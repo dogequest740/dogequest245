@@ -204,6 +204,35 @@ type PersistedState = {
   monsterKills: number
   dungeonRuns: number
 }
+
+type AdminPlayerRow = {
+  wallet: string
+  name: string
+  level: number
+  tierScore: number
+  gold: number
+  crystals: number
+  kills: number
+  dungeons: number
+  updatedAt: string
+}
+
+type AdminSummary = {
+  totalPlayers: number
+  active24h: number
+  avgLevel: number
+  avgTierScore: number
+  totalGold: number
+  totalCrystals: number
+  totalKills: number
+  totalDungeons: number
+  maxLevel: number
+}
+
+type AdminData = {
+  summary: AdminSummary
+  players: AdminPlayerRow[]
+}
 type PlayerSpriteKey = 'knight' | 'mage' | 'archer'
 type PlayerSpriteSource = HTMLImageElement | HTMLCanvasElement
 type MonsterSpriteKey =
@@ -1213,6 +1242,24 @@ const formatLongTimer = (seconds: number) => {
   const mins = Math.floor((total % 3600) / 60)
   const secs = total % 60
   return `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+}
+
+const formatNumber = (value: number) => value.toLocaleString('en-US')
+const formatShortWallet = (wallet: string) => `${wallet.slice(0, 4)}...${wallet.slice(-4)}`
+const formatDateTime = (value: string) => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('en-US')
+}
+
+const normalizeEquipment = (
+  equipment?: Partial<Record<EquipmentSlot, EquipmentItem | null>> | null,
+): Record<EquipmentSlot, EquipmentItem | null> => {
+  const base = EQUIPMENT_SLOTS.reduce((acc, slot) => {
+    acc[slot.id] = null
+    return acc
+  }, {} as Record<EquipmentSlot, EquipmentItem | null>)
+  return { ...base, ...(equipment ?? {}) }
 }
 
 const shadeColor = (hex: string, amount: number) => {
@@ -2287,8 +2334,13 @@ function App() {
   const [selectedId, setSelectedId] = useState(CHARACTER_CLASSES[0].id)
   const [playerName, setPlayerName] = useState('')
   const [hud, setHud] = useState<HudState | null>(null)
-  const [activePanel, setActivePanel] = useState<'inventory' | 'dungeons' | 'shop' | 'quests' | 'worldboss' | null>(null)
+  const [activePanel, setActivePanel] = useState<
+    'inventory' | 'dungeons' | 'shop' | 'quests' | 'worldboss' | 'admin' | null
+  >(null)
   const [inventoryTab, setInventoryTab] = useState<'equipment' | 'consumables'>('equipment')
+  const [adminData, setAdminData] = useState<AdminData | null>(null)
+  const [adminLoading, setAdminLoading] = useState(false)
+  const [adminError, setAdminError] = useState('')
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const gameStateRef = useRef<GameState | null>(null)
   const serverLoadedRef = useRef(false)
@@ -2324,6 +2376,20 @@ function App() {
     () => CHARACTER_CLASSES.find((character) => character.id === selectedId) || CHARACTER_CLASSES[0],
     [selectedId],
   )
+
+  const adminWallets = useMemo(() => {
+    const raw = (import.meta.env.VITE_ADMIN_WALLETS as string | undefined) ?? ''
+    return raw
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+  }, [])
+
+  const isAdmin = useMemo(() => {
+    const wallet = publicKey?.toBase58()
+    if (!wallet) return false
+    return adminWallets.includes(wallet)
+  }, [publicKey, adminWallets])
 
   useEffect(() => {
     ;(Object.keys(PLAYER_SPRITE_SOURCES) as PlayerSpriteKey[]).forEach((key) => {
@@ -2550,6 +2616,12 @@ function App() {
     }
   }, [activePanel])
 
+  useEffect(() => {
+    if (activePanel !== 'admin') return
+    if (!isAdmin) return
+    void loadAdminData()
+  }, [activePanel, isAdmin])
+
   const startBattleOnce = () => {
     const state = gameStateRef.current
     if (!state) return
@@ -2642,6 +2714,86 @@ function App() {
 
     await maybeClaimWorldBossReward(wallet, bossRow, state)
     syncHud()
+  }
+
+  const loadAdminData = async () => {
+    if (!isAdmin) {
+      setAdminError('Admin access required.')
+      return
+    }
+    if (!supabase) {
+      setAdminError('Supabase not configured.')
+      return
+    }
+    setAdminLoading(true)
+    setAdminError('')
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('wallet, state, updated_at')
+      .order('updated_at', { ascending: false })
+      .limit(250)
+    if (error) {
+      setAdminError('Failed to load players.')
+      setAdminLoading(false)
+      return
+    }
+    const now = Date.now()
+    const players: AdminPlayerRow[] = (data ?? []).map((row) => {
+      const saved = (row.state as PersistedState | null) ?? null
+      const equipment = normalizeEquipment(saved?.equipment)
+      const tierScore = getTierScore(equipment)
+      const level = saved?.player?.level ?? 1
+      const gold = saved?.gold ?? 0
+      const crystals = saved?.crystals ?? 0
+      const kills = saved?.monsterKills ?? 0
+      const dungeons = saved?.dungeonRuns ?? 0
+      const name = saved?.name || 'Unknown'
+      return {
+        wallet: row.wallet as string,
+        name,
+        level,
+        tierScore,
+        gold,
+        crystals,
+        kills,
+        dungeons,
+        updatedAt: (row.updated_at as string) || new Date(0).toISOString(),
+      }
+    })
+
+    const totalPlayers = players.length
+    const totals = players.reduce(
+      (acc, player) => {
+        acc.level += player.level
+        acc.tier += player.tierScore
+        acc.gold += player.gold
+        acc.crystals += player.crystals
+        acc.kills += player.kills
+        acc.dungeons += player.dungeons
+        acc.maxLevel = Math.max(acc.maxLevel, player.level)
+        const lastSeen = new Date(player.updatedAt).getTime()
+        if (!Number.isNaN(lastSeen) && now - lastSeen <= 24 * 60 * 60 * 1000) {
+          acc.active += 1
+        }
+        return acc
+      },
+      { level: 0, tier: 0, gold: 0, crystals: 0, kills: 0, dungeons: 0, active: 0, maxLevel: 0 },
+    )
+
+    const summary: AdminSummary = {
+      totalPlayers,
+      active24h: totals.active,
+      avgLevel: totalPlayers ? Math.round(totals.level / totalPlayers) : 0,
+      avgTierScore: totalPlayers ? Math.round(totals.tier / totalPlayers) : 0,
+      totalGold: totals.gold,
+      totalCrystals: totals.crystals,
+      totalKills: totals.kills,
+      totalDungeons: totals.dungeons,
+      maxLevel: totals.maxLevel,
+    }
+
+    setAdminData({ summary, players })
+    setAdminLoading(false)
   }
 
   const addConsumable = (state: GameState, type: ConsumableType) => {
@@ -3143,6 +3295,12 @@ function App() {
                       <img className="icon-img" src={iconWorldBoss} alt="" />
                       World Boss
                     </button>
+                    {isAdmin && (
+                      <button type="button" className="menu-big admin" onClick={() => setActivePanel('admin')}>
+                        <span className="icon icon-admin" aria-hidden />
+                        Admin
+                      </button>
+                    )}
                   </div>
                 </>
               ) : (
@@ -3652,6 +3810,90 @@ function App() {
                 </>
               )
             })()}
+          </div>
+        </div>
+      )}
+
+      {activePanel === 'admin' && hud && (
+        <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
+          <div className="modal wide admin-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Admin Dashboard</h3>
+              <div className="modal-actions-inline">
+                <button type="button" onClick={loadAdminData} disabled={adminLoading || !isAdmin}>
+                  {adminLoading ? 'Loading...' : 'Refresh'}
+                </button>
+                <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
+                  Close
+                </button>
+              </div>
+            </div>
+            {!isAdmin && <div className="muted">Admin access required.</div>}
+            {isAdmin && (
+              <>
+                {adminError && <div className="admin-error">{adminError}</div>}
+                {adminData && (
+                  <div className="admin-content">
+                    <div className="admin-summary">
+                      <div className="admin-card">
+                        <div className="admin-label">Players</div>
+                        <div className="admin-value">{formatNumber(adminData.summary.totalPlayers)}</div>
+                        <div className="admin-sub">Active 24h: {formatNumber(adminData.summary.active24h)}</div>
+                      </div>
+                      <div className="admin-card">
+                        <div className="admin-label">Average Level</div>
+                        <div className="admin-value">{formatNumber(adminData.summary.avgLevel)}</div>
+                        <div className="admin-sub">Max: {formatNumber(adminData.summary.maxLevel)}</div>
+                      </div>
+                      <div className="admin-card">
+                        <div className="admin-label">Average Tier</div>
+                        <div className="admin-value">{formatNumber(adminData.summary.avgTierScore)}</div>
+                        <div className="admin-sub">Total Kills: {formatNumber(adminData.summary.totalKills)}</div>
+                      </div>
+                      <div className="admin-card">
+                        <div className="admin-label">Economy</div>
+                        <div className="admin-value">{formatNumber(adminData.summary.totalGold)} gold</div>
+                        <div className="admin-sub">{formatNumber(adminData.summary.totalCrystals)} crystals</div>
+                      </div>
+                      <div className="admin-card">
+                        <div className="admin-label">Dungeons</div>
+                        <div className="admin-value">{formatNumber(adminData.summary.totalDungeons)}</div>
+                        <div className="admin-sub">Runs total</div>
+                      </div>
+                    </div>
+                    <div className="admin-table">
+                      <div className="admin-row header">
+                        <span>Player</span>
+                        <span>Level</span>
+                        <span>Tier</span>
+                        <span>Gold</span>
+                        <span>Crystals</span>
+                        <span>Kills</span>
+                        <span>Dungeons</span>
+                        <span>Last Seen</span>
+                        <span>Wallet</span>
+                      </div>
+                      {adminData.players.map((player) => (
+                        <div key={player.wallet} className="admin-row">
+                          <span>{player.name}</span>
+                          <span>{formatNumber(player.level)}</span>
+                          <span>{formatNumber(player.tierScore)}</span>
+                          <span>{formatNumber(player.gold)}</span>
+                          <span>{formatNumber(player.crystals)}</span>
+                          <span>{formatNumber(player.kills)}</span>
+                          <span>{formatNumber(player.dungeons)}</span>
+                          <span>{formatDateTime(player.updatedAt)}</span>
+                          <span className="wallet-chip">{formatShortWallet(player.wallet)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {!adminData && !adminLoading && !adminError && (
+                  <div className="muted">No data yet. Click Refresh.</div>
+                )}
+              </>
+            )}
           </div>
         </div>
       )}
