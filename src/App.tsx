@@ -41,6 +41,7 @@ import iconBoots from './assets/icons/armory-boots.png'
 import iconArtifact from './assets/icons/armory-artifact.png'
 import iconQuests from './assets/icons/quests.png'
 import worldBossImage from './assets/boss/world-boss.jpg'
+import { supabase } from './lib/supabase'
 import './App.css'
 
 type CharacterClass = {
@@ -152,6 +153,35 @@ type WorldBossState = {
   participants: WorldBossParticipant[]
 }
 
+type PersistedPlayerState = {
+  level: number
+  xp: number
+  xpNext: number
+  baseAttack: number
+  baseAttackSpeed: number
+  baseSpeed: number
+  baseRange: number
+}
+
+type PersistedState = {
+  version: number
+  name: string
+  classId: string
+  player: PersistedPlayerState
+  energy: number
+  energyMax: number
+  energyTimer: number
+  gold: number
+  crystals: number
+  tickets: number
+  ticketDay: string
+  inventory: EquipmentItem[]
+  equipment: Record<EquipmentSlot, EquipmentItem | null>
+  consumables: ConsumableItem[]
+  questStates: Record<string, QuestState>
+  monsterKills: number
+  dungeonRuns: number
+}
 type PlayerSpriteKey = 'knight' | 'mage' | 'archer'
 type PlayerSpriteSource = HTMLImageElement | HTMLCanvasElement
 type MonsterSpriteKey =
@@ -284,6 +314,7 @@ type GameState = {
   player: PlayerState
   monsters: Monster[]
   name: string
+  classId: string
   classLabel: string
   lootLog: LootEntry[]
   eventLog: string[]
@@ -597,6 +628,7 @@ const WORLD_BOSS_BOTS = [
 
 const MONSTER_HP_TIER_TARGET = 30000
 const MONSTER_HP_TIER_EXCESS = 0.2
+const PERSIST_VERSION = 1
 
 const getMonsterHpMultiplier = (tierScore: number) => {
   if (tierScore <= 0) return 1
@@ -631,6 +663,109 @@ const createWorldBossState = (playerName: string): WorldBossState => {
     duration: WORLD_BOSS_DURATION,
     damageTimer: 0,
     participants,
+  }
+}
+
+const buildPersistedState = (state: GameState): PersistedState => ({
+  version: PERSIST_VERSION,
+  name: state.name,
+  classId: state.classId,
+  player: {
+    level: state.player.level,
+    xp: state.player.xp,
+    xpNext: state.player.xpNext,
+    baseAttack: state.player.baseAttack,
+    baseAttackSpeed: state.player.baseAttackSpeed,
+    baseSpeed: state.player.baseSpeed,
+    baseRange: state.player.baseRange,
+  },
+  energy: state.energy,
+  energyMax: state.energyMax,
+  energyTimer: state.energyTimer,
+  gold: state.gold,
+  crystals: state.crystals,
+  tickets: state.tickets,
+  ticketDay: state.ticketDay,
+  inventory: state.inventory,
+  equipment: state.equipment,
+  consumables: state.consumables,
+  questStates: state.questStates,
+  monsterKills: state.monsterKills,
+  dungeonRuns: state.dungeonRuns,
+})
+
+const applyPersistedState = (state: GameState, saved: PersistedState) => {
+  if (!saved || saved.version !== PERSIST_VERSION) return
+
+  const classMatch = CHARACTER_CLASSES.find((entry) => entry.id === saved.classId)
+  if (classMatch) {
+    state.classId = classMatch.id
+    state.classLabel = classMatch.label
+    state.player.spriteKey = classMatch.spriteKey
+  }
+
+  state.name = saved.name || state.name
+
+  const player = state.player
+  const savedPlayer = saved.player
+  if (savedPlayer) {
+    player.level = clamp(savedPlayer.level ?? player.level, 1, MAX_LEVEL)
+    player.xp = Math.max(0, savedPlayer.xp ?? player.xp)
+    player.xpNext = Math.max(1, savedPlayer.xpNext ?? getXpForLevel(player.level))
+    player.baseAttack = savedPlayer.baseAttack ?? player.baseAttack
+    player.baseAttackSpeed = savedPlayer.baseAttackSpeed ?? player.baseAttackSpeed
+    player.baseSpeed = savedPlayer.baseSpeed ?? player.baseSpeed
+    player.baseRange = savedPlayer.baseRange ?? player.baseRange
+  }
+
+  state.energyMax = Math.max(1, saved.energyMax ?? state.energyMax)
+  state.energy = clamp(saved.energy ?? state.energy, 0, state.energyMax)
+  state.energyTimer = Math.max(0, saved.energyTimer ?? state.energyTimer)
+  state.gold = Math.max(0, saved.gold ?? state.gold)
+  state.crystals = Math.max(0, saved.crystals ?? state.crystals)
+  state.tickets = Math.max(0, saved.tickets ?? state.tickets)
+  state.ticketDay = saved.ticketDay || state.ticketDay
+
+  state.inventory = saved.inventory ?? []
+  state.equipment = { ...state.equipment, ...(saved.equipment ?? {}) }
+  state.consumables = saved.consumables ?? []
+  state.questStates = { ...state.questStates, ...(saved.questStates ?? {}) }
+  state.monsterKills = Math.max(0, saved.monsterKills ?? state.monsterKills)
+  state.dungeonRuns = Math.max(0, saved.dungeonRuns ?? state.dungeonRuns)
+
+  const itemIds = [
+    ...state.inventory.map((item) => item.id),
+    ...Object.values(state.equipment)
+      .filter((item): item is EquipmentItem => Boolean(item))
+      .map((item) => item.id),
+  ]
+  const consumableIds = state.consumables.map((item) => item.id)
+  state.itemId = Math.max(state.itemId, ...itemIds, 0)
+  state.consumableId = Math.max(state.consumableId, ...consumableIds, 0)
+
+  recomputePlayerStats(state)
+}
+
+const loadProfileState = async (wallet: string) => {
+  if (!supabase) return null
+  const { data, error } = await supabase.from('profiles').select('state').eq('wallet', wallet).maybeSingle()
+  if (error) {
+    console.warn('Supabase load failed', error)
+    return null
+  }
+  return (data?.state as PersistedState | null) ?? null
+}
+
+const saveProfileState = async (wallet: string, state: GameState) => {
+  if (!supabase) return
+  const payload = {
+    wallet,
+    state: buildPersistedState(state),
+    updated_at: new Date().toISOString(),
+  }
+  const { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'wallet' })
+  if (error) {
+    console.warn('Supabase save failed', error)
   }
 }
 
@@ -1452,6 +1587,7 @@ const initGameState = (chosenClass: CharacterClass, name: string): GameState => 
     player,
     monsters,
     name,
+    classId: chosenClass.id,
     classLabel: chosenClass.label,
     lootLog: [],
     eventLog: ['Adventure begins. Scanning for enemies...'],
@@ -2028,6 +2164,7 @@ function App() {
   const [inventoryTab, setInventoryTab] = useState<'equipment' | 'consumables'>('equipment')
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const gameStateRef = useRef<GameState | null>(null)
+  const serverLoadedRef = useRef(false)
   const spriteCacheRef = useRef<PlayerSpriteMap>({
     knight: null,
     mage: null,
@@ -2134,6 +2271,21 @@ function App() {
 
   useEffect(() => {
     if (stage !== 'game') return
+    const interval = window.setInterval(() => {
+      void saveGameState()
+    }, 15000)
+    const handleUnload = () => {
+      void saveGameState()
+    }
+    window.addEventListener('beforeunload', handleUnload)
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('beforeunload', handleUnload)
+    }
+  }, [stage, publicKey])
+
+  useEffect(() => {
+    if (stage !== 'game') return
     const canvas = canvasRef.current
     if (!canvas) return
     const context = canvas.getContext('2d')
@@ -2147,6 +2299,21 @@ function App() {
     gameStateRef.current = state
     setHud(buildHud(state))
     backgroundCacheRef.current = { canvas: null, ready: false }
+    serverLoadedRef.current = false
+
+    const wallet = publicKey?.toBase58()
+    if (wallet && supabase) {
+      loadProfileState(wallet).then((saved) => {
+        if (!gameStateRef.current) return
+        if (saved) {
+          applyPersistedState(gameStateRef.current, saved)
+        }
+        serverLoadedRef.current = true
+        syncHud()
+      })
+    } else {
+      serverLoadedRef.current = true
+    }
 
     let running = true
     let lastTime = performance.now()
@@ -2188,7 +2355,7 @@ function App() {
     return () => {
       running = false
     }
-  }, [stage, selectedClass, playerName])
+  }, [stage, selectedClass, playerName, publicKey])
 
   const syncHud = () => {
     const state = gameStateRef.current
@@ -2222,6 +2389,14 @@ function App() {
     syncHud()
   }
 
+  const saveGameState = async () => {
+    const state = gameStateRef.current
+    if (!state) return
+    const wallet = publicKey?.toBase58()
+    if (!wallet || !supabase || !serverLoadedRef.current) return
+    await saveProfileState(wallet, state)
+  }
+
   const addConsumable = (state: GameState, type: ConsumableType) => {
     const consumable = createConsumable(++state.consumableId, type)
     state.consumables = [consumable, ...state.consumables]
@@ -2240,6 +2415,7 @@ function App() {
     addConsumable(state, 'energy-small')
     pushLog(state.eventLog, 'Energy tonic added to consumables.')
     syncHud()
+    void saveGameState()
   }
 
   const buyFullEnergy = (cost: number) => {
@@ -2254,6 +2430,7 @@ function App() {
     addConsumable(state, 'energy-full')
     pushLog(state.eventLog, 'Grand Energy Elixir added to consumables.')
     syncHud()
+    void saveGameState()
   }
 
   const buySpeedPotion = (cost: number) => {
@@ -2268,6 +2445,7 @@ function App() {
     addConsumable(state, 'speed')
     pushLog(state.eventLog, 'Swift Draught added to consumables.')
     syncHud()
+    void saveGameState()
   }
 
   const buyAttackSpeedPotion = (cost: number) => {
@@ -2282,6 +2460,7 @@ function App() {
     addConsumable(state, 'attack')
     pushLog(state.eventLog, 'Battle Tonic added to consumables.')
     syncHud()
+    void saveGameState()
   }
 
   const buyDungeonTicket = (cost: number) => {
@@ -2296,6 +2475,7 @@ function App() {
     addConsumable(state, 'key')
     pushLog(state.eventLog, 'Dungeon key added to consumables.')
     syncHud()
+    void saveGameState()
   }
 
   const grantQuestRewardItem = (state: GameState, item: QuestRewardItem) => {
@@ -2346,6 +2526,7 @@ function App() {
     }
     pushLog(state.eventLog, message)
     syncHud()
+    void saveGameState()
   }
 
   const joinWorldBoss = () => {
@@ -2356,6 +2537,7 @@ function App() {
     participant.joined = true
     participant.name = state.name
     syncHud()
+    void saveGameState()
   }
 
   const claimQuest = (quest: QuestDefinition) => {
@@ -2376,6 +2558,7 @@ function App() {
     }
     pushLog(state.eventLog, `Quest completed: ${rewardParts.join(', ')}.`)
     syncHud()
+    void saveGameState()
   }
 
   const equipItem = (item: EquipmentItem, source: 'loot' | 'inventory') => {
@@ -2394,6 +2577,7 @@ function App() {
     recomputePlayerStats(state)
     pushLog(state.eventLog, `Equipped ${item.rarity} ${item.name}.`)
     syncHud()
+    void saveGameState()
   }
 
   const sellItem = (item: EquipmentItem, source: 'loot' | 'inventory') => {
@@ -2407,6 +2591,7 @@ function App() {
     }
     pushLog(state.eventLog, `Sold ${item.rarity} ${item.name} for ${item.sellValue} gold.`)
     syncHud()
+    void saveGameState()
   }
 
   const runDungeon = (dungeon: (typeof DUNGEONS)[number]) => {
@@ -2419,6 +2604,7 @@ function App() {
     state.dungeonRuns += 1
     pushLog(state.eventLog, `${dungeon.name} cleared. +${dungeon.reward} crystals.`)
     syncHud()
+    void saveGameState()
   }
 
   const acknowledgeLevelUp = () => {
