@@ -2611,6 +2611,7 @@ function App() {
       state.worldBoss.participants = [playerEntry, ...state.worldBoss.participants]
     } else {
       playerEntry.name = state.name
+      playerEntry.isPlayer = true
     }
 
     if (playerEntry.joined || state.worldBoss.pendingDamage > 0) {
@@ -2619,7 +2620,7 @@ function App() {
     }
 
     const rows = await fetchWorldBossParticipants(cycleStart)
-    const participants = rows.map((row) => ({
+    const participants: WorldBossParticipant[] = rows.map((row) => ({
       id: row.wallet,
       name: row.name,
       damage: Number(row.damage),
@@ -2634,7 +2635,7 @@ function App() {
       serverPlayer.joined = serverPlayer.joined || playerEntry.joined
       serverPlayer.name = playerEntry.name
     } else {
-      participants.unshift(playerEntry)
+      participants.unshift({ ...playerEntry, isPlayer: true })
     }
 
     state.worldBoss.participants = participants
