@@ -173,6 +173,7 @@ type WorldBossParticipantRow = {
   damage: number
   joined: boolean
   reward_claimed: boolean
+  updated_at?: string
 }
 
 type PersistedPlayerState = {
@@ -762,7 +763,7 @@ const fetchWorldBossParticipants = async (cycleStart: string): Promise<WorldBoss
   if (!supabase || !cycleStart) return []
   const { data, error } = await supabase
     .from('world_boss_participants')
-    .select('wallet, cycle_start, name, damage, joined, reward_claimed')
+    .select('wallet, cycle_start, name, damage, joined, reward_claimed, updated_at')
     .eq('cycle_start', cycleStart)
     .order('damage', { ascending: false })
     .limit(100)
@@ -840,7 +841,7 @@ const maybeClaimWorldBossReward = async (wallet: string, boss: WorldBossRow, sta
 
 const buildPersistedState = (state: GameState): PersistedState => ({
   version: PERSIST_VERSION,
-  name: state.name,
+  name: sanitizePlayerName(state.name),
   classId: state.classId,
   player: {
     level: state.player.level,
@@ -876,7 +877,8 @@ const applyPersistedState = (state: GameState, saved: PersistedState) => {
     state.player.spriteKey = classMatch.spriteKey
   }
 
-  state.name = saved.name || state.name
+  const sanitizedName = sanitizePlayerName(saved.name || state.name)
+  state.name = sanitizedName || state.name
 
   const player = state.player
   const savedPlayer = saved.player
@@ -1251,6 +1253,8 @@ const formatDateTime = (value: string) => {
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString('en-US')
 }
+
+const sanitizePlayerName = (value: string) => value.replace(/[^A-Za-z]/g, '').slice(0, 10)
 
 const normalizeEquipment = (
   equipment?: Partial<Record<EquipmentSlot, EquipmentItem | null>> | null,
@@ -2478,7 +2482,7 @@ function App() {
       if (saved) {
         pendingProfileRef.current = saved
         setSelectedId(saved.classId || CHARACTER_CLASSES[0].id)
-        setPlayerName(saved.name || '')
+        setPlayerName(sanitizePlayerName(saved.name || ''))
         setStage('game')
       } else {
         pendingProfileRef.current = null
@@ -2521,7 +2525,7 @@ function App() {
     const classForInit = pendingProfile
       ? CHARACTER_CLASSES.find((entry) => entry.id === pendingProfile.classId) || selectedClass
       : selectedClass
-    const nameForInit = pendingProfile?.name || playerName.trim() || 'Nameless'
+    const nameForInit = sanitizePlayerName(pendingProfile?.name || playerName.trim()) || 'Nameless'
     const state = initGameState(classForInit, nameForInit)
     gameStateRef.current = state
     setHud(buildHud(state))
@@ -2686,12 +2690,33 @@ function App() {
       playerEntry.isPlayer = true
     }
 
-    if (playerEntry.joined || state.worldBoss.pendingDamage > 0) {
-      await upsertWorldBossParticipant(wallet, cycleStart, playerEntry.name, playerEntry.damage, playerEntry.joined)
+    const rows = await fetchWorldBossParticipants(cycleStart)
+    const playerRow = rows.find((row) => row.wallet === wallet)
+
+    let offlineDamage = 0
+    if (playerEntry.joined && playerRow?.joined) {
+      const lastUpdate = new Date(playerRow.updated_at || bossRow.cycle_start).getTime()
+      const cycleEndTime = new Date(cycleEnd).getTime()
+      const effectiveNow = Math.min(Date.now(), cycleEndTime)
+      const deltaSeconds = Math.max(0, Math.floor((effectiveNow - lastUpdate) / 1000))
+      const localAhead = playerEntry.damage > Number(playerRow.damage) + 1
+      if (deltaSeconds > 0 && !localAhead) {
+        offlineDamage = Math.max(0, Math.round(state.player.attack * deltaSeconds))
+      }
+    }
+
+    if (offlineDamage > 0) {
+      playerEntry.damage = Math.max(playerEntry.damage, Number(playerRow?.damage ?? 0)) + offlineDamage
       state.worldBoss.pendingDamage = 0
     }
 
-    const rows = await fetchWorldBossParticipants(cycleStart)
+    if (playerEntry.joined || state.worldBoss.pendingDamage > 0 || offlineDamage > 0) {
+      const nextDamage = Math.max(playerEntry.damage, Number(playerRow?.damage ?? 0))
+      playerEntry.damage = nextDamage
+      await upsertWorldBossParticipant(wallet, cycleStart, playerEntry.name, nextDamage, playerEntry.joined)
+      state.worldBoss.pendingDamage = 0
+    }
+
     const participants: WorldBossParticipant[] = rows.map((row) => ({
       id: row.wallet,
       name: row.name,
@@ -3090,8 +3115,20 @@ function App() {
             )}
           </div>
           <div className="wallet">
-            <WalletMultiButton className="wallet-button" />
-            {connected && <div className="wallet-hint">Wallet: {shortKey}</div>}
+            <div className="wallet-row">
+              <WalletMultiButton className="wallet-button" />
+            </div>
+            {(connected || isAdmin) && (
+              <div className="wallet-hint-row">
+                {isAdmin && (
+                  <button type="button" className="admin-inline" onClick={() => setActivePanel('admin')}>
+                    <span className="icon icon-admin" aria-hidden />
+                    Admin
+                  </button>
+                )}
+                {connected && <div className="wallet-hint">Wallet: {shortKey}</div>}
+              </div>
+            )}
           </div>
         </header>
       )}
@@ -3230,8 +3267,9 @@ function App() {
               Character name
               <input
                 value={playerName}
-                onChange={(event) => setPlayerName(event.target.value.slice(0, 16))}
-                placeholder="Enter a name"
+                maxLength={10}
+                onChange={(event) => setPlayerName(sanitizePlayerName(event.target.value))}
+                placeholder="Latin letters, max 10"
               />
             </label>
             <button
@@ -3295,12 +3333,6 @@ function App() {
                       <img className="icon-img" src={iconWorldBoss} alt="" />
                       World Boss
                     </button>
-                    {isAdmin && (
-                      <button type="button" className="menu-big admin" onClick={() => setActivePanel('admin')}>
-                        <span className="icon icon-admin" aria-hidden />
-                        Admin
-                      </button>
-                    )}
                   </div>
                 </>
               ) : (
