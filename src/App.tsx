@@ -2692,28 +2692,17 @@ function App() {
 
     const rows = await fetchWorldBossParticipants(cycleStart)
     const playerRow = rows.find((row) => row.wallet === wallet)
+    const serverDamage = Number(playerRow?.damage ?? 0)
 
-    let offlineDamage = 0
-    if (playerEntry.joined && playerRow?.joined) {
-      const lastUpdate = new Date(playerRow.updated_at || bossRow.cycle_start).getTime()
-      const cycleEndTime = new Date(cycleEnd).getTime()
-      const effectiveNow = Math.min(Date.now(), cycleEndTime)
-      const deltaSeconds = Math.max(0, Math.floor((effectiveNow - lastUpdate) / 1000))
-      const localAhead = playerEntry.damage > Number(playerRow.damage) + 1
-      if (deltaSeconds > 0 && !localAhead) {
-        offlineDamage = Math.max(0, Math.round(state.player.attack * deltaSeconds))
-      }
+    if (serverDamage > playerEntry.damage) {
+      playerEntry.damage = serverDamage
     }
 
-    if (offlineDamage > 0) {
-      playerEntry.damage = Math.max(playerEntry.damage, Number(playerRow?.damage ?? 0)) + offlineDamage
-      state.worldBoss.pendingDamage = 0
-    }
+    const shouldUpsert =
+      playerEntry.joined && (!playerRow || playerEntry.damage > serverDamage || state.worldBoss.pendingDamage > 0)
 
-    if (playerEntry.joined || state.worldBoss.pendingDamage > 0 || offlineDamage > 0) {
-      const nextDamage = Math.max(playerEntry.damage, Number(playerRow?.damage ?? 0))
-      playerEntry.damage = nextDamage
-      await upsertWorldBossParticipant(wallet, cycleStart, playerEntry.name, nextDamage, playerEntry.joined)
+    if (shouldUpsert) {
+      await upsertWorldBossParticipant(wallet, cycleStart, playerEntry.name, playerEntry.damage, playerEntry.joined)
       state.worldBoss.pendingDamage = 0
     }
 
