@@ -147,10 +147,32 @@ type WorldBossParticipant = {
 }
 
 type WorldBossState = {
+  cycleStart: string
+  cycleEnd: string
   remaining: number
   duration: number
   damageTimer: number
   participants: WorldBossParticipant[]
+  pendingDamage: number
+}
+
+type WorldBossRow = {
+  id: number
+  cycle_start: string
+  cycle_end: string
+  prize_pool: number
+  last_cycle_start: string | null
+  last_cycle_end: string | null
+  last_prize_pool: number | null
+}
+
+type WorldBossParticipantRow = {
+  wallet: string
+  cycle_start: string
+  name: string
+  damage: number
+  joined: boolean
+  reward_claimed: boolean
 }
 
 type PersistedPlayerState = {
@@ -615,17 +637,6 @@ const DUNGEONS = DUNGEON_REQUIREMENTS.map((tierScore, index) => ({
 const WORLD_BOSS_DURATION = 5 * 60 * 60
 const WORLD_BOSS_REWARD = 1000
 
-const WORLD_BOSS_BOTS = [
-  { id: 'ember-warden', name: 'Ember Warden', attack: 28 },
-  { id: 'glimmer-seer', name: 'Glimmer Seer', attack: 24 },
-  { id: 'ash-strider', name: 'Ash Strider', attack: 22 },
-  { id: 'rune-sentinel', name: 'Rune Sentinel', attack: 26 },
-  { id: 'void-huntress', name: 'Void Huntress', attack: 30 },
-  { id: 'stormblade', name: 'Stormblade', attack: 27 },
-  { id: 'sun-mender', name: 'Sun Mender', attack: 23 },
-  { id: 'mystic-archer', name: 'Mystic Archer', attack: 25 },
-]
-
 const MONSTER_HP_TIER_TARGET = 30000
 const MONSTER_HP_TIER_EXCESS = 0.2
 const PERSIST_VERSION = 1
@@ -640,7 +651,7 @@ const getMonsterHpMultiplier = (tierScore: number) => {
   return base * extra
 }
 
-const createWorldBossState = (playerName: string): WorldBossState => {
+const createWorldBossState = (playerName: string, cycleStart = '', cycleEnd = ''): WorldBossState => {
   const participants: WorldBossParticipant[] = [
     {
       id: 'player',
@@ -650,20 +661,152 @@ const createWorldBossState = (playerName: string): WorldBossState => {
       isPlayer: true,
       attack: 0,
     },
-    ...WORLD_BOSS_BOTS.map((bot) => ({
-      id: bot.id,
-      name: bot.name,
-      damage: 0,
-      joined: true,
-      attack: bot.attack,
-    })),
   ]
   return {
+    cycleStart,
+    cycleEnd,
     remaining: WORLD_BOSS_DURATION,
     duration: WORLD_BOSS_DURATION,
     damageTimer: 0,
     participants,
+    pendingDamage: 0,
   }
+}
+
+const ensureWorldBossCycle = async (): Promise<WorldBossRow | null> => {
+  if (!supabase) return null
+  const now = new Date()
+  const { data: existing, error } = await supabase.from('world_boss').select('*').eq('id', 1).maybeSingle()
+  if (error) {
+    console.warn('World boss load failed', error)
+    return null
+  }
+
+  if (!existing) {
+    const cycleStart = now.toISOString()
+    const cycleEnd = new Date(now.getTime() + WORLD_BOSS_DURATION * 1000).toISOString()
+    const { data } = await supabase
+      .from('world_boss')
+      .upsert(
+        {
+          id: 1,
+          cycle_start: cycleStart,
+          cycle_end: cycleEnd,
+          prize_pool: WORLD_BOSS_REWARD,
+          last_cycle_start: null,
+          last_cycle_end: null,
+          last_prize_pool: null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'id' },
+      )
+      .select()
+      .single()
+    return data as WorldBossRow
+  }
+
+  const cycleEnd = new Date(existing.cycle_end)
+  if (cycleEnd.getTime() <= now.getTime()) {
+    const newStart = now.toISOString()
+    const newEnd = new Date(now.getTime() + WORLD_BOSS_DURATION * 1000).toISOString()
+    const { data } = await supabase
+      .from('world_boss')
+      .update({
+        cycle_start: newStart,
+        cycle_end: newEnd,
+        prize_pool: WORLD_BOSS_REWARD,
+        last_cycle_start: existing.cycle_start,
+        last_cycle_end: existing.cycle_end,
+        last_prize_pool: existing.prize_pool,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', 1)
+      .select()
+      .single()
+    return data as WorldBossRow
+  }
+
+  return existing as WorldBossRow
+}
+
+const fetchWorldBossParticipants = async (cycleStart: string): Promise<WorldBossParticipantRow[]> => {
+  if (!supabase || !cycleStart) return []
+  const { data, error } = await supabase
+    .from('world_boss_participants')
+    .select('wallet, cycle_start, name, damage, joined, reward_claimed')
+    .eq('cycle_start', cycleStart)
+    .order('damage', { ascending: false })
+    .limit(100)
+  if (error) {
+    console.warn('World boss participants load failed', error)
+    return []
+  }
+  return (data as WorldBossParticipantRow[]) ?? []
+}
+
+const upsertWorldBossParticipant = async (
+  wallet: string,
+  cycleStart: string,
+  name: string,
+  damage: number,
+  joined: boolean,
+) => {
+  if (!supabase) return
+  const { error } = await supabase
+    .from('world_boss_participants')
+    .upsert(
+      {
+        wallet,
+        cycle_start: cycleStart,
+        name,
+        damage,
+        joined,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'wallet,cycle_start' },
+    )
+  if (error) {
+    console.warn('World boss participant upsert failed', error)
+  }
+}
+
+const maybeClaimWorldBossReward = async (wallet: string, boss: WorldBossRow, state: GameState) => {
+  if (!supabase || !boss.last_cycle_start || !boss.last_cycle_end || !boss.last_prize_pool) return
+  const now = new Date()
+  if (now.getTime() <= new Date(boss.last_cycle_end).getTime()) return
+
+  const { data: playerRow, error: playerError } = await supabase
+    .from('world_boss_participants')
+    .select('wallet, cycle_start, name, damage, joined, reward_claimed')
+    .eq('cycle_start', boss.last_cycle_start)
+    .eq('wallet', wallet)
+    .maybeSingle()
+
+  if (playerError || !playerRow || playerRow.reward_claimed || !playerRow.joined) return
+
+  const { data: totals, error: totalError } = await supabase
+    .from('world_boss_participants')
+    .select('damage')
+    .eq('cycle_start', boss.last_cycle_start)
+    .eq('joined', true)
+
+  if (totalError || !totals) return
+  const totalDamage = totals.reduce((sum, entry) => sum + Number(entry.damage), 0)
+  if (totalDamage <= 0) return
+
+  const share = Math.floor((boss.last_prize_pool * Number(playerRow.damage)) / totalDamage)
+  if (share <= 0) return
+
+  state.crystals += share
+  pushLog(state.eventLog, `World boss rewards: +${share} crystals.`)
+
+  await supabase
+    .from('world_boss_participants')
+    .update({ reward_claimed: true, updated_at: new Date().toISOString() })
+    .eq('wallet', wallet)
+    .eq('cycle_start', boss.last_cycle_start)
+
+  await saveProfileState(wallet, state)
 }
 
 const buildPersistedState = (state: GameState): PersistedState => ({
@@ -1685,35 +1828,21 @@ const updateGame = (state: GameState, dt: number) => {
   }
 
   const boss = state.worldBoss
-  if (boss.remaining > 0) {
-    boss.remaining = Math.max(0, boss.remaining - dt)
+  if (boss.cycleEnd) {
+    const remaining = (new Date(boss.cycleEnd).getTime() - Date.now()) / 1000
+    boss.remaining = Math.max(0, remaining)
+  }
+
+  const playerParticipant = boss.participants.find((entry) => entry.isPlayer)
+  if (playerParticipant?.joined && boss.remaining > 0) {
     boss.damageTimer += dt
     while (boss.damageTimer >= 1) {
       boss.damageTimer -= 1
-      for (const participant of boss.participants) {
-        if (!participant.joined) continue
-        const baseAttack = participant.isPlayer ? state.player.attack : participant.attack
-        const variance = participant.isPlayer ? randomBetween(0.9, 1.1) : randomBetween(0.85, 1.15)
-        participant.damage += Math.max(1, Math.round(baseAttack * variance))
-      }
+      const variance = randomBetween(0.9, 1.1)
+      const damage = Math.max(1, Math.round(state.player.attack * variance))
+      playerParticipant.damage += damage
+      boss.pendingDamage += damage
     }
-  }
-
-  if (boss.remaining <= 0) {
-    const totalDamage = boss.participants.reduce((sum, entry) => sum + (entry.joined ? entry.damage : 0), 0)
-    const playerEntry = boss.participants.find((entry) => entry.isPlayer)
-    if (playerEntry && playerEntry.joined && totalDamage > 0) {
-      const share = Math.floor((WORLD_BOSS_REWARD * playerEntry.damage) / totalDamage)
-      if (share > 0) {
-        state.crystals += share
-        pushLog(state.eventLog, `World boss rewards: +${share} crystals.`)
-      } else {
-        pushLog(state.eventLog, 'World boss ended. No rewards earned.')
-      }
-    } else {
-      pushLog(state.eventLog, 'World boss ended.')
-    }
-    state.worldBoss = createWorldBossState(state.name)
   }
 
   const todayKey = getDayKey()
@@ -2163,6 +2292,7 @@ function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const gameStateRef = useRef<GameState | null>(null)
   const serverLoadedRef = useRef(false)
+  const pendingProfileRef = useRef<PersistedState | null>(null)
   const spriteCacheRef = useRef<PlayerSpriteMap>({
     knight: null,
     mage: null,
@@ -2260,12 +2390,40 @@ function App() {
   }, [])
 
   useEffect(() => {
+    let active = true
     if (!connected) {
+      pendingProfileRef.current = null
       setStage('auth')
-      return
+      return () => {
+        active = false
+      }
     }
-    if (stage === 'auth') setStage('select')
-  }, [connected, stage])
+
+    const wallet = publicKey?.toBase58()
+    if (!wallet || !supabase) {
+      setStage('select')
+      return () => {
+        active = false
+      }
+    }
+
+    loadProfileState(wallet).then((saved) => {
+      if (!active) return
+      if (saved) {
+        pendingProfileRef.current = saved
+        setSelectedId(saved.classId || CHARACTER_CLASSES[0].id)
+        setPlayerName(saved.name || '')
+        setStage('game')
+      } else {
+        pendingProfileRef.current = null
+        setStage('select')
+      }
+    })
+
+    return () => {
+      active = false
+    }
+  }, [connected, publicKey])
 
   useEffect(() => {
     if (stage !== 'game') return
@@ -2293,14 +2451,24 @@ function App() {
     canvas.height = Math.round(WORLD.height * RENDER_SCALE)
     context.imageSmoothingEnabled = false
 
-    const state = initGameState(selectedClass, playerName.trim() || 'Nameless')
+    const pendingProfile = pendingProfileRef.current
+    const classForInit = pendingProfile
+      ? CHARACTER_CLASSES.find((entry) => entry.id === pendingProfile.classId) || selectedClass
+      : selectedClass
+    const nameForInit = pendingProfile?.name || playerName.trim() || 'Nameless'
+    const state = initGameState(classForInit, nameForInit)
     gameStateRef.current = state
     setHud(buildHud(state))
     backgroundCacheRef.current = { canvas: null, ready: false }
     serverLoadedRef.current = false
 
     const wallet = publicKey?.toBase58()
-    if (wallet && supabase) {
+    if (pendingProfile) {
+      applyPersistedState(state, pendingProfile)
+      pendingProfileRef.current = null
+      serverLoadedRef.current = true
+      syncHud()
+    } else if (wallet && supabase) {
       loadProfileState(wallet).then((saved) => {
         if (!gameStateRef.current) return
         if (saved) {
@@ -2355,6 +2523,21 @@ function App() {
     }
   }, [stage, selectedClass, playerName, publicKey])
 
+  useEffect(() => {
+    if (stage !== 'game') return
+    let active = true
+    const runSync = () => {
+      if (!active) return
+      void syncWorldBossFromServer()
+    }
+    runSync()
+    const interval = window.setInterval(runSync, 5000)
+    return () => {
+      active = false
+      window.clearInterval(interval)
+    }
+  }, [stage, publicKey])
+
   const syncHud = () => {
     const state = gameStateRef.current
     if (!state) return
@@ -2393,6 +2576,71 @@ function App() {
     const wallet = publicKey?.toBase58()
     if (!wallet || !supabase || !serverLoadedRef.current) return
     await saveProfileState(wallet, state)
+  }
+
+  const syncWorldBossFromServer = async () => {
+    const state = gameStateRef.current
+    const wallet = publicKey?.toBase58()
+    if (!state || !wallet || !supabase) return
+
+    const bossRow = await ensureWorldBossCycle()
+    if (!bossRow) return
+
+    const cycleStart = bossRow.cycle_start
+    const cycleEnd = bossRow.cycle_end
+
+    if (state.worldBoss.cycleStart !== cycleStart) {
+      state.worldBoss = createWorldBossState(state.name, cycleStart, cycleEnd)
+    } else {
+      state.worldBoss.cycleEnd = cycleEnd
+    }
+
+    state.worldBoss.duration = WORLD_BOSS_DURATION
+    state.worldBoss.remaining = Math.max(0, (new Date(cycleEnd).getTime() - Date.now()) / 1000)
+
+    let playerEntry = state.worldBoss.participants.find((entry) => entry.isPlayer)
+    if (!playerEntry) {
+      playerEntry = {
+        id: 'player',
+        name: state.name,
+        damage: 0,
+        joined: false,
+        isPlayer: true,
+        attack: 0,
+      }
+      state.worldBoss.participants = [playerEntry, ...state.worldBoss.participants]
+    } else {
+      playerEntry.name = state.name
+    }
+
+    if (playerEntry.joined || state.worldBoss.pendingDamage > 0) {
+      await upsertWorldBossParticipant(wallet, cycleStart, playerEntry.name, playerEntry.damage, playerEntry.joined)
+      state.worldBoss.pendingDamage = 0
+    }
+
+    const rows = await fetchWorldBossParticipants(cycleStart)
+    const participants = rows.map((row) => ({
+      id: row.wallet,
+      name: row.name,
+      damage: Number(row.damage),
+      joined: row.joined,
+      isPlayer: row.wallet === wallet,
+      attack: 0,
+    }))
+
+    const serverPlayer = participants.find((entry) => entry.isPlayer)
+    if (serverPlayer) {
+      serverPlayer.damage = Math.max(serverPlayer.damage, playerEntry.damage)
+      serverPlayer.joined = serverPlayer.joined || playerEntry.joined
+      serverPlayer.name = playerEntry.name
+    } else {
+      participants.unshift(playerEntry)
+    }
+
+    state.worldBoss.participants = participants
+
+    await maybeClaimWorldBossReward(wallet, bossRow, state)
+    syncHud()
   }
 
   const addConsumable = (state: GameState, type: ConsumableType) => {
@@ -2535,6 +2783,7 @@ function App() {
     participant.joined = true
     participant.name = state.name
     syncHud()
+    void syncWorldBossFromServer()
     void saveGameState()
   }
 
