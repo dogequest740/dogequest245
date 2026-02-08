@@ -1,0 +1,98 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Manrope:wght@400;600&family=Press+Start+2P&display=swap');
+
+:root {
+  color-scheme: dark;
+  --bg: linear-gradient(160deg, #0b1116 0%, #0a0f14 45%, #06090c 100%);
+  --bg-glow-1: radial-gradient(900px circle at 12% 12%, rgba(70, 110, 90, 0.22), transparent 70%);
+  --bg-glow-2: radial-gradient(900px circle at 88% 8%, rgba(180, 120, 60, 0.18), transparent 70%);
+  --bg-glow-3: radial-gradient(900px circle at 50% 100%, rgba(80, 120, 160, 0.16), transparent 75%);
+  --panel: rgba(13, 18, 22, 0.96);
+  --panel-2: rgba(16, 22, 28, 0.92);
+  --border: rgba(214, 178, 95, 0.28);
+  --accent: #d6b25f;
+  --accent-emerald: #6bd8a6;
+  --accent-ruby: #f07a62;
+  --text-main: #e7f0f5;
+  --text-muted: #93a4b4;
+  --frame-light: rgba(255, 229, 180, 0.18);
+  --frame-dark: rgba(6, 8, 10, 0.65);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text-main);
+  font-family: 'Manrope', system-ui, sans-serif;
+  position: relative;
+  overflow-x: hidden;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: var(--bg-glow-1), var(--bg-glow-2), var(--bg-glow-3);
+  z-index: -2;
+  pointer-events: none;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    radial-gradient(circle at 18% 16%, rgba(255, 230, 170, 0.08), transparent 45%),
+    radial-gradient(circle at 82% 12%, rgba(120, 190, 150, 0.06), transparent 45%),
+    repeating-linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.02),
+      rgba(255, 255, 255, 0.02) 1px,
+      transparent 1px,
+      transparent 6px
+    );
+  opacity: 0.35;
+  mix-blend-mode: soft-light;
+  z-index: -1;
+  pointer-events: none;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font-family: 'Manrope', system-ui, sans-serif;
+}
+
+.wallet-adapter-button {
+  background: var(--accent) !important;
+  color: #0a1116 !important;
+  border-radius: 12px !important;
+  font-family: 'Manrope', system-ui, sans-serif !important;
+  font-weight: 600 !important;
+  border: none !important;
+}
+
+.wallet-adapter-button:hover {
+  background: #7be6a1 !important;
+}
+
+.wallet-adapter-modal-wrapper {
+  background: rgba(8, 12, 18, 0.85) !important;
+}
+
+.wallet-adapter-modal {
+  border-radius: 16px !important;
+  background: #101823 !important;
+  border: 1px solid var(--border) !important;
+}
