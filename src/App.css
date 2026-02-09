@@ -209,7 +209,7 @@
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: rgba(12, 18, 26, 0.65);
   color: #f6d488;
-  padding: 6px 10px;
+  padding: 6px 12px;
   border-radius: 10px;
   font-size: 11px;
   font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
@@ -219,14 +219,16 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 30px;
+  min-height: 34px;
   line-height: 1;
 }
 
 .resource-action .icon-img,
 .resource-action .icon-img.tiny {
-  width: 24px;
-  height: 24px;
+  width: 30px;
+  height: 30px;
+  display: block;
+  flex: 0 0 auto;
 }
 
 .resource-action.secondary {
@@ -335,6 +337,9 @@
 
 .buygold-card .shop-meta {
   justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
 }
 
 .buygold-card button {
