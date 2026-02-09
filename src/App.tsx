@@ -3584,7 +3584,7 @@ function App() {
                 A living pixel realm where your gear, Tier Score, and timing decide the outcome. Battle on demand,
                 conquer dungeons, and share World Boss rewards.
               </p>
-              <p className="auth-sublead">
+              <p className="auth-sublead highlight">
                 Earn real SOL by playing: farm crystals in dungeons and World Boss raids, then convert rewards to SOL.
                 The deeper you push, the larger the payouts.
               </p>
