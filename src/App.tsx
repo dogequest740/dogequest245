@@ -3585,8 +3585,8 @@ function App() {
                 conquer dungeons, and share World Boss rewards.
               </p>
               <p className="auth-sublead">
-                Earn crystals through gameplay, request SOL withdrawals after manual review, and make secure
-                on-chain purchases for gold and starter packs.
+                Earn real SOL by playing: farm crystals in dungeons and World Boss raids, then convert rewards to SOL.
+                The deeper you push, the larger the payouts.
               </p>
               <div className="auth-cta">
                 <WalletMultiButton className="wallet-button auth-wallet" />
@@ -3664,7 +3664,7 @@ function App() {
                 <img src={iconCrystals} alt="" />
                 <div>
                   <h3>Crystals to SOL</h3>
-                  <p>Request withdrawals with a fixed rate and manual review.</p>
+                  <p>Turn crystal rewards into SOL at a fixed exchange rate.</p>
                 </div>
               </div>
             </div>
@@ -3733,7 +3733,7 @@ function App() {
                 <img src={iconCrystals} alt="" />
                 <div>
                   <h3>Crystals economy</h3>
-                  <p>Earn crystals in raids and dungeons, then reinvest or request a SOL payout.</p>
+                  <p>Earn crystals in raids and dungeons, then convert them into SOL.</p>
                 </div>
               </div>
               <div className="progress-card">
@@ -3754,7 +3754,7 @@ function App() {
                 <img src={iconSolana} alt="" />
                 <div>
                   <h3>Solana integration</h3>
-                  <p>Wallet login, on-chain purchases, and manual withdrawals keep rewards connected to you.</p>
+                  <p>Wallet login and on-chain purchases keep your rewards tied to your Solana address.</p>
                 </div>
               </div>
             </div>
