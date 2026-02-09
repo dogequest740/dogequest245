@@ -8,7 +8,7 @@ import '@solana/wallet-adapter-react-ui/styles.css'
 import './index.css'
 import App from './App'
 
-const endpoint = clusterApiUrl('devnet')
+const endpoint = import.meta.env.VITE_SOLANA_RPC ?? clusterApiUrl('mainnet-beta')
 const wallets = [new PhantomWalletAdapter()]
 
 createRoot(document.getElementById('root')!).render(
