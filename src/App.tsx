@@ -3760,7 +3760,33 @@ function App() {
             </div>
           </div>
 
-          <div className="auth-footer reveal delay-6">
+          <div className="auth-section highlight reveal delay-6">
+            <h2>How to earn SOL</h2>
+            <div className="earn-grid">
+              <div className="earn-card">
+                <div className="earn-number">01</div>
+                <h3>Farm dungeons</h3>
+                <p>Clear higher tiers for larger crystal payouts.</p>
+              </div>
+              <div className="earn-card">
+                <div className="earn-number">02</div>
+                <h3>Join World Boss</h3>
+                <p>Deal damage every cycle and share the crystal pool.</p>
+              </div>
+              <div className="earn-card">
+                <div className="earn-number">03</div>
+                <h3>Boost Tier Score</h3>
+                <p>Better gear unlocks tougher content with higher rewards.</p>
+              </div>
+              <div className="earn-card">
+                <div className="earn-number">04</div>
+                <h3>Convert crystals</h3>
+                <p>Exchange your crystal balance into SOL at a fixed rate.</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="auth-footer reveal delay-7">
             <div>
               <div className="auth-footer-title">Ready to enter the realm?</div>
               <div className="auth-footer-copy">Connect your wallet and choose a class to begin.</div>
