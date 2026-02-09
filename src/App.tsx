@@ -3584,6 +3584,10 @@ function App() {
                 A living pixel realm where your gear, Tier Score, and timing decide the outcome. Battle on demand,
                 conquer dungeons, and share World Boss rewards.
               </p>
+              <p className="auth-sublead">
+                Earn crystals through gameplay, request SOL withdrawals after manual review, and make secure
+                on-chain purchases for gold and starter packs.
+              </p>
               <div className="auth-cta">
                 <WalletMultiButton className="wallet-button auth-wallet" />
                 <span className="auth-note">Connect wallet to continue. We only read your address.</span>
@@ -3602,8 +3606,8 @@ function App() {
                   <span className="stat-label">Dungeons</span>
                 </div>
                 <div className="stat-card">
-                  <span className="stat-value">5h</span>
-                  <span className="stat-label">Boss Cycle</span>
+                  <span className="stat-value">Mainnet</span>
+                  <span className="stat-label">Solana</span>
                 </div>
               </div>
             </div>
@@ -3646,7 +3650,7 @@ function App() {
                 <img src={iconWorldBoss} alt="" />
                 <div>
                   <h3>World Boss raids</h3>
-                  <p>Join every cycle and earn your share of the crystal pool.</p>
+                  <p>Join each cycle, stack damage, and claim your share of the crystal pool.</p>
                 </div>
               </div>
               <div className="feature-card">
@@ -3654,6 +3658,13 @@ function App() {
                 <div>
                   <h3>Merchant shop</h3>
                   <p>Stock energy, speed, and attack tonics to push further.</p>
+                </div>
+              </div>
+              <div className="feature-card">
+                <img src={iconCrystals} alt="" />
+                <div>
+                  <h3>Crystals to SOL</h3>
+                  <p>Request withdrawals with a fixed rate and manual review.</p>
                 </div>
               </div>
             </div>
@@ -3681,6 +3692,18 @@ function App() {
             <h2>Monsters of the realm</h2>
             <div className="roster-grid monsters">
               <div className="roster-card">
+                <img src={goblinSprite} alt="Goblin" />
+                <span>Goblin Raider</span>
+              </div>
+              <div className="roster-card">
+                <img src={deathEyeSprite} alt="Death Eye" />
+                <span>Death Eye</span>
+              </div>
+              <div className="roster-card">
+                <img src={skeletonWarriorSprite} alt="Skeleton Warrior" />
+                <span>Skeleton Warrior</span>
+              </div>
+              <div className="roster-card">
                 <img src={iceDragonSprite} alt="Ice Dragon" />
                 <span>Ice Dragon</span>
               </div>
@@ -3704,13 +3727,13 @@ function App() {
           </div>
 
           <div className="auth-section reveal delay-5">
-            <h2>Progression that matters</h2>
+            <h2>Progression and Web3</h2>
             <div className="progress-grid">
               <div className="progress-card">
                 <img src={iconCrystals} alt="" />
                 <div>
                   <h3>Crystals economy</h3>
-                  <p>Earn crystals in raids and dungeons, then reinvest in growth.</p>
+                  <p>Earn crystals in raids and dungeons, then reinvest or request a SOL payout.</p>
                 </div>
               </div>
               <div className="progress-card">
@@ -3725,6 +3748,13 @@ function App() {
                 <div>
                   <h3>Dungeon readiness</h3>
                   <p>Build your loadout to meet strict Tier Score thresholds.</p>
+                </div>
+              </div>
+              <div className="progress-card">
+                <img src={iconSolana} alt="" />
+                <div>
+                  <h3>Solana integration</h3>
+                  <p>Wallet login, on-chain purchases, and manual withdrawals keep rewards connected to you.</p>
                 </div>
               </div>
             </div>

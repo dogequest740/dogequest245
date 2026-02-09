@@ -888,6 +888,12 @@
   max-width: 560px;
 }
 
+.auth-sublead {
+  font-size: 13px;
+  color: rgba(214, 178, 95, 0.8);
+  max-width: 560px;
+}
+
 .auth-cta {
   display: grid;
   gap: 8px;
