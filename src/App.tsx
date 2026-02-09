@@ -2464,6 +2464,7 @@ function App() {
   const [stakeTab, setStakeTab] = useState<'stake' | 'my'>('stake')
   const [musicEnabled, setMusicEnabled] = useState(true)
   const [contractCopied, setContractCopied] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const gameStateRef = useRef<GameState | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -2514,6 +2515,18 @@ function App() {
     if (!wallet) return false
     return adminWallets.includes(wallet)
   }, [publicKey, adminWallets])
+
+  useEffect(() => {
+    const detectMobile = () => {
+      const ua = navigator.userAgent || ''
+      const mobileUa = /Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(ua)
+      const smallScreen = window.matchMedia('(max-width: 900px)').matches
+      setIsMobile(mobileUa || smallScreen)
+    }
+    detectMobile()
+    window.addEventListener('resize', detectMobile)
+    return () => window.removeEventListener('resize', detectMobile)
+  }, [])
 
   const copyContractAddress = async () => {
     const contractValue = 'Soon'
@@ -3509,7 +3522,7 @@ function App() {
   const topbarClass = stage === 'select' ? 'topbar centered' : 'topbar'
 
   return (
-    <div className={`app ${stage === 'auth' ? 'auth-mode' : ''}`}>
+    <div className={`app ${stage === 'auth' ? 'auth-mode' : ''} ${isMobile ? 'mobile' : ''}`}>
       <audio ref={audioRef} src={bgMusic} preload="auto" />
       {stage !== 'auth' && (
         <header className={topbarClass}>
