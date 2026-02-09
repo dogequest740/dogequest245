@@ -207,11 +207,8 @@ type PersistedState = {
   questStates: Record<string, QuestState>
   monsterKills: number
   dungeonRuns: number
-  stake: {
-    active: boolean
-    amount: number
-    endsAt: number
-  }
+  stake: StakeEntry[] | { active: boolean; amount: number; endsAt: number }
+  stakeId: number
 }
 
 type AdminPlayerRow = {
@@ -254,6 +251,12 @@ type AdminData = {
   summary: AdminSummary
   players: AdminPlayerRow[]
   withdrawals: WithdrawalRow[]
+}
+
+type StakeEntry = {
+  id: number
+  amount: number
+  endsAt: number
 }
 type PlayerSpriteKey = 'knight' | 'mage' | 'archer'
 type PlayerSpriteSource = HTMLImageElement | HTMLCanvasElement
@@ -423,11 +426,8 @@ type GameState = {
   monsterHpScale: number
   worldBoss: WorldBossState
   questStates: Record<string, QuestState>
-  stake: {
-    active: boolean
-    amount: number
-    endsAt: number
-  }
+  stake: StakeEntry[]
+  stakeId: number
 }
 
 type HudState = {
@@ -463,11 +463,7 @@ type HudState = {
   dungeonRuns: number
   worldBoss: WorldBossState
   questStates: Record<string, QuestState>
-  stake: {
-    active: boolean
-    amount: number
-    endsAt: number
-  }
+  stake: StakeEntry[]
 }
 
 const CHARACTER_CLASSES: CharacterClass[] = [
@@ -902,6 +898,7 @@ const buildPersistedState = (state: GameState): PersistedState => ({
   monsterKills: state.monsterKills,
   dungeonRuns: state.dungeonRuns,
   stake: state.stake,
+  stakeId: state.stakeId,
 })
 
 const applyPersistedState = (state: GameState, saved: PersistedState) => {
@@ -944,12 +941,34 @@ const applyPersistedState = (state: GameState, saved: PersistedState) => {
   state.monsterKills = Math.max(0, saved.monsterKills ?? state.monsterKills)
   state.dungeonRuns = Math.max(0, saved.dungeonRuns ?? state.dungeonRuns)
   if (saved.stake) {
-    state.stake = {
-      active: Boolean(saved.stake.active),
-      amount: Math.max(0, saved.stake.amount ?? 0),
-      endsAt: Math.max(0, saved.stake.endsAt ?? 0),
+    if (Array.isArray(saved.stake)) {
+      state.stake = saved.stake
+        .map((entry) => ({
+          id: Math.max(1, Number(entry.id ?? 0)),
+          amount: Math.max(0, Number(entry.amount ?? 0)),
+          endsAt: Math.max(0, Number(entry.endsAt ?? 0)),
+        }))
+        .filter((entry) => entry.amount > 0)
+    } else if (saved.stake.active && saved.stake.amount > 0) {
+      const legacyId = saved.stakeId ?? Date.now()
+      state.stake = [
+        {
+          id: Number(legacyId),
+          amount: Math.max(0, saved.stake.amount ?? 0),
+          endsAt: Math.max(0, saved.stake.endsAt ?? 0),
+        },
+      ]
+    } else {
+      state.stake = []
     }
   }
+
+  state.stakeId = Math.max(
+    state.stakeId,
+    saved.stakeId ?? 0,
+    ...state.stake.map((entry) => entry.id),
+    0,
+  )
 
   const itemIds = [
     ...state.inventory.map((item) => item.id),
@@ -1866,7 +1885,8 @@ const initGameState = (chosenClass: CharacterClass, name: string): GameState => 
     dungeonRuns: 0,
     monsterHpScale: getMonsterHpMultiplier(0),
     worldBoss: createWorldBossState(name),
-    stake: { active: false, amount: 0, endsAt: 0 },
+    stake: [],
+    stakeId: 0,
     questStates: QUESTS.reduce((acc, quest) => {
       acc[quest.id] = { claimed: false }
       return acc
@@ -2955,10 +2975,6 @@ function App() {
   const startStake = () => {
     const state = gameStateRef.current
     if (!state) return
-    if (state.stake.active) {
-      setStakeError('Stake already active.')
-      return
-    }
     const amount = Math.floor(Number(stakeAmount))
     if (!Number.isFinite(amount) || amount <= 0) {
       setStakeError('Enter a valid amount.')
@@ -2973,11 +2989,16 @@ function App() {
       return
     }
     state.crystals -= amount
-    state.stake = {
-      active: true,
-      amount,
-      endsAt: Date.now() + STAKE_DURATION * 1000,
-    }
+    const nextId = state.stakeId + 1
+    state.stakeId = nextId
+    state.stake = [
+      {
+        id: nextId,
+        amount,
+        endsAt: Date.now() + STAKE_DURATION * 1000,
+      },
+      ...state.stake,
+    ]
     setStakeAmount('')
     setStakeError('')
     pushLog(state.eventLog, `Staked ${amount} crystals.`)
@@ -2985,18 +3006,19 @@ function App() {
     void saveGameState()
   }
 
-  const claimStake = () => {
+  const claimStake = (stakeId: number) => {
     const state = gameStateRef.current
     if (!state) return
-    if (!state.stake.active) return
-    if (Date.now() < state.stake.endsAt) {
+    const entry = state.stake.find((item) => item.id === stakeId)
+    if (!entry) return
+    if (Date.now() < entry.endsAt) {
       setStakeError('Stake is still locked.')
       return
     }
-    const bonus = Math.floor(state.stake.amount * STAKE_BONUS)
-    const total = state.stake.amount + bonus
+    const bonus = Math.floor(entry.amount * STAKE_BONUS)
+    const total = entry.amount + bonus
     state.crystals += total
-    state.stake = { active: false, amount: 0, endsAt: 0 }
+    state.stake = state.stake.filter((item) => item.id !== stakeId)
     pushLog(state.eventLog, `Stake completed: +${total} crystals.`)
     setStakeError('')
     syncHud()
@@ -4080,39 +4102,44 @@ function App() {
 
               {stakeTab === 'my' && (
                 <>
-                  {hud.stake.active ? (
+                  {hud.stake.length > 0 ? (
                     <>
-                      <div className="withdraw-info">
-                        <span className="withdraw-info-label">
-                          <img className="icon-img small" src={iconCrystals} alt="" />
-                          Staked
-                        </span>
-                        <strong>
-                          {formatNumber(hud.stake.amount)} <img className="icon-img small" src={iconCrystals} alt="" />
-                        </strong>
-                      </div>
-                      <div className="withdraw-info">
-                        <span className="withdraw-info-label">
-                          <img className="icon-img small" src={iconCrystals} alt="" />
-                          Reward
-                        </span>
-                        <strong>
-                          +{formatNumber(Math.floor(hud.stake.amount * STAKE_BONUS))} (
-                          {formatNumber(hud.stake.amount + Math.floor(hud.stake.amount * STAKE_BONUS))} total)
-                        </strong>
-                      </div>
-                      <div className="withdraw-convert">
-                        Unlocks in {formatLongTimer(Math.max(0, (hud.stake.endsAt - Date.now()) / 1000))}
-                      </div>
                       {stakeError && <div className="withdraw-error">{stakeError}</div>}
-                      <button
-                        type="button"
-                        className="withdraw-submit"
-                        onClick={claimStake}
-                        aria-disabled={Date.now() < hud.stake.endsAt}
-                      >
-                        Claim stake
-                      </button>
+                      <div className="stake-list">
+                        {[...hud.stake]
+                          .sort((a, b) => a.endsAt - b.endsAt)
+                          .map((entry) => {
+                            const bonus = Math.floor(entry.amount * STAKE_BONUS)
+                            const total = entry.amount + bonus
+                            const remaining = Math.max(0, (entry.endsAt - Date.now()) / 1000)
+                            const ready = remaining <= 0
+                            return (
+                              <div key={entry.id} className={`stake-card ${ready ? 'ready' : ''}`}>
+                                <div className="stake-row">
+                                  <span>Staked</span>
+                                  <strong>
+                                    {formatNumber(entry.amount)} <img className="icon-img small" src={iconCrystals} alt="" />
+                                  </strong>
+                                </div>
+                                <div className="stake-row">
+                                  <span>Reward</span>
+                                  <strong>
+                                    +{formatNumber(bonus)} ({formatNumber(total)} total)
+                                  </strong>
+                                </div>
+                                <div className="withdraw-convert">Unlocks in {formatLongTimer(remaining)}</div>
+                                <button
+                                  type="button"
+                                  className="withdraw-submit"
+                                  onClick={() => claimStake(entry.id)}
+                                  disabled={!ready}
+                                >
+                                  Claim stake
+                                </button>
+                              </div>
+                            )
+                          })}
+                      </div>
                     </>
                   ) : (
                     <div className="withdraw-note">No active stakes yet.</div>

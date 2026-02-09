@@ -237,6 +237,46 @@
   box-shadow: 0 10px 16px rgba(103, 210, 140, 0.2);
 }
 
+.stake-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.stake-card {
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  border-radius: 14px;
+  padding: 12px;
+  display: grid;
+  gap: 6px;
+}
+
+.stake-card.ready {
+  border-color: rgba(103, 210, 140, 0.45);
+  box-shadow: 0 0 14px rgba(103, 210, 140, 0.25);
+}
+
+.stake-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-main);
+  font-size: 13px;
+}
+
+.stake-row span {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-size: 11px;
+}
+
+.stake-row strong {
+  color: #f8f6ef;
+}
+
 .resource-action:hover {
   box-shadow: 0 0 12px rgba(214, 178, 95, 0.35);
 }
