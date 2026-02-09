@@ -1,0 +1,14 @@
+name: World Boss Tick
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call world boss tick
+        run: |
+          curl -sS -X POST "https://dogequest245.vercel.app/api/world-boss-tick" -H "Content-Type: application/json"
