@@ -35,6 +35,7 @@ import iconBattle from './assets/icons/battle.png'
 import iconAutoBattle from './assets/icons/autobattle.png'
 import iconWithdraw from './assets/icons/withdraw.png'
 import iconSolana from './assets/icons/solana.png'
+import iconStacking from './assets/icons/stacking.png'
 import iconWeapon from './assets/icons/armory-weapon.png'
 import iconArmor from './assets/icons/armory-armor.png'
 import iconHead from './assets/icons/armory-head.png'
@@ -700,6 +701,7 @@ const WITHDRAW_RATE = 10000
 const WITHDRAW_MIN = 1000
 const STAKE_DURATION = 12 * 60 * 60
 const STAKE_BONUS = 0.1
+const STAKE_MIN = 50
 
 const MONSTER_HP_TIER_TARGET = 30000
 const MONSTER_HP_TIER_EXCESS = 0.2
@@ -2393,6 +2395,7 @@ function App() {
   const [withdrawError, setWithdrawError] = useState('')
   const [stakeAmount, setStakeAmount] = useState('')
   const [stakeError, setStakeError] = useState('')
+  const [stakeTab, setStakeTab] = useState<'stake' | 'my'>('stake')
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const gameStateRef = useRef<GameState | null>(null)
   const serverLoadedRef = useRef(false)
@@ -2671,6 +2674,7 @@ function App() {
     }
     if (activePanel !== 'stake') {
       setStakeError('')
+      setStakeTab('stake')
     }
   }, [activePanel])
 
@@ -2958,6 +2962,10 @@ function App() {
     const amount = Math.floor(Number(stakeAmount))
     if (!Number.isFinite(amount) || amount <= 0) {
       setStakeError('Enter a valid amount.')
+      return
+    }
+    if (amount < STAKE_MIN) {
+      setStakeError(`Minimum stake is ${STAKE_MIN} crystals.`)
       return
     }
     if (amount > state.crystals) {
@@ -3275,6 +3283,7 @@ function App() {
                       Withdraw
                     </button>
                     <button type="button" className="resource-action secondary" onClick={() => setActivePanel('stake')}>
+                      <img className="icon-img tiny" src={iconStacking} alt="" />
                       Staking
                     </button>
                   </div>
@@ -3994,63 +4003,120 @@ function App() {
               </button>
             </div>
             <div className="withdraw-body stake-body">
-              <div className="withdraw-info">
-                <span className="withdraw-info-label">
-                  <img className="icon-img small" src={iconCrystals} alt="" />
-                  Reward
-                </span>
-                <strong>+{Math.round(STAKE_BONUS * 100)}% in 12 hours</strong>
+              <div className="stake-tabs">
+                <button
+                  type="button"
+                  className={`tab-btn ${stakeTab === 'stake' ? 'active' : ''}`}
+                  onClick={() => setStakeTab('stake')}
+                >
+                  Stake
+                </button>
+                <button
+                  type="button"
+                  className={`tab-btn ${stakeTab === 'my' ? 'active' : ''}`}
+                  onClick={() => setStakeTab('my')}
+                >
+                  My Staking
+                </button>
               </div>
-              <div className="withdraw-info">
-                <span className="withdraw-info-label">
-                  <img className="icon-img small" src={iconCrystals} alt="" />
-                  Available
-                </span>
-                <strong>
-                  {formatNumber(hud.crystals)} <img className="icon-img small" src={iconCrystals} alt="" />
-                </strong>
-              </div>
-              {hud.stake.active ? (
+
+              {stakeTab === 'stake' && (
                 <>
                   <div className="withdraw-info">
                     <span className="withdraw-info-label">
                       <img className="icon-img small" src={iconCrystals} alt="" />
-                      Staked
+                      Reward
+                    </span>
+                    <strong>+{Math.round(STAKE_BONUS * 100)}% in 12 hours</strong>
+                  </div>
+                  <div className="withdraw-info">
+                    <span className="withdraw-info-label">
+                      <img className="icon-img small" src={iconCrystals} alt="" />
+                      Minimum stake
                     </span>
                     <strong>
-                      {formatNumber(hud.stake.amount)} <img className="icon-img small" src={iconCrystals} alt="" />
+                      {formatNumber(STAKE_MIN)} <img className="icon-img small" src={iconCrystals} alt="" />
                     </strong>
                   </div>
-                  <div className="withdraw-convert">
-                    Unlocks in {formatLongTimer(Math.max(0, (hud.stake.endsAt - Date.now()) / 1000))}
+                  <div className="withdraw-info">
+                    <span className="withdraw-info-label">
+                      <img className="icon-img small" src={iconCrystals} alt="" />
+                      Available
+                    </span>
+                    <strong>
+                      {formatNumber(hud.crystals)} <img className="icon-img small" src={iconCrystals} alt="" />
+                    </strong>
                   </div>
-                  <button
-                    type="button"
-                    className="withdraw-submit"
-                    onClick={claimStake}
-                    disabled={Date.now() < hud.stake.endsAt}
-                  >
-                    Claim stake
-                  </button>
-                </>
-              ) : (
-                <>
                   <label className="withdraw-label">
                     Amount (crystals)
                     <input
                       type="number"
-                      min={1}
+                      min={STAKE_MIN}
                       step={1}
                       value={stakeAmount}
                       onChange={(event) => setStakeAmount(event.target.value.replace(/[^0-9]/g, ''))}
                       placeholder="1000"
                     />
                   </label>
+                  {(() => {
+                    const amount = Math.floor(Number(stakeAmount))
+                    if (!Number.isFinite(amount) || amount <= 0) return null
+                    const bonus = Math.floor(amount * STAKE_BONUS)
+                    const total = amount + bonus
+                    return (
+                      <div className="withdraw-convert">
+                        <img className="icon-img small" src={iconCrystals} alt="" />
+                        Reward: {formatNumber(amount)} + {formatNumber(bonus)} = {formatNumber(total)}
+                      </div>
+                    )
+                  })()}
                   {stakeError && <div className="withdraw-error">{stakeError}</div>}
                   <button type="button" className="withdraw-submit" onClick={startStake}>
                     Start staking
                   </button>
                   <div className="withdraw-note">Staked crystals are locked for 12 hours.</div>
+                </>
+              )}
+
+              {stakeTab === 'my' && (
+                <>
+                  {hud.stake.active ? (
+                    <>
+                      <div className="withdraw-info">
+                        <span className="withdraw-info-label">
+                          <img className="icon-img small" src={iconCrystals} alt="" />
+                          Staked
+                        </span>
+                        <strong>
+                          {formatNumber(hud.stake.amount)} <img className="icon-img small" src={iconCrystals} alt="" />
+                        </strong>
+                      </div>
+                      <div className="withdraw-info">
+                        <span className="withdraw-info-label">
+                          <img className="icon-img small" src={iconCrystals} alt="" />
+                          Reward
+                        </span>
+                        <strong>
+                          +{formatNumber(Math.floor(hud.stake.amount * STAKE_BONUS))} (
+                          {formatNumber(hud.stake.amount + Math.floor(hud.stake.amount * STAKE_BONUS))} total)
+                        </strong>
+                      </div>
+                      <div className="withdraw-convert">
+                        Unlocks in {formatLongTimer(Math.max(0, (hud.stake.endsAt - Date.now()) / 1000))}
+                      </div>
+                      {stakeError && <div className="withdraw-error">{stakeError}</div>}
+                      <button
+                        type="button"
+                        className="withdraw-submit"
+                        onClick={claimStake}
+                        aria-disabled={Date.now() < hud.stake.endsAt}
+                      >
+                        Claim stake
+                      </button>
+                    </>
+                  ) : (
+                    <div className="withdraw-note">No active stakes yet.</div>
+                  )}
                 </>
               )}
             </div>

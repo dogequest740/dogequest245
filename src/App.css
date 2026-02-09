@@ -214,6 +214,29 @@
   justify-content: center;
 }
 
+.stake-tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.stake-tabs .tab-btn {
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text-muted);
+  padding: 6px 14px;
+  border-radius: 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
+}
+
+.stake-tabs .tab-btn.active {
+  color: #0a1116;
+  background: var(--accent);
+  box-shadow: 0 10px 16px rgba(103, 210, 140, 0.2);
+}
+
 .resource-action:hover {
   box-shadow: 0 0 12px rgba(214, 178, 95, 0.35);
 }
