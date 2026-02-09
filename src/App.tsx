@@ -206,6 +206,11 @@ type PersistedState = {
   questStates: Record<string, QuestState>
   monsterKills: number
   dungeonRuns: number
+  stake: {
+    active: boolean
+    amount: number
+    endsAt: number
+  }
 }
 
 type AdminPlayerRow = {
@@ -417,6 +422,11 @@ type GameState = {
   monsterHpScale: number
   worldBoss: WorldBossState
   questStates: Record<string, QuestState>
+  stake: {
+    active: boolean
+    amount: number
+    endsAt: number
+  }
 }
 
 type HudState = {
@@ -452,6 +462,11 @@ type HudState = {
   dungeonRuns: number
   worldBoss: WorldBossState
   questStates: Record<string, QuestState>
+  stake: {
+    active: boolean
+    amount: number
+    endsAt: number
+  }
 }
 
 const CHARACTER_CLASSES: CharacterClass[] = [
@@ -683,6 +698,8 @@ const WORLD_BOSS_DURATION = 5 * 60 * 60
 const WORLD_BOSS_REWARD = 1000
 const WITHDRAW_RATE = 10000
 const WITHDRAW_MIN = 1000
+const STAKE_DURATION = 12 * 60 * 60
+const STAKE_BONUS = 0.1
 
 const MONSTER_HP_TIER_TARGET = 30000
 const MONSTER_HP_TIER_EXCESS = 0.2
@@ -882,6 +899,7 @@ const buildPersistedState = (state: GameState): PersistedState => ({
   questStates: state.questStates,
   monsterKills: state.monsterKills,
   dungeonRuns: state.dungeonRuns,
+  stake: state.stake,
 })
 
 const applyPersistedState = (state: GameState, saved: PersistedState) => {
@@ -923,6 +941,13 @@ const applyPersistedState = (state: GameState, saved: PersistedState) => {
   state.questStates = { ...state.questStates, ...(saved.questStates ?? {}) }
   state.monsterKills = Math.max(0, saved.monsterKills ?? state.monsterKills)
   state.dungeonRuns = Math.max(0, saved.dungeonRuns ?? state.dungeonRuns)
+  if (saved.stake) {
+    state.stake = {
+      active: Boolean(saved.stake.active),
+      amount: Math.max(0, saved.stake.amount ?? 0),
+      endsAt: Math.max(0, saved.stake.endsAt ?? 0),
+    }
+  }
 
   const itemIds = [
     ...state.inventory.map((item) => item.id),
@@ -1766,6 +1791,7 @@ const buildHud = (state: GameState): HudState => ({
   dungeonRuns: state.dungeonRuns,
   worldBoss: state.worldBoss,
   questStates: cloneQuestStates(state.questStates),
+  stake: state.stake,
 })
 
 const initGameState = (chosenClass: CharacterClass, name: string): GameState => {
@@ -1838,6 +1864,7 @@ const initGameState = (chosenClass: CharacterClass, name: string): GameState => 
     dungeonRuns: 0,
     monsterHpScale: getMonsterHpMultiplier(0),
     worldBoss: createWorldBossState(name),
+    stake: { active: false, amount: 0, endsAt: 0 },
     questStates: QUESTS.reduce((acc, quest) => {
       acc[quest.id] = { claimed: false }
       return acc
@@ -2356,7 +2383,7 @@ function App() {
   const [playerName, setPlayerName] = useState('')
   const [hud, setHud] = useState<HudState | null>(null)
   const [activePanel, setActivePanel] = useState<
-    'inventory' | 'dungeons' | 'shop' | 'quests' | 'worldboss' | 'admin' | 'withdraw' | null
+    'inventory' | 'dungeons' | 'shop' | 'quests' | 'worldboss' | 'admin' | 'withdraw' | 'stake' | null
   >(null)
   const [inventoryTab, setInventoryTab] = useState<'equipment' | 'consumables'>('equipment')
   const [adminData, setAdminData] = useState<AdminData | null>(null)
@@ -2364,6 +2391,8 @@ function App() {
   const [adminError, setAdminError] = useState('')
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [withdrawError, setWithdrawError] = useState('')
+  const [stakeAmount, setStakeAmount] = useState('')
+  const [stakeError, setStakeError] = useState('')
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const gameStateRef = useRef<GameState | null>(null)
   const serverLoadedRef = useRef(false)
@@ -2640,6 +2669,9 @@ function App() {
     if (activePanel !== 'withdraw') {
       setWithdrawError('')
     }
+    if (activePanel !== 'stake') {
+      setStakeError('')
+    }
   }, [activePanel])
 
   useEffect(() => {
@@ -2914,6 +2946,53 @@ function App() {
     syncHud()
     void saveGameState()
     setActivePanel(null)
+  }
+
+  const startStake = () => {
+    const state = gameStateRef.current
+    if (!state) return
+    if (state.stake.active) {
+      setStakeError('Stake already active.')
+      return
+    }
+    const amount = Math.floor(Number(stakeAmount))
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setStakeError('Enter a valid amount.')
+      return
+    }
+    if (amount > state.crystals) {
+      setStakeError('Not enough crystals.')
+      return
+    }
+    state.crystals -= amount
+    state.stake = {
+      active: true,
+      amount,
+      endsAt: Date.now() + STAKE_DURATION * 1000,
+    }
+    setStakeAmount('')
+    setStakeError('')
+    pushLog(state.eventLog, `Staked ${amount} crystals.`)
+    syncHud()
+    void saveGameState()
+  }
+
+  const claimStake = () => {
+    const state = gameStateRef.current
+    if (!state) return
+    if (!state.stake.active) return
+    if (Date.now() < state.stake.endsAt) {
+      setStakeError('Stake is still locked.')
+      return
+    }
+    const bonus = Math.floor(state.stake.amount * STAKE_BONUS)
+    const total = state.stake.amount + bonus
+    state.crystals += total
+    state.stake = { active: false, amount: 0, endsAt: 0 }
+    pushLog(state.eventLog, `Stake completed: +${total} crystals.`)
+    setStakeError('')
+    syncHud()
+    void saveGameState()
   }
 
   const addConsumable = (state: GameState, type: ConsumableType) => {
@@ -3194,6 +3273,9 @@ function App() {
                     <button type="button" className="resource-action" onClick={() => setActivePanel('withdraw')}>
                       <img className="icon-img tiny" src={iconWithdraw} alt="" />
                       Withdraw
+                    </button>
+                    <button type="button" className="resource-action secondary" onClick={() => setActivePanel('stake')}>
+                      Staking
                     </button>
                   </div>
                 </div>
@@ -3897,6 +3979,80 @@ function App() {
               <div className="withdraw-note">
                 Requests are reviewed manually. You will receive SOL in 15min - 2hr.
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activePanel === 'stake' && hud && (
+        <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Crystal Staking</h3>
+              <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
+                Close
+              </button>
+            </div>
+            <div className="withdraw-body stake-body">
+              <div className="withdraw-info">
+                <span className="withdraw-info-label">
+                  <img className="icon-img small" src={iconCrystals} alt="" />
+                  Reward
+                </span>
+                <strong>+{Math.round(STAKE_BONUS * 100)}% in 12 hours</strong>
+              </div>
+              <div className="withdraw-info">
+                <span className="withdraw-info-label">
+                  <img className="icon-img small" src={iconCrystals} alt="" />
+                  Available
+                </span>
+                <strong>
+                  {formatNumber(hud.crystals)} <img className="icon-img small" src={iconCrystals} alt="" />
+                </strong>
+              </div>
+              {hud.stake.active ? (
+                <>
+                  <div className="withdraw-info">
+                    <span className="withdraw-info-label">
+                      <img className="icon-img small" src={iconCrystals} alt="" />
+                      Staked
+                    </span>
+                    <strong>
+                      {formatNumber(hud.stake.amount)} <img className="icon-img small" src={iconCrystals} alt="" />
+                    </strong>
+                  </div>
+                  <div className="withdraw-convert">
+                    Unlocks in {formatLongTimer(Math.max(0, (hud.stake.endsAt - Date.now()) / 1000))}
+                  </div>
+                  <button
+                    type="button"
+                    className="withdraw-submit"
+                    onClick={claimStake}
+                    disabled={Date.now() < hud.stake.endsAt}
+                  >
+                    Claim stake
+                  </button>
+                </>
+              ) : (
+                <>
+                  <label className="withdraw-label">
+                    Amount (crystals)
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={stakeAmount}
+                      onChange={(event) => setStakeAmount(event.target.value.replace(/[^0-9]/g, ''))}
+                      placeholder="1000"
+                    />
+                  </label>
+                  {stakeError && <div className="withdraw-error">{stakeError}</div>}
+                  <button type="button" className="withdraw-submit" onClick={startStake}>
+                    Start staking
+                  </button>
+                  <div className="withdraw-note">Staked crystals are locked for 12 hours.</div>
+                </>
+              )}
             </div>
           </div>
         </div>

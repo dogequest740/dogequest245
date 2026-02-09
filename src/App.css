@@ -204,6 +204,16 @@
   gap: 6px;
 }
 
+.resource-action.secondary {
+  background: rgba(14, 20, 30, 0.65);
+  color: #d6e8ff;
+  border-color: rgba(120, 155, 255, 0.35);
+}
+
+.stake-body .withdraw-convert {
+  justify-content: center;
+}
+
 .resource-action:hover {
   box-shadow: 0 0 12px rgba(214, 178, 95, 0.35);
 }
