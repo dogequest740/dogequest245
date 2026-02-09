@@ -3023,6 +3023,13 @@ function App() {
     setBuyGoldError('')
     try {
       const lamports = Math.round(pack.sol * LAMPORTS_PER_SOL)
+      const balance = await connection.getBalance(publicKey)
+      const feeBuffer = 5000
+      if (balance < lamports + feeBuffer) {
+        setBuyGoldError(`Not enough SOL. Need ${pack.sol} SOL + network fee.`)
+        setBuyGoldLoading(null)
+        return
+      }
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash()
       const tx = new Transaction({
         feePayer: publicKey,
