@@ -2463,6 +2463,7 @@ function App() {
   const [stakeError, setStakeError] = useState('')
   const [stakeTab, setStakeTab] = useState<'stake' | 'my'>('stake')
   const [musicEnabled, setMusicEnabled] = useState(true)
+  const [contractCopied, setContractCopied] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const gameStateRef = useRef<GameState | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -2513,6 +2514,29 @@ function App() {
     if (!wallet) return false
     return adminWallets.includes(wallet)
   }, [publicKey, adminWallets])
+
+  const copyContractAddress = async () => {
+    const contractValue = 'Soon'
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(contractValue)
+      } else {
+        const textarea = document.createElement('textarea')
+        textarea.value = contractValue
+        textarea.style.position = 'fixed'
+        textarea.style.opacity = '0'
+        document.body.appendChild(textarea)
+        textarea.focus()
+        textarea.select()
+        document.execCommand('copy')
+        document.body.removeChild(textarea)
+      }
+      setContractCopied(true)
+      window.setTimeout(() => setContractCopied(false), 1600)
+    } catch (error) {
+      console.warn('Copy failed', error)
+    }
+  }
 
   useEffect(() => {
     const audio = audioRef.current
@@ -3576,6 +3600,9 @@ function App() {
 
       {stage === 'auth' && (
         <section className="auth-page">
+          <a className="auth-x-button" href="https://x.com/Doge_mmorpg" target="_blank" rel="noreferrer">
+            X
+          </a>
           <div className="auth-hero">
             <div className="auth-hero-copy reveal">
               <div className="auth-eyebrow">Solana Pixel RPG</div>
@@ -3589,7 +3616,13 @@ function App() {
                 The deeper you push, the larger the payouts.
               </p>
               <div className="auth-cta">
-                <WalletMultiButton className="wallet-button auth-wallet" />
+                <div className="auth-cta-row">
+                  <WalletMultiButton className="wallet-button auth-wallet" />
+                  <button type="button" className="contract-button" onClick={copyContractAddress}>
+                    Contract Address: <strong>Soon</strong>
+                    {contractCopied && <span className="copy-tag">Copied</span>}
+                  </button>
+                </div>
                 <span className="auth-note">Connect wallet to continue. We only read your address.</span>
               </div>
               <div className="auth-stats">
