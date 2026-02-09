@@ -33,6 +33,8 @@ import iconAttackSpeed from './assets/icons/attack-speed.png'
 import iconWorldBoss from './assets/icons/world-boss.png'
 import iconBattle from './assets/icons/battle.png'
 import iconAutoBattle from './assets/icons/autobattle.png'
+import iconWithdraw from './assets/icons/withdraw.png'
+import iconSolana from './assets/icons/solana.jpg'
 import iconWeapon from './assets/icons/armory-weapon.png'
 import iconArmor from './assets/icons/armory-armor.png'
 import iconHead from './assets/icons/armory-head.png'
@@ -2856,6 +2858,22 @@ function App() {
     setAdminLoading(false)
   }
 
+  const markWithdrawalPaid = async (withdrawalId: string) => {
+    if (!isAdmin || !supabase) return
+    setAdminLoading(true)
+    setAdminError('')
+    const { error } = await supabase
+      .from('withdrawals')
+      .update({ status: 'paid' })
+      .eq('id', withdrawalId)
+    if (error) {
+      setAdminError('Failed to update withdrawal.')
+      setAdminLoading(false)
+      return
+    }
+    await loadAdminData()
+  }
+
   const submitWithdrawal = async () => {
     const state = gameStateRef.current
     const wallet = publicKey?.toBase58()
@@ -3174,6 +3192,7 @@ function App() {
                     <span>Crystals</span>
                     <strong>{hud.crystals}</strong>
                     <button type="button" className="resource-action" onClick={() => setActivePanel('withdraw')}>
+                      <img className="icon-img tiny" src={iconWithdraw} alt="" />
                       Withdraw
                     </button>
                   </div>
@@ -3820,13 +3839,32 @@ function App() {
             </div>
             <div className="withdraw-body">
               <div className="withdraw-info">
-                Exchange rate: <strong>{WITHDRAW_RATE} crystals = 1 SOL</strong>
+                <span className="withdraw-info-label">
+                  <img className="icon-img small" src={iconCrystals} alt="" />
+                  Exchange rate
+                </span>
+                <strong>
+                  {formatNumber(WITHDRAW_RATE)} <img className="icon-img small" src={iconCrystals} alt="" /> = 1{' '}
+                  <img className="icon-img small" src={iconSolana} alt="" />
+                </strong>
               </div>
               <div className="withdraw-info">
-                Minimum withdrawal: <strong>{WITHDRAW_MIN} crystals</strong>
+                <span className="withdraw-info-label">
+                  <img className="icon-img small" src={iconCrystals} alt="" />
+                  Minimum withdrawal
+                </span>
+                <strong>
+                  {formatNumber(WITHDRAW_MIN)} <img className="icon-img small" src={iconCrystals} alt="" />
+                </strong>
               </div>
               <div className="withdraw-info">
-                Available: <strong>{formatNumber(hud.crystals)} crystals</strong>
+                <span className="withdraw-info-label">
+                  <img className="icon-img small" src={iconCrystals} alt="" />
+                  Available
+                </span>
+                <strong>
+                  {formatNumber(hud.crystals)} <img className="icon-img small" src={iconCrystals} alt="" />
+                </strong>
               </div>
               <label className="withdraw-label">
                 Amount (crystals)
@@ -3839,12 +3877,25 @@ function App() {
                   placeholder="1000"
                 />
               </label>
+              {(() => {
+                const amount = Math.floor(Number(withdrawAmount))
+                if (!Number.isFinite(amount) || amount <= 0) return null
+                const solValue = (amount / WITHDRAW_RATE).toFixed(4)
+                return (
+                  <div className="withdraw-convert">
+                    <img className="icon-img small" src={iconCrystals} alt="" />
+                    {formatNumber(amount)} =
+                    <img className="icon-img small" src={iconSolana} alt="" />
+                    {solValue} SOL
+                  </div>
+                )
+              })()}
               {withdrawError && <div className="withdraw-error">{withdrawError}</div>}
               <button type="button" className="withdraw-submit" onClick={submitWithdrawal}>
                 Submit request
               </button>
               <div className="withdraw-note">
-                Requests are reviewed manually. You will receive SOL after approval.
+                Requests are reviewed manually. You will receive SOL in 15min - 2hr.
               </div>
             </div>
           </div>
@@ -4057,6 +4108,7 @@ function App() {
                         <span>Status</span>
                         <span>Created</span>
                         <span>Wallet</span>
+                        <span>Action</span>
                       </div>
                       {adminData.withdrawals.length === 0 && (
                         <div className="admin-row empty">
@@ -4072,6 +4124,19 @@ function App() {
                           <span className={`status ${row.status}`}>{row.status}</span>
                           <span>{formatDateTime(row.created_at)}</span>
                           <span className="wallet-chip">{formatShortWallet(row.wallet)}</span>
+                          <span>
+                            {row.status === 'pending' ? (
+                              <button
+                                type="button"
+                                className="admin-action"
+                                onClick={() => markWithdrawalPaid(row.id)}
+                              >
+                                Mark as paid
+                              </button>
+                            ) : (
+                              <span className="status paid">paid</span>
+                            )}
+                          </span>
                         </div>
                       ))}
                     </div>

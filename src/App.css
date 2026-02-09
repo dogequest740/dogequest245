@@ -199,6 +199,9 @@
   cursor: pointer;
   text-transform: uppercase;
   letter-spacing: 0.3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .resource-action:hover {
@@ -2133,6 +2136,11 @@ button.ghost {
   height: 18px;
 }
 
+.icon-img.tiny {
+  width: 14px;
+  height: 14px;
+}
+
 .quest-card button {
   border: none;
   border-radius: 10px;
@@ -2288,14 +2296,37 @@ button.ghost {
   gap: 10px;
   font-size: 12px;
   color: var(--text-muted);
+  font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
 }
 
 .withdraw-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   padding: 8px 10px;
   border-radius: 10px;
   background: rgba(10, 14, 20, 0.7);
   border: 1px solid rgba(214, 178, 95, 0.2);
   color: #f0e9ff;
+}
+
+.withdraw-info-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: rgba(231, 240, 245, 0.7);
+}
+
+.withdraw-info strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #f6d488;
 }
 
 .withdraw-label {
@@ -2320,6 +2351,18 @@ button.ghost {
   border: 1px solid rgba(255, 120, 120, 0.3);
   padding: 6px 10px;
   border-radius: 10px;
+}
+
+.withdraw-convert {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #d6e8ff;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(12, 18, 26, 0.65);
+  border: 1px solid rgba(120, 155, 255, 0.25);
 }
 
 .withdraw-submit {
@@ -2426,8 +2469,8 @@ button.ghost {
 }
 
 .admin-row.withdrawals {
-  grid-template-columns: 0.8fr 1.2fr 0.9fr 0.8fr 0.8fr 1.2fr 0.9fr;
-  min-width: 680px;
+  grid-template-columns: 0.7fr 1.1fr 0.9fr 0.8fr 0.8fr 1.1fr 0.9fr 0.9fr;
+  min-width: 720px;
 }
 
 .admin-row.empty {
@@ -2450,6 +2493,28 @@ button.ghost {
   color: #ffd36f;
   border-color: rgba(255, 210, 120, 0.4);
   background: rgba(40, 28, 12, 0.7);
+}
+
+.admin-row .status.paid {
+  color: #7bd88f;
+  border-color: rgba(123, 216, 143, 0.5);
+  background: rgba(16, 32, 20, 0.6);
+}
+
+.admin-action {
+  border: 1px solid rgba(123, 216, 143, 0.5);
+  background: rgba(18, 28, 20, 0.8);
+  color: #7bd88f;
+  padding: 4px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+}
+
+.admin-action:hover {
+  box-shadow: 0 0 10px rgba(123, 216, 143, 0.3);
 }
 
 .admin-row.header {
