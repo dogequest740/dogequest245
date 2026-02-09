@@ -3575,102 +3575,167 @@ function App() {
       )}
 
       {stage === 'auth' && (
-        <section className="panel auth-panel">
+        <section className="auth-page">
           <div className="auth-hero">
-            <div className="auth-title">DOGE QUEST</div>
-            <div className="auth-subtitle">A pixel RPG where every battle forges your legend.</div>
-            <p className="auth-copy">
-              Dive into a living pixel realm of auto-battles, epic loot, and time-based challenges. Connect your
-              Solana wallet to start. We only read your address and never request transaction signatures.
-            </p>
-            <div className="auth-cta">
-              <WalletMultiButton className="wallet-button auth-wallet" />
-            </div>
-            <div className="auth-badges">
-              <span>Auto Battles</span>
-              <span>World Boss Raids</span>
-              <span>Tier Progression</span>
-              <span>Dungeon Keys</span>
-              <span>Trade Gear</span>
-            </div>
-          </div>
-          <div className="auth-visual">
-            <img src={worldBossImage} alt="World boss" />
-            <div className="auth-visual-caption">World Boss raid every 5 hours</div>
-          </div>
-          <div className="auth-landing">
-            <div className="landing-copy">
-              <h3>What awaits you</h3>
-              <p>
-                Assemble legendary gear, climb Tier Score, and carve your name into the leaderboard. Every victory
-                feeds your progression and unlocks tougher dungeons with greater rewards.
+            <div className="auth-hero-copy reveal">
+              <div className="auth-eyebrow">Solana Pixel RPG</div>
+              <h1 className="auth-title">DOGE QUEST</h1>
+              <p className="auth-lead">
+                A living pixel realm where your gear, Tier Score, and timing decide the outcome. Battle on demand,
+                conquer dungeons, and share World Boss rewards.
               </p>
-              <ul>
-                <li>Auto-battle or manual fights for precise control.</li>
-                <li>Dynamic loot rarity that scales with your level.</li>
-                <li>Dungeon tiers that reward mastery and preparation.</li>
-                <li>World Boss raids with shared crystal pools.</li>
-              </ul>
+              <div className="auth-cta">
+                <WalletMultiButton className="wallet-button auth-wallet" />
+                <span className="auth-note">Connect wallet to continue. We only read your address.</span>
+              </div>
+              <div className="auth-stats">
+                <div className="stat-card">
+                  <span className="stat-value">255</span>
+                  <span className="stat-label">Levels</span>
+                </div>
+                <div className="stat-card">
+                  <span className="stat-value">7</span>
+                  <span className="stat-label">Rarities</span>
+                </div>
+                <div className="stat-card">
+                  <span className="stat-value">20</span>
+                  <span className="stat-label">Dungeons</span>
+                </div>
+                <div className="stat-card">
+                  <span className="stat-value">5h</span>
+                  <span className="stat-label">Boss Cycle</span>
+                </div>
+              </div>
             </div>
-            <div className="landing-features">
+            <div className="auth-hero-art reveal delay-1">
+              <div className="hero-ring" />
+              <img className="hero-boss" src={worldBossImage} alt="World boss" />
+              <div className="hero-sprites">
+                <img className="hero-sprite sprite-knight" src={knightSprite} alt="Knight" />
+                <img className="hero-sprite sprite-mage" src={mageSprite} alt="Mage" />
+                <img className="hero-sprite sprite-archer" src={archerSprite} alt="Archer" />
+              </div>
+            </div>
+          </div>
+
+          <div className="auth-section reveal delay-2">
+            <h2>Core gameplay</h2>
+            <div className="feature-grid">
               <div className="feature-card">
                 <img src={iconBattle} alt="" />
                 <div>
-                  <h4>Auto Battle Flow</h4>
-                  <p>Toggle auto mode or launch single fights to control energy usage.</p>
-                </div>
-              </div>
-              <div className="feature-card">
-                <img src={iconDungeons} alt="" />
-                <div>
-                  <h4>Dungeon Keys</h4>
-                  <p>Spend keys to clear higher tiers and secure crystal rewards.</p>
+                  <h3>Battle on demand</h3>
+                  <p>Spend energy for a single fight or toggle Auto Battle to keep momentum.</p>
                 </div>
               </div>
               <div className="feature-card">
                 <img src={iconQuests} alt="" />
                 <div>
-                  <h4>Quest Lines</h4>
-                  <p>Complete progression quests for gold and powerful consumables.</p>
+                  <h3>Quest progression</h3>
+                  <p>Long-term quests guide leveling, dungeons, and Tier Score milestones.</p>
+                </div>
+              </div>
+              <div className="feature-card">
+                <img src={iconDungeons} alt="" />
+                <div>
+                  <h3>Dungeon tiers</h3>
+                  <p>Keys unlock tougher crypts with higher crystal rewards.</p>
                 </div>
               </div>
               <div className="feature-card">
                 <img src={iconWorldBoss} alt="" />
                 <div>
-                  <h4>World Boss</h4>
-                  <p>Join the raid and earn a share of the crystal pool.</p>
+                  <h3>World Boss raids</h3>
+                  <p>Join every cycle and earn your share of the crystal pool.</p>
                 </div>
               </div>
               <div className="feature-card">
                 <img src={iconShop} alt="" />
                 <div>
-                  <h4>Merchant Shop</h4>
-                  <p>Stock up on energy, speed, and attack tonics.</p>
+                  <h3>Merchant shop</h3>
+                  <p>Stock energy, speed, and attack tonics to push further.</p>
                 </div>
               </div>
             </div>
-            <div className="landing-showcase">
-              <div className="showcase-card">
-                <img src={knightSprite} alt="Knight" />
+          </div>
+
+          <div className="auth-section alt reveal delay-3">
+            <h2>Choose your legend</h2>
+            <div className="roster-grid">
+              <div className="roster-card">
+                <img src={knightSprite} alt="Knight Vanguard" />
                 <span>Knight Vanguard</span>
               </div>
-              <div className="showcase-card">
-                <img src={mageSprite} alt="Mage" />
+              <div className="roster-card">
+                <img src={mageSprite} alt="Arcane Mage" />
                 <span>Arcane Mage</span>
               </div>
-              <div className="showcase-card">
-                <img src={archerSprite} alt="Archer" />
+              <div className="roster-card">
+                <img src={archerSprite} alt="Swift Archer" />
                 <span>Swift Archer</span>
               </div>
-              <div className="showcase-card">
-                <img src={iceDragonSprite} alt="Ice dragon" />
+            </div>
+          </div>
+
+          <div className="auth-section reveal delay-4">
+            <h2>Monsters of the realm</h2>
+            <div className="roster-grid monsters">
+              <div className="roster-card">
+                <img src={iceDragonSprite} alt="Ice Dragon" />
                 <span>Ice Dragon</span>
               </div>
-              <div className="showcase-card">
-                <img src={lavaDemonSprite} alt="Lava demon" />
+              <div className="roster-card">
+                <img src={lavaDemonSprite} alt="Lava Demon" />
                 <span>Lava Demon</span>
               </div>
+              <div className="roster-card">
+                <img src={blackWizardSprite} alt="Black Wizard" />
+                <span>Black Wizard</span>
+              </div>
+              <div className="roster-card">
+                <img src={mushroomSprite} alt="Mushroom Brute" />
+                <span>Mushroom Brute</span>
+              </div>
+              <div className="roster-card">
+                <img src={firewormSprite} alt="Fireworm" />
+                <span>Fireworm</span>
+              </div>
             </div>
+          </div>
+
+          <div className="auth-section reveal delay-5">
+            <h2>Progression that matters</h2>
+            <div className="progress-grid">
+              <div className="progress-card">
+                <img src={iconCrystals} alt="" />
+                <div>
+                  <h3>Crystals economy</h3>
+                  <p>Earn crystals in raids and dungeons, then reinvest in growth.</p>
+                </div>
+              </div>
+              <div className="progress-card">
+                <img src={iconGold} alt="" />
+                <div>
+                  <h3>Gear upgrades</h3>
+                  <p>Loot rarity and item level push Tier Score higher.</p>
+                </div>
+              </div>
+              <div className="progress-card">
+                <img src={iconKey} alt="" />
+                <div>
+                  <h3>Dungeon readiness</h3>
+                  <p>Build your loadout to meet strict Tier Score thresholds.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="auth-footer reveal delay-6">
+            <div>
+              <div className="auth-footer-title">Ready to enter the realm?</div>
+              <div className="auth-footer-copy">Connect your wallet and choose a class to begin.</div>
+            </div>
+            <WalletMultiButton className="wallet-button auth-wallet" />
           </div>
         </section>
       )}
