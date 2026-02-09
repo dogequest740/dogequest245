@@ -3620,6 +3620,7 @@ function App() {
                   <WalletMultiButton className="wallet-button auth-wallet" />
                   <button type="button" className="contract-button" onClick={copyContractAddress}>
                     Contract Address: <strong>Soon</strong>
+                    <span className="copy-icon" aria-hidden>⧉</span>
                     {contractCopied && <span className="copy-tag">Copied</span>}
                   </button>
                 </div>

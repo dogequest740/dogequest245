@@ -843,15 +843,15 @@
 .auth-x-button {
   position: absolute;
   top: 18px;
-  right: 18px;
-  width: 52px;
-  height: 52px;
+  right: 32px;
+  width: 58px;
+  height: 58px;
   border-radius: 16px;
   border: 1px solid rgba(214, 178, 95, 0.45);
   background: linear-gradient(135deg, rgba(16, 20, 28, 0.9), rgba(8, 12, 18, 0.95));
   color: #f6d488;
   font-family: 'Cinzel Decorative', 'Cinzel', system-ui, sans-serif;
-  font-size: 20px;
+  font-size: 22px;
   letter-spacing: 1px;
   display: grid;
   place-items: center;
@@ -961,6 +961,11 @@
 .contract-button strong {
   color: #ffe3a3;
   font-weight: 700;
+}
+
+.copy-icon {
+  font-size: 14px;
+  color: rgba(255, 227, 163, 0.9);
 }
 
 .copy-tag {
