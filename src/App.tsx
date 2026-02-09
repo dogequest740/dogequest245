@@ -38,6 +38,7 @@ import iconWithdraw from './assets/icons/withdraw.png'
 import iconSolana from './assets/icons/solana.png'
 import iconStacking from './assets/icons/stacking.png'
 import iconBuyGold from './assets/icons/buy-gold.png'
+import iconStarterPack from './assets/icons/starter-pack.png'
 import iconWeapon from './assets/icons/armory-weapon.png'
 import iconArmor from './assets/icons/armory-armor.png'
 import iconHead from './assets/icons/armory-head.png'
@@ -213,6 +214,7 @@ type PersistedState = {
   questStates: Record<string, QuestState>
   monsterKills: number
   dungeonRuns: number
+  starterPackPurchased: boolean
   stake: StakeEntry[] | { active: boolean; amount: number; endsAt: number }
   stakeId: number
 }
@@ -432,6 +434,7 @@ type GameState = {
   monsterHpScale: number
   worldBoss: WorldBossState
   questStates: Record<string, QuestState>
+  starterPackPurchased: boolean
   stake: StakeEntry[]
   stakeId: number
 }
@@ -469,6 +472,7 @@ type HudState = {
   dungeonRuns: number
   worldBoss: WorldBossState
   questStates: Record<string, QuestState>
+  starterPackPurchased: boolean
   stake: StakeEntry[]
 }
 
@@ -710,6 +714,15 @@ const GOLD_PACKAGES = [
   { id: 'gold-100k', gold: 100000, sol: 0.1, image: goldMiddleImage },
   { id: 'gold-500k', gold: 500000, sol: 0.4, image: goldLargeImage },
 ]
+const STARTER_PACK_PRICE = 0.35
+const STARTER_PACK_GOLD = 300000
+const STARTER_PACK_ITEMS: { type: ConsumableType; qty: number }[] = [
+  { type: 'energy-small', qty: 20 },
+  { type: 'energy-full', qty: 5 },
+  { type: 'speed', qty: 10 },
+  { type: 'attack', qty: 10 },
+  { type: 'key', qty: 20 },
+]
 
 const MONSTER_HP_TIER_TARGET = 30000
 const MONSTER_HP_TIER_EXCESS = 0.2
@@ -909,6 +922,7 @@ const buildPersistedState = (state: GameState): PersistedState => ({
   questStates: state.questStates,
   monsterKills: state.monsterKills,
   dungeonRuns: state.dungeonRuns,
+  starterPackPurchased: state.starterPackPurchased,
   stake: state.stake,
   stakeId: state.stakeId,
 })
@@ -952,6 +966,7 @@ const applyPersistedState = (state: GameState, saved: PersistedState) => {
   state.questStates = { ...state.questStates, ...(saved.questStates ?? {}) }
   state.monsterKills = Math.max(0, saved.monsterKills ?? state.monsterKills)
   state.dungeonRuns = Math.max(0, saved.dungeonRuns ?? state.dungeonRuns)
+  state.starterPackPurchased = Boolean(saved.starterPackPurchased)
   if (saved.stake) {
     if (Array.isArray(saved.stake)) {
       state.stake = saved.stake
@@ -1824,6 +1839,7 @@ const buildHud = (state: GameState): HudState => ({
   dungeonRuns: state.dungeonRuns,
   worldBoss: state.worldBoss,
   questStates: cloneQuestStates(state.questStates),
+  starterPackPurchased: state.starterPackPurchased,
   stake: state.stake,
 })
 
@@ -1897,6 +1913,7 @@ const initGameState = (chosenClass: CharacterClass, name: string): GameState => 
     dungeonRuns: 0,
     monsterHpScale: getMonsterHpMultiplier(0),
     worldBoss: createWorldBossState(name),
+    starterPackPurchased: false,
     stake: [],
     stakeId: 0,
     questStates: QUESTS.reduce((acc, quest) => {
@@ -2418,7 +2435,17 @@ function App() {
   const [playerName, setPlayerName] = useState('')
   const [hud, setHud] = useState<HudState | null>(null)
   const [activePanel, setActivePanel] = useState<
-    'inventory' | 'dungeons' | 'shop' | 'quests' | 'worldboss' | 'admin' | 'withdraw' | 'stake' | 'buygold' | null
+    | 'inventory'
+    | 'dungeons'
+    | 'shop'
+    | 'quests'
+    | 'worldboss'
+    | 'admin'
+    | 'withdraw'
+    | 'stake'
+    | 'buygold'
+    | 'starterpack'
+    | null
   >(null)
   const [inventoryTab, setInventoryTab] = useState<'equipment' | 'consumables'>('equipment')
   const [adminData, setAdminData] = useState<AdminData | null>(null)
@@ -2428,6 +2455,8 @@ function App() {
   const [withdrawError, setWithdrawError] = useState('')
   const [buyGoldError, setBuyGoldError] = useState('')
   const [buyGoldLoading, setBuyGoldLoading] = useState<string | null>(null)
+  const [starterPackError, setStarterPackError] = useState('')
+  const [starterPackLoading, setStarterPackLoading] = useState(false)
   const [solBalance, setSolBalance] = useState(0)
   const [solBalanceLoading, setSolBalanceLoading] = useState(false)
   const [stakeAmount, setStakeAmount] = useState('')
@@ -2736,6 +2765,10 @@ function App() {
     if (activePanel !== 'buygold') {
       setBuyGoldError('')
       setBuyGoldLoading(null)
+    }
+    if (activePanel !== 'starterpack') {
+      setStarterPackError('')
+      setStarterPackLoading(false)
     }
     if (activePanel !== 'stake') {
       setStakeError('')
@@ -3086,6 +3119,61 @@ function App() {
       setBuyGoldError(`Transaction failed: ${message}`)
     } finally {
       setBuyGoldLoading(null)
+    }
+  }
+
+  const buyStarterPack = async () => {
+    const state = gameStateRef.current
+    if (!state || !publicKey) {
+      setStarterPackError('Connect your wallet to buy the starter pack.')
+      return
+    }
+    if (state.starterPackPurchased) {
+      setStarterPackError('Starter pack already purchased.')
+      return
+    }
+    setStarterPackLoading(true)
+    setStarterPackError('')
+    try {
+      const lamports = Math.round(STARTER_PACK_PRICE * LAMPORTS_PER_SOL)
+      const balance = await connection.getBalance(publicKey)
+      const feeBuffer = 5000
+      if (balance < lamports + feeBuffer) {
+        setStarterPackError(`Not enough SOL. Need ${STARTER_PACK_PRICE} SOL + network fee.`)
+        setStarterPackLoading(false)
+        return
+      }
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash()
+      const tx = new Transaction({
+        feePayer: publicKey,
+        recentBlockhash: blockhash,
+      }).add(
+        SystemProgram.transfer({
+          fromPubkey: publicKey,
+          toPubkey: GOLD_STORE_WALLET,
+          lamports,
+        }),
+      )
+      const signature = await sendTransaction(tx, connection)
+      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
+
+      state.gold += STARTER_PACK_GOLD
+      STARTER_PACK_ITEMS.forEach((entry) => {
+        for (let i = 0; i < entry.qty; i += 1) {
+          addConsumable(state, entry.type)
+        }
+      })
+      state.starterPackPurchased = true
+      pushLog(state.eventLog, 'Starter Pack purchased.')
+      syncHud()
+      void saveGameState()
+      setActivePanel(null)
+    } catch (error) {
+      console.warn('Starter pack purchase failed', error)
+      const message = error instanceof Error ? error.message : String(error)
+      setStarterPackError(`Transaction failed: ${message}`)
+    } finally {
+      setStarterPackLoading(false)
     }
   }
 
@@ -3665,6 +3753,15 @@ function App() {
                     {hud.speedBuffTime > 0 && <div>Speed Buff {Math.ceil(hud.speedBuffTime)}s</div>}
                     {hud.attackSpeedBuffTime > 0 && <div>ATK SPD Buff {Math.ceil(hud.attackSpeedBuffTime)}s</div>}
                   </div>
+                  {!hud.starterPackPurchased && (
+                    <button type="button" className="starter-pack-btn" onClick={() => setActivePanel('starterpack')}>
+                      <img className="starter-pack-icon" src={iconStarterPack} alt="" />
+                      <div className="starter-pack-text">
+                        <span>Starter Pack</span>
+                        <strong>One-time offer</strong>
+                      </div>
+                    </button>
+                  )}
                   <div className="menu-stack">
                     <button type="button" className="menu-big" onClick={() => setActivePanel('inventory')}>
                       <img className="icon-img" src={iconInventory} alt="" />
@@ -4119,6 +4216,62 @@ function App() {
               </div>
               {buyGoldError && <div className="withdraw-error">{buyGoldError}</div>}
               <div className="withdraw-note">Gold is added instantly after the transaction confirms.</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activePanel === 'starterpack' && hud && (
+        <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Starter Pack</h3>
+              <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
+                Close
+              </button>
+            </div>
+            <div className="withdraw-body starterpack-body">
+              <div className="starterpack-hero">
+                <img className="starterpack-image" src={iconStarterPack} alt="" />
+                <div className="starterpack-meta">
+                  <div className="starterpack-title">Starter Pack</div>
+                  <div className="starterpack-price">
+                    <img className="icon-img small" src={iconSolana} alt="" />
+                    {STARTER_PACK_PRICE} SOL
+                  </div>
+                </div>
+              </div>
+              <div className="starterpack-list">
+                <div className="starterpack-item">
+                  <img className="icon-img" src={iconGold} alt="" />
+                  <span>{formatNumber(STARTER_PACK_GOLD)} Gold</span>
+                </div>
+                <div className="starterpack-item">
+                  <img className="icon-img" src={iconEnergyTonic} alt="" />
+                  <span>20 Energy Tonic</span>
+                </div>
+                <div className="starterpack-item">
+                  <img className="icon-img" src={iconGrandEnergy} alt="" />
+                  <span>5 Grand Energy Elixir</span>
+                </div>
+                <div className="starterpack-item">
+                  <img className="icon-img" src={iconSwiftDraught} alt="" />
+                  <span>10 Swift Draught</span>
+                </div>
+                <div className="starterpack-item">
+                  <img className="icon-img" src={iconAttackSpeed} alt="" />
+                  <span>10 Battle Tonic</span>
+                </div>
+                <div className="starterpack-item">
+                  <img className="icon-img" src={iconKey} alt="" />
+                  <span>20 Dungeon Keys</span>
+                </div>
+              </div>
+              {starterPackError && <div className="withdraw-error">{starterPackError}</div>}
+              <button type="button" className="withdraw-submit" disabled={starterPackLoading} onClick={buyStarterPack}>
+                {starterPackLoading ? 'Processing...' : 'Buy Starter Pack'}
+              </button>
+              <div className="withdraw-note">This pack can be purchased only once.</div>
             </div>
           </div>
         </div>
