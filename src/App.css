@@ -1024,26 +1024,14 @@
   min-height: 320px;
 }
 
-.hero-ring {
-  position: absolute;
-  width: 360px;
-  height: 360px;
-  border-radius: 50%;
-  border: 1px solid rgba(120, 190, 255, 0.25);
-  background:
-    radial-gradient(circle, rgba(120, 190, 255, 0.12), transparent 60%),
-    radial-gradient(circle at 30% 30%, rgba(255, 200, 120, 0.2), transparent 55%);
-  box-shadow: 0 0 40px rgba(80, 120, 180, 0.25);
-}
-
 .hero-boss-frame {
   position: relative;
-  width: min(340px, 100%);
+  width: min(520px, 100%);
   aspect-ratio: 3 / 2;
-  border-radius: 18px;
+  border-radius: 22px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 16px 28px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 20px 36px rgba(0, 0, 0, 0.45);
   z-index: 1;
 }
 
@@ -1054,35 +1042,6 @@
   display: block;
 }
 
-.hero-sprites {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.hero-sprite {
-  position: absolute;
-  width: 120px;
-  height: 120px;
-  object-fit: contain;
-  image-rendering: auto;
-  filter: drop-shadow(0 0 18px rgba(0, 0, 0, 0.45));
-}
-
-.hero-sprite.sprite-knight {
-  left: -10px;
-  bottom: 10px;
-}
-
-.hero-sprite.sprite-mage {
-  right: -8px;
-  bottom: 0;
-}
-
-.hero-sprite.sprite-archer {
-  right: 40%;
-  top: 0;
-}
 
 .auth-section {
   display: grid;

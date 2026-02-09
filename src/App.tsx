@@ -3646,14 +3646,8 @@ function App() {
               </div>
             </div>
             <div className="auth-hero-art reveal delay-1">
-              <div className="hero-ring" />
               <div className="hero-boss-frame">
                 <img className="hero-boss" src={worldBossImage} alt="World boss" />
-                <div className="hero-sprites">
-                  <img className="hero-sprite sprite-knight" src={knightSprite} alt="Knight" />
-                  <img className="hero-sprite sprite-mage" src={mageSprite} alt="Mage" />
-                  <img className="hero-sprite sprite-archer" src={archerSprite} alt="Archer" />
-                </div>
               </div>
             </div>
           </div>
