@@ -4100,13 +4100,13 @@ function App() {
               <div className="buygold-grid">
                 {GOLD_PACKAGES.map((pack) => (
                   <div key={pack.id} className="shop-card buygold-card">
+                    <img className="shop-icon" src={pack.image} alt="Gold pack" />
                     <div className="shop-title">{formatNumber(pack.gold)} Gold</div>
                     <div className="shop-desc">Instant delivery</div>
                     <div className="shop-meta">
                       <img className="icon-img small" src={iconSolana} alt="" />
                       Price: {pack.sol} SOL
                     </div>
-                    <img className="shop-icon" src={pack.image} alt="Gold pack" />
                     <button
                       type="button"
                       disabled={buyGoldLoading === pack.id}
