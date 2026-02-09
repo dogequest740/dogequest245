@@ -2424,6 +2424,8 @@ function App() {
   const [withdrawError, setWithdrawError] = useState('')
   const [buyGoldError, setBuyGoldError] = useState('')
   const [buyGoldLoading, setBuyGoldLoading] = useState<string | null>(null)
+  const [solBalance, setSolBalance] = useState(0)
+  const [solBalanceLoading, setSolBalanceLoading] = useState(false)
   const [stakeAmount, setStakeAmount] = useState('')
   const [stakeError, setStakeError] = useState('')
   const [stakeTab, setStakeTab] = useState<'stake' | 'my'>('stake')
@@ -2743,6 +2745,32 @@ function App() {
     void loadAdminData()
   }, [activePanel, isAdmin])
 
+  useEffect(() => {
+    if (activePanel !== 'buygold') return
+    if (!publicKey) {
+      setSolBalance(0)
+      return
+    }
+    let active = true
+    const loadBalance = async () => {
+      setSolBalanceLoading(true)
+      try {
+        const balance = await connection.getBalance(publicKey)
+        if (active) {
+          setSolBalance(balance / LAMPORTS_PER_SOL)
+        }
+      } catch (error) {
+        console.warn('Balance load failed', error)
+      } finally {
+        if (active) setSolBalanceLoading(false)
+      }
+    }
+    void loadBalance()
+    return () => {
+      active = false
+    }
+  }, [activePanel, publicKey, connection])
+
   const startBattleOnce = () => {
     const state = gameStateRef.current
     if (!state) return
@@ -3050,7 +3078,8 @@ function App() {
       setActivePanel(null)
     } catch (error) {
       console.warn('Gold purchase failed', error)
-      setBuyGoldError('Transaction failed or was cancelled.')
+      const message = error instanceof Error ? error.message : String(error)
+      setBuyGoldError(`Transaction failed: ${message}`)
     } finally {
       setBuyGoldLoading(null)
     }
@@ -4057,6 +4086,13 @@ function App() {
               </button>
             </div>
             <div className="withdraw-body buygold-body">
+              <div className="withdraw-info">
+                <span className="withdraw-info-label">
+                  <img className="icon-img small" src={iconSolana} alt="" />
+                  Wallet balance
+                </span>
+                <strong>{solBalanceLoading ? 'Loading...' : `${solBalance.toFixed(4)} SOL`}</strong>
+              </div>
               <div className="buygold-grid">
                 {GOLD_PACKAGES.map((pack) => (
                   <div key={pack.id} className="shop-card buygold-card">
