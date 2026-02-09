@@ -1018,6 +1018,46 @@
   display: grid;
   gap: 16px;
   z-index: 1;
+  position: relative;
+  padding-top: 18px;
+}
+
+.auth-section::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(214, 178, 95, 0.7), transparent);
+  box-shadow: 0 0 10px rgba(214, 178, 95, 0.35);
+}
+
+.auth-section::after {
+  content: '';
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  width: 120px;
+  height: 12px;
+  transform: translateX(-50%);
+  background:
+    radial-gradient(circle at 6px 6px, rgba(214, 178, 95, 0.6) 2px, transparent 3px),
+    radial-gradient(circle at 24px 6px, rgba(214, 178, 95, 0.4) 2px, transparent 3px),
+    radial-gradient(circle at 42px 6px, rgba(214, 178, 95, 0.6) 2px, transparent 3px),
+    radial-gradient(circle at 60px 6px, rgba(214, 178, 95, 0.4) 2px, transparent 3px),
+    radial-gradient(circle at 78px 6px, rgba(214, 178, 95, 0.6) 2px, transparent 3px),
+    radial-gradient(circle at 96px 6px, rgba(214, 178, 95, 0.4) 2px, transparent 3px);
+  opacity: 0.8;
+}
+
+.auth-section.highlight {
+  padding-top: 26px;
+}
+
+.auth-section.highlight::before,
+.auth-section.highlight::after {
+  opacity: 0.6;
 }
 
 .auth-section h2 {
