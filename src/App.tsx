@@ -3485,7 +3485,7 @@ function App() {
   const topbarClass = stage === 'select' ? 'topbar centered' : 'topbar'
 
   return (
-    <div className="app">
+    <div className={`app ${stage === 'auth' ? 'auth-mode' : ''}`}>
       <audio ref={audioRef} src={bgMusic} preload="auto" />
       {stage !== 'auth' && (
         <header className={topbarClass}>

@@ -10,6 +10,17 @@
   overflow: hidden;
 }
 
+.app.auth-mode {
+  height: auto;
+  overflow: auto;
+}
+
+.app.auth-mode .auth-page {
+  height: auto;
+  max-height: none;
+  overflow: visible;
+}
+
 .topbar {
   display: flex;
   justify-content: space-between;
