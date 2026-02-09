@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useWallet } from '@solana/wallet-adapter-react'
+import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
+import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
 import knightSprite from './assets/knight.png'
 import mageSprite from './assets/mage.png'
 import archerSprite from './assets/archer.png'
@@ -699,6 +700,12 @@ const WITHDRAW_MIN = 1000
 const STAKE_DURATION = 12 * 60 * 60
 const STAKE_BONUS = 0.1
 const STAKE_MIN = 50
+const GOLD_STORE_WALLET = new PublicKey('9a5GXRjX6HKh9Yjc9d7gp9RFmuRvMQAcV1VJ9WV7LU8c')
+const GOLD_PACKAGES = [
+  { id: 'gold-50k', gold: 50000, sol: 0.05 },
+  { id: 'gold-100k', gold: 100000, sol: 0.1 },
+  { id: 'gold-500k', gold: 500000, sol: 0.4 },
+]
 
 const MONSTER_HP_TIER_TARGET = 30000
 const MONSTER_HP_TIER_EXCESS = 0.2
@@ -2400,13 +2407,14 @@ const drawGame = (
 }
 
 function App() {
-  const { connected, publicKey } = useWallet()
+  const { connected, publicKey, sendTransaction } = useWallet()
+  const { connection } = useConnection()
   const [stage, setStage] = useState<'auth' | 'select' | 'game'>('auth')
   const [selectedId, setSelectedId] = useState(CHARACTER_CLASSES[0].id)
   const [playerName, setPlayerName] = useState('')
   const [hud, setHud] = useState<HudState | null>(null)
   const [activePanel, setActivePanel] = useState<
-    'inventory' | 'dungeons' | 'shop' | 'quests' | 'worldboss' | 'admin' | 'withdraw' | 'stake' | null
+    'inventory' | 'dungeons' | 'shop' | 'quests' | 'worldboss' | 'admin' | 'withdraw' | 'stake' | 'buygold' | null
   >(null)
   const [inventoryTab, setInventoryTab] = useState<'equipment' | 'consumables'>('equipment')
   const [adminData, setAdminData] = useState<AdminData | null>(null)
@@ -2414,6 +2422,8 @@ function App() {
   const [adminError, setAdminError] = useState('')
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [withdrawError, setWithdrawError] = useState('')
+  const [buyGoldError, setBuyGoldError] = useState('')
+  const [buyGoldLoading, setBuyGoldLoading] = useState<string | null>(null)
   const [stakeAmount, setStakeAmount] = useState('')
   const [stakeError, setStakeError] = useState('')
   const [stakeTab, setStakeTab] = useState<'stake' | 'my'>('stake')
@@ -2717,6 +2727,10 @@ function App() {
     if (activePanel !== 'withdraw') {
       setWithdrawError('')
     }
+    if (activePanel !== 'buygold') {
+      setBuyGoldError('')
+      setBuyGoldLoading(null)
+    }
     if (activePanel !== 'stake') {
       setStakeError('')
       setStakeTab('stake')
@@ -2995,6 +3009,44 @@ function App() {
     syncHud()
     void saveGameState()
     setActivePanel(null)
+  }
+
+  const buyGoldPackage = async (packId: string) => {
+    const state = gameStateRef.current
+    if (!state || !publicKey) {
+      setBuyGoldError('Connect your wallet to buy gold.')
+      return
+    }
+    const pack = GOLD_PACKAGES.find((entry) => entry.id === packId)
+    if (!pack) return
+    setBuyGoldLoading(packId)
+    setBuyGoldError('')
+    try {
+      const lamports = Math.round(pack.sol * LAMPORTS_PER_SOL)
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash()
+      const tx = new Transaction({
+        feePayer: publicKey,
+        recentBlockhash: blockhash,
+      }).add(
+        SystemProgram.transfer({
+          fromPubkey: publicKey,
+          toPubkey: GOLD_STORE_WALLET,
+          lamports,
+        }),
+      )
+      const signature = await sendTransaction(tx, connection)
+      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
+      state.gold += pack.gold
+      pushLog(state.eventLog, `Purchased ${formatNumber(pack.gold)} gold.`)
+      syncHud()
+      void saveGameState()
+      setActivePanel(null)
+    } catch (error) {
+      console.warn('Gold purchase failed', error)
+      setBuyGoldError('Transaction failed or was cancelled.')
+    } finally {
+      setBuyGoldLoading(null)
+    }
   }
 
   const startStake = () => {
@@ -3316,10 +3368,20 @@ function App() {
           <div className="top-actions">
             {stage === 'game' && hud && (
               <div className="resources">
-                <div className="resource-chip gold">
+                <div className="resource-chip gold with-action">
                   <img className="icon-img" src={iconGold} alt="" />
-                  <span>Gold</span>
-                  <strong>{hud.gold}</strong>
+                  <div className="resource-text">
+                    <div className="resource-main">
+                      <span>Gold</span>
+                      <strong>{hud.gold}</strong>
+                    </div>
+                    <div className="resource-actions">
+                      <button type="button" className="resource-action" onClick={() => setActivePanel('buygold')}>
+                        <img className="icon-img tiny" src={iconGold} alt="" />
+                        Buy Gold
+                      </button>
+                    </div>
+                  </div>
                 </div>
                 <div className="resource-chip crystals with-action">
                   <img className="icon-img" src={iconCrystals} alt="" />
@@ -3973,6 +4035,43 @@ function App() {
                   Buy
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activePanel === 'buygold' && hud && (
+        <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Buy Gold</h3>
+              <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
+                Close
+              </button>
+            </div>
+            <div className="withdraw-body buygold-body">
+              <div className="buygold-grid">
+                {GOLD_PACKAGES.map((pack) => (
+                  <div key={pack.id} className="shop-card buygold-card">
+                    <div className="shop-title">{formatNumber(pack.gold)} Gold</div>
+                    <div className="shop-desc">Instant delivery</div>
+                    <div className="shop-meta">
+                      <img className="icon-img small" src={iconSolana} alt="" />
+                      Price: {pack.sol} SOL
+                    </div>
+                    <img className="shop-icon" src={iconGold} alt="Gold" />
+                    <button
+                      type="button"
+                      disabled={buyGoldLoading === pack.id}
+                      onClick={() => buyGoldPackage(pack.id)}
+                    >
+                      {buyGoldLoading === pack.id ? 'Processing...' : 'Buy'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+              {buyGoldError && <div className="withdraw-error">{buyGoldError}</div>}
+              <div className="withdraw-note">Gold is added instantly after the transaction confirms.</div>
             </div>
           </div>
         </div>

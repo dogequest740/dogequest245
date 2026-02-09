@@ -111,27 +111,23 @@
 }
 
 .resource-chip.with-action .resource-text {
-  gap: 8px;
-}
-
-.resource-chip.crystals.with-action .resource-text {
   display: flex;
   align-items: center;
   gap: 12px;
 }
 
-.resource-chip.crystals .resource-main {
+.resource-chip.with-action .resource-main {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.resource-chip.crystals .resource-actions {
+.resource-chip.with-action .resource-actions {
   display: flex;
   gap: 6px;
 }
 
-.resource-chip.crystals .resource-actions .resource-action {
+.resource-chip.with-action .resource-actions .resource-action {
   margin: 0;
 }
 
@@ -302,6 +298,17 @@
 
 .stake-row strong {
   color: #f8f6ef;
+}
+
+.buygold-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.buygold-card button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .resource-action:hover {
