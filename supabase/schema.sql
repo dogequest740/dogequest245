@@ -1,3 +1,5 @@
+create extension if not exists "pgcrypto";
+
 create table if not exists public.profiles (
   wallet text primary key,
   state jsonb not null,
@@ -45,6 +47,24 @@ with check (true);
 
 create policy "public world boss participants read/write"
 on public.world_boss_participants
+for all
+using (true)
+with check (true);
+
+create table if not exists public.withdrawals (
+  id uuid primary key default gen_random_uuid(),
+  wallet text not null,
+  name text not null,
+  crystals int not null,
+  sol_amount numeric not null,
+  status text not null default 'pending',
+  created_at timestamptz default now()
+);
+
+alter table public.withdrawals enable row level security;
+
+create policy "public withdrawals read/write"
+on public.withdrawals
 for all
 using (true)
 with check (true);

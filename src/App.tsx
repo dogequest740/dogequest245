@@ -228,11 +228,24 @@ type AdminSummary = {
   totalKills: number
   totalDungeons: number
   maxLevel: number
+  pendingWithdrawals: number
+  pendingCrystals: number
+}
+
+type WithdrawalRow = {
+  id: string
+  wallet: string
+  name: string
+  crystals: number
+  sol_amount: number
+  status: string
+  created_at: string
 }
 
 type AdminData = {
   summary: AdminSummary
   players: AdminPlayerRow[]
+  withdrawals: WithdrawalRow[]
 }
 type PlayerSpriteKey = 'knight' | 'mage' | 'archer'
 type PlayerSpriteSource = HTMLImageElement | HTMLCanvasElement
@@ -666,6 +679,8 @@ const DUNGEONS = DUNGEON_REQUIREMENTS.map((tierScore, index) => ({
 
 const WORLD_BOSS_DURATION = 5 * 60 * 60
 const WORLD_BOSS_REWARD = 1000
+const WITHDRAW_RATE = 10000
+const WITHDRAW_MIN = 1000
 
 const MONSTER_HP_TIER_TARGET = 30000
 const MONSTER_HP_TIER_EXCESS = 0.2
@@ -2339,12 +2354,14 @@ function App() {
   const [playerName, setPlayerName] = useState('')
   const [hud, setHud] = useState<HudState | null>(null)
   const [activePanel, setActivePanel] = useState<
-    'inventory' | 'dungeons' | 'shop' | 'quests' | 'worldboss' | 'admin' | null
+    'inventory' | 'dungeons' | 'shop' | 'quests' | 'worldboss' | 'admin' | 'withdraw' | null
   >(null)
   const [inventoryTab, setInventoryTab] = useState<'equipment' | 'consumables'>('equipment')
   const [adminData, setAdminData] = useState<AdminData | null>(null)
   const [adminLoading, setAdminLoading] = useState(false)
   const [adminError, setAdminError] = useState('')
+  const [withdrawAmount, setWithdrawAmount] = useState('')
+  const [withdrawError, setWithdrawError] = useState('')
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const gameStateRef = useRef<GameState | null>(null)
   const serverLoadedRef = useRef(false)
@@ -2618,6 +2635,9 @@ function App() {
     if (activePanel === 'inventory') {
       setInventoryTab('equipment')
     }
+    if (activePanel !== 'withdraw') {
+      setWithdrawError('')
+    }
   }, [activePanel])
 
   useEffect(() => {
@@ -2751,6 +2771,17 @@ function App() {
       setAdminLoading(false)
       return
     }
+
+    const { data: withdrawalsData, error: withdrawalsError } = await supabase
+      .from('withdrawals')
+      .select('id, wallet, name, crystals, sol_amount, status, created_at')
+      .order('created_at', { ascending: false })
+      .limit(200)
+    if (withdrawalsError) {
+      setAdminError('Failed to load withdrawals.')
+      setAdminLoading(false)
+      return
+    }
     const now = Date.now()
     const players: AdminPlayerRow[] = (data ?? []).map((row) => {
       const saved = (row.state as PersistedState | null) ?? null
@@ -2794,6 +2825,19 @@ function App() {
       { level: 0, tier: 0, gold: 0, crystals: 0, kills: 0, dungeons: 0, active: 0, maxLevel: 0 },
     )
 
+    const withdrawals: WithdrawalRow[] = (withdrawalsData ?? []).map((row) => ({
+      id: String(row.id),
+      wallet: row.wallet as string,
+      name: (row.name as string) || 'Unknown',
+      crystals: Number(row.crystals ?? 0),
+      sol_amount: Number(row.sol_amount ?? 0),
+      status: (row.status as string) || 'pending',
+      created_at: (row.created_at as string) || new Date(0).toISOString(),
+    }))
+
+    const pending = withdrawals.filter((entry) => entry.status === 'pending')
+    const pendingCrystals = pending.reduce((sum, entry) => sum + entry.crystals, 0)
+
     const summary: AdminSummary = {
       totalPlayers,
       active24h: totals.active,
@@ -2804,10 +2848,54 @@ function App() {
       totalKills: totals.kills,
       totalDungeons: totals.dungeons,
       maxLevel: totals.maxLevel,
+      pendingWithdrawals: pending.length,
+      pendingCrystals,
     }
 
-    setAdminData({ summary, players })
+    setAdminData({ summary, players, withdrawals })
     setAdminLoading(false)
+  }
+
+  const submitWithdrawal = async () => {
+    const state = gameStateRef.current
+    const wallet = publicKey?.toBase58()
+    if (!state || !wallet || !supabase) return
+
+    const amount = Math.floor(Number(withdrawAmount))
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setWithdrawError('Enter a valid amount.')
+      return
+    }
+    if (amount < WITHDRAW_MIN) {
+      setWithdrawError(`Minimum withdrawal is ${WITHDRAW_MIN} crystals.`)
+      return
+    }
+    if (amount > state.crystals) {
+      setWithdrawError('Not enough crystals.')
+      return
+    }
+
+    const solAmount = Number((amount / WITHDRAW_RATE).toFixed(4))
+    const { error } = await supabase.from('withdrawals').insert({
+      wallet,
+      name: state.name,
+      crystals: amount,
+      sol_amount: solAmount,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+    })
+    if (error) {
+      setWithdrawError('Failed to submit request.')
+      return
+    }
+
+    state.crystals = Math.max(0, state.crystals - amount)
+    pushLog(state.eventLog, `Withdrawal requested: ${amount} crystals.`)
+    setWithdrawAmount('')
+    setWithdrawError('')
+    syncHud()
+    void saveGameState()
+    setActivePanel(null)
   }
 
   const addConsumable = (state: GameState, type: ConsumableType) => {
@@ -3080,10 +3168,15 @@ function App() {
                   <span>Gold</span>
                   <strong>{hud.gold}</strong>
                 </div>
-                <div className="resource-chip crystals">
+                <div className="resource-chip crystals with-action">
                   <img className="icon-img" src={iconCrystals} alt="" />
-                  <span>Crystals</span>
-                  <strong>{hud.crystals}</strong>
+                  <div className="resource-text">
+                    <span>Crystals</span>
+                    <strong>{hud.crystals}</strong>
+                    <button type="button" className="resource-action" onClick={() => setActivePanel('withdraw')}>
+                      Withdraw
+                    </button>
+                  </div>
                 </div>
                 <div className="resource-chip energy">
                   <span className="icon icon-energy" aria-hidden />
@@ -3716,6 +3809,48 @@ function App() {
         </div>
       )}
 
+      {activePanel === 'withdraw' && hud && (
+        <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Withdraw Crystals</h3>
+              <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
+                Close
+              </button>
+            </div>
+            <div className="withdraw-body">
+              <div className="withdraw-info">
+                Exchange rate: <strong>{WITHDRAW_RATE} crystals = 1 SOL</strong>
+              </div>
+              <div className="withdraw-info">
+                Minimum withdrawal: <strong>{WITHDRAW_MIN} crystals</strong>
+              </div>
+              <div className="withdraw-info">
+                Available: <strong>{formatNumber(hud.crystals)} crystals</strong>
+              </div>
+              <label className="withdraw-label">
+                Amount (crystals)
+                <input
+                  type="number"
+                  min={WITHDRAW_MIN}
+                  step={1}
+                  value={withdrawAmount}
+                  onChange={(event) => setWithdrawAmount(event.target.value.replace(/[^0-9]/g, ''))}
+                  placeholder="1000"
+                />
+              </label>
+              {withdrawError && <div className="withdraw-error">{withdrawError}</div>}
+              <button type="button" className="withdraw-submit" onClick={submitWithdrawal}>
+                Submit request
+              </button>
+              <div className="withdraw-note">
+                Requests are reviewed manually. You will receive SOL after approval.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {activePanel === 'quests' && hud && (
         <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
           <div className="modal wide" onClick={(event) => event.stopPropagation()}>
@@ -3877,6 +4012,11 @@ function App() {
                         <div className="admin-sub">{formatNumber(adminData.summary.totalCrystals)} crystals</div>
                       </div>
                       <div className="admin-card">
+                        <div className="admin-label">Withdrawals</div>
+                        <div className="admin-value">{formatNumber(adminData.summary.pendingWithdrawals)} pending</div>
+                        <div className="admin-sub">{formatNumber(adminData.summary.pendingCrystals)} crystals</div>
+                      </div>
+                      <div className="admin-card">
                         <div className="admin-label">Dungeons</div>
                         <div className="admin-value">{formatNumber(adminData.summary.totalDungeons)}</div>
                         <div className="admin-sub">Runs total</div>
@@ -3905,6 +4045,33 @@ function App() {
                           <span>{formatNumber(player.dungeons)}</span>
                           <span>{formatDateTime(player.updatedAt)}</span>
                           <span className="wallet-chip">{formatShortWallet(player.wallet)}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="admin-table withdrawals">
+                      <div className="admin-row header withdrawals">
+                        <span>Request</span>
+                        <span>Player</span>
+                        <span>Crystals</span>
+                        <span>SOL</span>
+                        <span>Status</span>
+                        <span>Created</span>
+                        <span>Wallet</span>
+                      </div>
+                      {adminData.withdrawals.length === 0 && (
+                        <div className="admin-row empty">
+                          <span>No withdrawal requests yet.</span>
+                        </div>
+                      )}
+                      {adminData.withdrawals.map((row) => (
+                        <div key={row.id} className="admin-row withdrawals">
+                          <span>#{row.id.slice(0, 6)}</span>
+                          <span>{row.name}</span>
+                          <span>{formatNumber(row.crystals)}</span>
+                          <span>{row.sol_amount}</span>
+                          <span className={`status ${row.status}`}>{row.status}</span>
+                          <span>{formatDateTime(row.created_at)}</span>
+                          <span className="wallet-chip">{formatShortWallet(row.wallet)}</span>
                         </div>
                       ))}
                     </div>
