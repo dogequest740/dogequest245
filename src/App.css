@@ -783,9 +783,10 @@
   padding: 48px 40px;
   border-radius: 26px;
   border: 1px solid rgba(214, 178, 95, 0.35);
-  max-height: calc(100vh - 64px);
-  overflow: auto;
+  height: calc(100vh - 64px);
+  overflow-y: auto;
   overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
   background:
     radial-gradient(120% 120% at 20% 10%, rgba(70, 40, 20, 0.28), transparent 60%),
     radial-gradient(120% 120% at 80% 20%, rgba(40, 60, 90, 0.25), transparent 65%),
