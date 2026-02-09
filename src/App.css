@@ -231,6 +231,17 @@
   flex: 0 0 auto;
 }
 
+.resource-action.buy-gold {
+  min-height: 38px;
+  padding: 6px 12px;
+}
+
+.resource-action.buy-gold .icon-img,
+.resource-action.buy-gold .icon-img.tiny {
+  width: 34px;
+  height: 34px;
+}
+
 .resource-action.secondary {
   background: rgba(14, 20, 30, 0.65);
   color: #d6e8ff;
@@ -337,9 +348,11 @@
 
 .buygold-card .shop-meta {
   justify-content: center;
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #f7e0a6;
+  letter-spacing: 0.3px;
+  text-shadow: 0 0 10px rgba(214, 178, 95, 0.35);
 }
 
 .buygold-card button {

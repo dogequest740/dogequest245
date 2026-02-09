@@ -3416,7 +3416,7 @@ function App() {
                       <strong>{hud.gold}</strong>
                     </div>
                     <div className="resource-actions">
-                      <button type="button" className="resource-action" onClick={() => setActivePanel('buygold')}>
+                      <button type="button" className="resource-action buy-gold" onClick={() => setActivePanel('buygold')}>
                         <img className="icon-img tiny" src={iconBuyGold} alt="" />
                         Buy Gold
                       </button>
