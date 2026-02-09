@@ -107,11 +107,32 @@
 }
 
 .resource-chip.with-action {
-  align-items: flex-start;
+  align-items: center;
 }
 
 .resource-chip.with-action .resource-text {
-  gap: 4px;
+  gap: 8px;
+}
+
+.resource-chip.crystals.with-action .resource-text {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.resource-chip.crystals .resource-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.resource-chip.crystals .resource-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.resource-chip.crystals .resource-actions .resource-action {
+  margin: 0;
 }
 
 .resource-timer {

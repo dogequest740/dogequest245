@@ -3298,16 +3298,20 @@ function App() {
                 <div className="resource-chip crystals with-action">
                   <img className="icon-img" src={iconCrystals} alt="" />
                   <div className="resource-text">
-                    <span>Crystals</span>
-                    <strong>{hud.crystals}</strong>
-                    <button type="button" className="resource-action" onClick={() => setActivePanel('withdraw')}>
-                      <img className="icon-img tiny" src={iconWithdraw} alt="" />
-                      Withdraw
-                    </button>
-                    <button type="button" className="resource-action secondary" onClick={() => setActivePanel('stake')}>
-                      <img className="icon-img tiny" src={iconStacking} alt="" />
-                      Staking
-                    </button>
+                    <div className="resource-main">
+                      <span>Crystals</span>
+                      <strong>{hud.crystals}</strong>
+                    </div>
+                    <div className="resource-actions">
+                      <button type="button" className="resource-action" onClick={() => setActivePanel('withdraw')}>
+                        <img className="icon-img tiny" src={iconWithdraw} alt="" />
+                        Withdraw
+                      </button>
+                      <button type="button" className="resource-action secondary" onClick={() => setActivePanel('stake')}>
+                        <img className="icon-img tiny" src={iconStacking} alt="" />
+                        Staking
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <div className="resource-chip energy">
