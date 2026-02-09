@@ -1,0 +1,22 @@
+[toolchain]
+anchor_version = "0.29.0"
+
+[features]
+seeds = true
+skip-lint = false
+
+[programs.localnet]
+dogequest_payments = "11111111111111111111111111111111"
+
+[programs.devnet]
+dogequest_payments = "11111111111111111111111111111111"
+
+[programs.mainnet]
+dogequest_payments = "11111111111111111111111111111111"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "mainnet"
+wallet = "~/.config/solana/id.json"
