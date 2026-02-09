@@ -37,6 +37,7 @@ import iconAutoBattle from './assets/icons/autobattle.png'
 import iconWithdraw from './assets/icons/withdraw.png'
 import iconSolana from './assets/icons/solana.png'
 import iconStacking from './assets/icons/stacking.png'
+import iconBuyGold from './assets/icons/buy-gold.png'
 import iconWeapon from './assets/icons/armory-weapon.png'
 import iconArmor from './assets/icons/armory-armor.png'
 import iconHead from './assets/icons/armory-head.png'
@@ -44,6 +45,9 @@ import iconLegs from './assets/icons/armory-legs.png'
 import iconBoots from './assets/icons/armory-boots.png'
 import iconArtifact from './assets/icons/armory-artifact.png'
 import iconQuests from './assets/icons/quests.png'
+import goldSmallImage from './assets/shop/gold-small.png'
+import goldMiddleImage from './assets/shop/gold-middle.png'
+import goldLargeImage from './assets/shop/gold-large.png'
 import worldBossImage from './assets/boss/world-boss.jpg'
 import bgMusic from './assets/audio/bg-music.mp3'
 import { supabase } from './lib/supabase'
@@ -702,9 +706,9 @@ const STAKE_BONUS = 0.1
 const STAKE_MIN = 50
 const GOLD_STORE_WALLET = new PublicKey('9a5GXRjX6HKh9Yjc9d7gp9RFmuRvMQAcV1VJ9WV7LU8c')
 const GOLD_PACKAGES = [
-  { id: 'gold-50k', gold: 50000, sol: 0.05 },
-  { id: 'gold-100k', gold: 100000, sol: 0.1 },
-  { id: 'gold-500k', gold: 500000, sol: 0.4 },
+  { id: 'gold-50k', gold: 50000, sol: 0.05, image: goldSmallImage },
+  { id: 'gold-100k', gold: 100000, sol: 0.1, image: goldMiddleImage },
+  { id: 'gold-500k', gold: 500000, sol: 0.4, image: goldLargeImage },
 ]
 
 const MONSTER_HP_TIER_TARGET = 30000
@@ -3413,7 +3417,7 @@ function App() {
                     </div>
                     <div className="resource-actions">
                       <button type="button" className="resource-action" onClick={() => setActivePanel('buygold')}>
-                        <img className="icon-img tiny" src={iconGold} alt="" />
+                        <img className="icon-img tiny" src={iconBuyGold} alt="" />
                         Buy Gold
                       </button>
                     </div>
@@ -4102,7 +4106,7 @@ function App() {
                       <img className="icon-img small" src={iconSolana} alt="" />
                       Price: {pack.sol} SOL
                     </div>
-                    <img className="shop-icon" src={iconGold} alt="Gold" />
+                    <img className="shop-icon" src={pack.image} alt="Gold pack" />
                     <button
                       type="button"
                       disabled={buyGoldLoading === pack.id}
