@@ -44,6 +44,7 @@ import iconBoots from './assets/icons/armory-boots.png'
 import iconArtifact from './assets/icons/armory-artifact.png'
 import iconQuests from './assets/icons/quests.png'
 import worldBossImage from './assets/boss/world-boss.jpg'
+import bgMusic from './assets/audio/bg-music.mp3'
 import { supabase } from './lib/supabase'
 import './App.css'
 
@@ -2416,8 +2417,10 @@ function App() {
   const [stakeAmount, setStakeAmount] = useState('')
   const [stakeError, setStakeError] = useState('')
   const [stakeTab, setStakeTab] = useState<'stake' | 'my'>('stake')
+  const [musicEnabled, setMusicEnabled] = useState(true)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const gameStateRef = useRef<GameState | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
   const serverLoadedRef = useRef(false)
   const pendingProfileRef = useRef<PersistedState | null>(null)
   const spriteCacheRef = useRef<PlayerSpriteMap>({
@@ -2465,6 +2468,28 @@ function App() {
     if (!wallet) return false
     return adminWallets.includes(wallet)
   }, [publicKey, adminWallets])
+
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    audio.loop = true
+    audio.volume = 0.15
+    if (musicEnabled) {
+      const tryPlay = async () => {
+        try {
+          await audio.play()
+        } catch {
+          const unlock = () => {
+            audio.play().catch(() => {})
+          }
+          window.addEventListener('pointerdown', unlock, { once: true })
+        }
+      }
+      void tryPlay()
+    } else {
+      audio.pause()
+    }
+  }, [musicEnabled])
 
   useEffect(() => {
     ;(Object.keys(PLAYER_SPRITE_SOURCES) as PlayerSpriteKey[]).forEach((key) => {
@@ -3281,6 +3306,7 @@ function App() {
 
   return (
     <div className="app">
+      <audio ref={audioRef} src={bgMusic} preload="auto" />
       {stage !== 'auth' && (
         <header className={topbarClass}>
           <div>
@@ -3332,8 +3358,15 @@ function App() {
               </div>
             )}
           </div>
-          <div className="wallet">
+            <div className="wallet">
             <div className="wallet-row">
+              <button
+                type="button"
+                className={`music-toggle ${musicEnabled ? 'on' : 'off'}`}
+                onClick={() => setMusicEnabled((prev) => !prev)}
+              >
+                {musicEnabled ? 'Music On' : 'Music Off'}
+              </button>
               <WalletMultiButton className="wallet-button" />
             </div>
             {(connected || isAdmin) && (
