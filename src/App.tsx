@@ -3753,15 +3753,6 @@ function App() {
                     {hud.speedBuffTime > 0 && <div>Speed Buff {Math.ceil(hud.speedBuffTime)}s</div>}
                     {hud.attackSpeedBuffTime > 0 && <div>ATK SPD Buff {Math.ceil(hud.attackSpeedBuffTime)}s</div>}
                   </div>
-                  {!hud.starterPackPurchased && (
-                    <button type="button" className="starter-pack-btn" onClick={() => setActivePanel('starterpack')}>
-                      <img className="starter-pack-icon" src={iconStarterPack} alt="" />
-                      <div className="starter-pack-text">
-                        <span>Starter Pack</span>
-                        <strong>One-time offer</strong>
-                      </div>
-                    </button>
-                  )}
                   <div className="menu-stack">
                     <button type="button" className="menu-big" onClick={() => setActivePanel('inventory')}>
                       <img className="icon-img" src={iconInventory} alt="" />
@@ -3794,6 +3785,19 @@ function App() {
             </aside>
             <div className="game-main">
               <div className="canvas-wrap">
+                {!hud?.starterPackPurchased && (
+                  <button
+                    type="button"
+                    className="starter-pack-btn starter-pack-float"
+                    onClick={() => setActivePanel('starterpack')}
+                  >
+                    <img className="starter-pack-icon" src={iconStarterPack} alt="" />
+                    <div className="starter-pack-text">
+                      <span>Starter Pack</span>
+                      <strong>One-time offer</strong>
+                    </div>
+                  </button>
+                )}
                 <canvas ref={canvasRef} className="game-canvas" />
                 <div className="buff-stack">
                   <div className={`buff-chip ${hud?.speedBuffTime ? 'active' : ''}`}>

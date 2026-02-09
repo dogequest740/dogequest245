@@ -1093,6 +1093,15 @@
     inset 0 0 0 1px rgba(255, 255, 255, 0.05);
 }
 
+.starter-pack-float {
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 3;
+  width: 220px;
+}
+
 .starter-pack-btn:hover {
   transform: translateY(-1px);
   box-shadow:
