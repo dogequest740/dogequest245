@@ -42,6 +42,9 @@
 .app.mobile .resources {
   justify-content: flex-start;
   gap: 8px;
+  width: 100%;
+  flex-direction: column;
+  align-items: stretch;
 }
 
 .app.mobile .resource-chip {
@@ -56,6 +59,37 @@
 .app.mobile .resource-action {
   font-size: 10px;
   min-height: 30px;
+}
+
+.app.mobile .resource-chip.with-action .resource-actions {
+  display: none;
+}
+
+.app.mobile .resources-strip {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+
+.app.mobile .resources-strip .resource-chip {
+  flex: 0 0 auto;
+  min-width: 160px;
+  scroll-snap-align: start;
+}
+
+.app.mobile .resources-actions-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.app.mobile .resources-actions-row .resource-action {
+  flex: 1 1 120px;
+  justify-content: center;
+  min-height: 36px;
 }
 
 .app.mobile .wallet {

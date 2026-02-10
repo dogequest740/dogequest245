@@ -3520,6 +3520,75 @@ function App() {
   }, [hud?.level, hud?.monsterKills, hud?.tierScore, hud?.dungeonRuns, hud?.questStates])
 
   const topbarClass = stage === 'select' ? 'topbar centered' : 'topbar'
+  const resourceChips = hud ? (
+    <>
+      <div className="resource-chip gold with-action">
+        <img className="icon-img" src={iconGold} alt="" />
+        <div className="resource-text">
+          <div className="resource-main">
+            <span>Gold</span>
+            <strong>{hud.gold}</strong>
+          </div>
+          <div className="resource-actions">
+            <button type="button" className="resource-action buy-gold" onClick={() => setActivePanel('buygold')}>
+              <img className="icon-img tiny" src={iconBuyGold} alt="" />
+              Buy Gold
+            </button>
+          </div>
+        </div>
+      </div>
+      <div className="resource-chip crystals with-action">
+        <img className="icon-img" src={iconCrystals} alt="" />
+        <div className="resource-text">
+          <div className="resource-main">
+            <span>Crystals</span>
+            <strong>{hud.crystals}</strong>
+          </div>
+          <div className="resource-actions">
+            <button type="button" className="resource-action" onClick={() => setActivePanel('withdraw')}>
+              <img className="icon-img tiny" src={iconWithdraw} alt="" />
+              Withdraw
+            </button>
+            <button type="button" className="resource-action secondary" onClick={() => setActivePanel('stake')}>
+              <img className="icon-img tiny" src={iconStacking} alt="" />
+              Staking
+            </button>
+          </div>
+        </div>
+      </div>
+      <div className="resource-chip energy">
+        <span className="icon icon-energy" aria-hidden />
+        <div className="resource-text">
+          <span>Energy</span>
+          <strong>
+            {hud.energy}/{hud.energyMax}
+          </strong>
+          <small className="resource-timer">Next in {formatTimer(hud.energyTimer)}</small>
+        </div>
+      </div>
+      <div className="resource-chip tier">
+        <span className="icon icon-tier" aria-hidden />
+        <span>Tier</span>
+        <strong>{hud.tierScore}</strong>
+      </div>
+    </>
+  ) : null
+  const resourceActionRow = (
+    <div className="resources-actions-row">
+      <button type="button" className="resource-action buy-gold" onClick={() => setActivePanel('buygold')}>
+        <img className="icon-img tiny" src={iconBuyGold} alt="" />
+        Buy Gold
+      </button>
+      <button type="button" className="resource-action" onClick={() => setActivePanel('withdraw')}>
+        <img className="icon-img tiny" src={iconWithdraw} alt="" />
+        Withdraw
+      </button>
+      <button type="button" className="resource-action secondary" onClick={() => setActivePanel('stake')}>
+        <img className="icon-img tiny" src={iconStacking} alt="" />
+        Staking
+      </button>
+    </div>
+  )
 
   return (
     <div className={`app ${stage === 'auth' ? 'auth-mode' : ''} ${isMobile ? 'mobile' : ''}`}>
@@ -3532,56 +3601,15 @@ function App() {
           </div>
           <div className="top-actions">
             {stage === 'game' && hud && (
-              <div className="resources">
-                <div className="resource-chip gold with-action">
-                  <img className="icon-img" src={iconGold} alt="" />
-                  <div className="resource-text">
-                    <div className="resource-main">
-                      <span>Gold</span>
-                      <strong>{hud.gold}</strong>
-                    </div>
-                    <div className="resource-actions">
-                      <button type="button" className="resource-action buy-gold" onClick={() => setActivePanel('buygold')}>
-                        <img className="icon-img tiny" src={iconBuyGold} alt="" />
-                        Buy Gold
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <div className="resource-chip crystals with-action">
-                  <img className="icon-img" src={iconCrystals} alt="" />
-                  <div className="resource-text">
-                    <div className="resource-main">
-                      <span>Crystals</span>
-                      <strong>{hud.crystals}</strong>
-                    </div>
-                    <div className="resource-actions">
-                      <button type="button" className="resource-action" onClick={() => setActivePanel('withdraw')}>
-                        <img className="icon-img tiny" src={iconWithdraw} alt="" />
-                        Withdraw
-                      </button>
-                      <button type="button" className="resource-action secondary" onClick={() => setActivePanel('stake')}>
-                        <img className="icon-img tiny" src={iconStacking} alt="" />
-                        Staking
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <div className="resource-chip energy">
-                  <span className="icon icon-energy" aria-hidden />
-                  <div className="resource-text">
-                    <span>Energy</span>
-                    <strong>
-                      {hud.energy}/{hud.energyMax}
-                    </strong>
-                    <small className="resource-timer">Next in {formatTimer(hud.energyTimer)}</small>
-                  </div>
-                </div>
-                <div className="resource-chip tier">
-                  <span className="icon icon-tier" aria-hidden />
-                  <span>Tier</span>
-                  <strong>{hud.tierScore}</strong>
-                </div>
+              <div className={`resources ${isMobile ? 'mobile-resources' : ''}`}>
+                {isMobile ? (
+                  <>
+                    <div className="resources-strip">{resourceChips}</div>
+                    {resourceActionRow}
+                  </>
+                ) : (
+                  resourceChips
+                )}
               </div>
             )}
           </div>
