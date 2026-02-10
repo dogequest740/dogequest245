@@ -2860,7 +2860,8 @@ function App() {
   useEffect(() => {
     if (activePanel !== 'withdraw') return
     const wallet = publicKey?.toBase58()
-    if (!wallet || !supabase) {
+    const client = supabase
+    if (!wallet || !client) {
       setPlayerWithdrawals([])
       return
     }
@@ -2868,7 +2869,7 @@ function App() {
     const loadWithdrawals = async () => {
       setPlayerWithdrawalsLoading(true)
       setPlayerWithdrawalsError('')
-      const { data, error } = await supabase
+      const { data, error } = await client
         .from('withdrawals')
         .select('id, wallet, name, crystals, sol_amount, status, created_at')
         .eq('wallet', wallet)
