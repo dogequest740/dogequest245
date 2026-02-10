@@ -3955,7 +3955,65 @@ function App() {
             </div>
           </div>
 
-          <div className="auth-footer reveal delay-7">
+          <div className="auth-section roadmap reveal delay-7">
+            <h2>Roadmap</h2>
+            <div className="roadmap-grid">
+              <div className="roadmap-item">
+                <div className="roadmap-step">01</div>
+                <div>Game launch</div>
+              </div>
+              <div className="roadmap-item">
+                <div className="roadmap-step">02</div>
+                <div>Project token launch</div>
+              </div>
+              <div className="roadmap-item">
+                <div className="roadmap-step">03</div>
+                <div>Token integration in-game</div>
+              </div>
+              <div className="roadmap-item">
+                <div className="roadmap-step">04</div>
+                <div>In‑game chat</div>
+              </div>
+              <div className="roadmap-item">
+                <div className="roadmap-step">05</div>
+                <div>Daily rewards</div>
+              </div>
+              <div className="roadmap-item">
+                <div className="roadmap-step">06</div>
+                <div>Guild system</div>
+              </div>
+              <div className="roadmap-item">
+                <div className="roadmap-step">07</div>
+                <div>Guild wars</div>
+              </div>
+              <div className="roadmap-item">
+                <div className="roadmap-step">08</div>
+                <div>PvP arena with crystal wagers</div>
+              </div>
+              <div className="roadmap-item">
+                <div className="roadmap-step">09</div>
+                <div>Daily quests</div>
+              </div>
+              <div className="roadmap-item">
+                <div className="roadmap-step">10</div>
+                <div>Player market for equipment trading</div>
+              </div>
+              <div className="roadmap-item">
+                <div className="roadmap-step">11</div>
+                <div>Limited-time bosses & maps with unique rewards</div>
+              </div>
+              <div className="roadmap-item">
+                <div className="roadmap-step">12</div>
+                <div>Customization: skins & profile avatars</div>
+              </div>
+              <div className="roadmap-item">
+                <div className="roadmap-step">13</div>
+                <div>NFT collection</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="auth-footer reveal delay-8">
             <div>
               <div className="auth-footer-title">Ready to enter the realm?</div>
               <div className="auth-footer-copy">Connect your wallet and choose a class to begin.</div>
