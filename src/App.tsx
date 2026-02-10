@@ -1802,10 +1802,6 @@ const createMonster = (id: number, tierScore = 0): Monster => {
   }
 }
 
-const cloneQuestStates = (questStates: Record<string, QuestState>) => {
-  return Object.fromEntries(Object.entries(questStates).map(([id, state]) => [id, { ...state }]))
-}
-
 const buildHud = (state: GameState): HudState => ({
   name: state.name,
   classLabel: state.classLabel,
@@ -1838,7 +1834,7 @@ const buildHud = (state: GameState): HudState => ({
   monsterKills: state.monsterKills,
   dungeonRuns: state.dungeonRuns,
   worldBoss: state.worldBoss,
-  questStates: cloneQuestStates(state.questStates),
+  questStates: state.questStates,
   starterPackPurchased: state.starterPackPurchased,
   stake: state.stake,
 })
@@ -3447,7 +3443,10 @@ function App() {
     if (!questState || questState.claimed) return
     const progress = getQuestProgress(state, quest)
     if (progress < quest.target) return
-    questState.claimed = true
+    state.questStates = {
+      ...state.questStates,
+      [quest.id]: { ...questState, claimed: true },
+    }
     state.gold += quest.rewardGold
     const rewardParts = [`+${quest.rewardGold} gold`]
     if (quest.rewardItem) {
