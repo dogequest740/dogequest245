@@ -3990,6 +3990,30 @@ function App() {
                   Auto Battle: {hud?.autoBattle ? 'ON' : 'OFF'}
                 </button>
               </div>
+              {isMobile && (
+                <div className="mobile-nav">
+                  <button type="button" onClick={() => setActivePanel('inventory')}>
+                    <img className="icon-img" src={iconInventory} alt="" />
+                    <span>Inventory</span>
+                  </button>
+                  <button type="button" onClick={() => setActivePanel('dungeons')}>
+                    <img className="icon-img" src={iconDungeons} alt="" />
+                    <span>Dungeons</span>
+                  </button>
+                  <button type="button" onClick={() => setActivePanel('shop')}>
+                    <img className="icon-img" src={iconShop} alt="" />
+                    <span>Shop</span>
+                  </button>
+                  <button type="button" onClick={() => setActivePanel('quests')}>
+                    <img className="icon-img" src={iconQuests} alt="" />
+                    <span>Quests</span>
+                  </button>
+                  <button type="button" onClick={() => setActivePanel('worldboss')}>
+                    <img className="icon-img" src={iconWorldBoss} alt="" />
+                    <span>Boss</span>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </section>
