@@ -3608,6 +3608,65 @@ button.ghost {
   color: rgba(231, 240, 245, 0.65);
 }
 
+.withdraw-requests {
+  margin-top: 6px;
+  display: grid;
+  gap: 8px;
+}
+
+.withdraw-requests-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: rgba(231, 240, 245, 0.8);
+}
+
+.withdraw-requests-list {
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.withdraw-row {
+  display: grid;
+  grid-template-columns: 0.9fr 0.9fr 1.1fr 1fr 1.4fr;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(10, 14, 20, 0.7);
+  border: 1px solid rgba(140, 110, 255, 0.18);
+  font-size: 11px;
+  color: #d7d8ff;
+  font-family: 'Manrope', system-ui, sans-serif;
+}
+
+.withdraw-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.withdraw-cell.status {
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.4px;
+}
+
+.withdraw-cell.status.pending {
+  color: #f6d488;
+}
+
+.withdraw-cell.status.paid {
+  color: #7bd88f;
+}
+
+.withdraw-cell.date {
+  color: rgba(231, 240, 245, 0.6);
+}
+
 .modal-actions-inline {
   display: inline-flex;
   gap: 8px;
@@ -3759,6 +3818,16 @@ button.ghost {
   padding: 2px 8px;
   border-radius: 999px;
   width: fit-content;
+}
+
+.wallet-chip.copy-chip {
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.wallet-chip.copy-chip:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 12px rgba(140, 110, 255, 0.25);
 }
 
 .muted {

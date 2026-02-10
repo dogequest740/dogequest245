@@ -2450,6 +2450,9 @@ function App() {
   const [adminError, setAdminError] = useState('')
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [withdrawError, setWithdrawError] = useState('')
+  const [playerWithdrawals, setPlayerWithdrawals] = useState<WithdrawalRow[]>([])
+  const [playerWithdrawalsLoading, setPlayerWithdrawalsLoading] = useState(false)
+  const [playerWithdrawalsError, setPlayerWithdrawalsError] = useState('')
   const [buyGoldError, setBuyGoldError] = useState('')
   const [buyGoldLoading, setBuyGoldLoading] = useState<string | null>(null)
   const [starterPackError, setStarterPackError] = useState('')
@@ -2556,6 +2559,26 @@ function App() {
       }
       setContractCopied(true)
       window.setTimeout(() => setContractCopied(false), 1600)
+    } catch (error) {
+      console.warn('Copy failed', error)
+    }
+  }
+
+  const copyToClipboard = async (value: string) => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value)
+      } else {
+        const textarea = document.createElement('textarea')
+        textarea.value = value
+        textarea.style.position = 'fixed'
+        textarea.style.opacity = '0'
+        document.body.appendChild(textarea)
+        textarea.focus()
+        textarea.select()
+        document.execCommand('copy')
+        document.body.removeChild(textarea)
+      }
     } catch (error) {
       console.warn('Copy failed', error)
     }
@@ -2818,6 +2841,7 @@ function App() {
     }
     if (activePanel !== 'withdraw') {
       setWithdrawError('')
+      setPlayerWithdrawalsError('')
     }
     if (activePanel !== 'buygold') {
       setBuyGoldError('')
@@ -2832,6 +2856,38 @@ function App() {
       setStakeTab('stake')
     }
   }, [activePanel])
+
+  useEffect(() => {
+    if (activePanel !== 'withdraw') return
+    const wallet = publicKey?.toBase58()
+    if (!wallet || !supabase) {
+      setPlayerWithdrawals([])
+      return
+    }
+    let active = true
+    const loadWithdrawals = async () => {
+      setPlayerWithdrawalsLoading(true)
+      setPlayerWithdrawalsError('')
+      const { data, error } = await supabase
+        .from('withdrawals')
+        .select('id, wallet, name, crystals, sol_amount, status, created_at')
+        .eq('wallet', wallet)
+        .order('created_at', { ascending: false })
+        .limit(20)
+      if (!active) return
+      if (error) {
+        setPlayerWithdrawalsError('Failed to load withdrawal requests.')
+        setPlayerWithdrawals([])
+      } else {
+        setPlayerWithdrawals((data as WithdrawalRow[]) ?? [])
+      }
+      setPlayerWithdrawalsLoading(false)
+    }
+    void loadWithdrawals()
+    return () => {
+      active = false
+    }
+  }, [activePanel, publicKey])
 
   useEffect(() => {
     if (activePanel !== 'worldboss') return
@@ -3116,13 +3172,14 @@ function App() {
     }
 
     const solAmount = Number((amount / WITHDRAW_RATE).toFixed(4))
+    const createdAt = new Date().toISOString()
     const { error } = await supabase.from('withdrawals').insert({
       wallet,
       name: state.name,
       crystals: amount,
       sol_amount: solAmount,
       status: 'pending',
-      created_at: new Date().toISOString(),
+      created_at: createdAt,
     })
     if (error) {
       setWithdrawError('Failed to submit request.')
@@ -3133,6 +3190,18 @@ function App() {
     pushLog(state.eventLog, `Withdrawal requested: ${amount} crystals.`)
     setWithdrawAmount('')
     setWithdrawError('')
+    setPlayerWithdrawals((prev) => [
+      {
+        id: `local-${createdAt}`,
+        wallet,
+        name: state.name,
+        crystals: amount,
+        sol_amount: solAmount,
+        status: 'pending',
+        created_at: createdAt,
+      },
+      ...prev,
+    ])
     syncHud()
     void saveGameState()
     setActivePanel(null)
@@ -4659,6 +4728,33 @@ function App() {
               <div className="withdraw-note">
                 Requests are reviewed manually. You will receive SOL in 15min - 2hr.
               </div>
+              <div className="withdraw-requests">
+                <div className="withdraw-requests-title">Your requests</div>
+                {playerWithdrawalsLoading && <div className="muted">Loading requests...</div>}
+                {playerWithdrawalsError && <div className="withdraw-error">{playerWithdrawalsError}</div>}
+                {!playerWithdrawalsLoading && !playerWithdrawalsError && playerWithdrawals.length === 0 && (
+                  <div className="muted">No withdrawal requests yet.</div>
+                )}
+                {playerWithdrawals.length > 0 && (
+                  <div className="withdraw-requests-list">
+                    {playerWithdrawals.map((row) => (
+                      <div key={row.id} className="withdraw-row">
+                        <span className="withdraw-cell id">#{row.id.slice(0, 6)}</span>
+                        <span className={`withdraw-cell status ${row.status}`}>{row.status}</span>
+                        <span className="withdraw-cell amount">
+                          <img className="icon-img small" src={iconCrystals} alt="" />
+                          {formatNumber(row.crystals)}
+                        </span>
+                        <span className="withdraw-cell sol">
+                          <img className="icon-img small" src={iconSolana} alt="" />
+                          {row.sol_amount}
+                        </span>
+                        <span className="withdraw-cell date">{formatDateTime(row.created_at)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -5024,7 +5120,14 @@ function App() {
                           <span>{row.sol_amount}</span>
                           <span className={`status ${row.status}`}>{row.status}</span>
                           <span>{formatDateTime(row.created_at)}</span>
-                          <span className="wallet-chip">{formatShortWallet(row.wallet)}</span>
+                          <button
+                            type="button"
+                            className="wallet-chip copy-chip"
+                            onClick={() => copyToClipboard(row.wallet)}
+                            title="Copy wallet"
+                          >
+                            {formatShortWallet(row.wallet)}
+                          </button>
                           <span>
                             {row.status === 'pending' ? (
                               <button
