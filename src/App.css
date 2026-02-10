@@ -66,18 +66,16 @@
 }
 
 .app.mobile .resources-strip {
-  display: flex;
-  gap: 10px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-  scroll-snap-type: x mandatory;
-  -webkit-overflow-scrolling: touch;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  overflow: visible;
+  padding-bottom: 2px;
 }
 
 .app.mobile .resources-strip .resource-chip {
-  flex: 0 0 auto;
-  min-width: 160px;
-  scroll-snap-align: start;
+  width: 100%;
+  min-width: 0;
 }
 
 .app.mobile .resources-actions-row {
