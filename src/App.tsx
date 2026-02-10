@@ -2469,6 +2469,7 @@ function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const gameStateRef = useRef<GameState | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const musicUnlockRef = useRef(false)
   const serverLoadedRef = useRef(false)
   const pendingProfileRef = useRef<PersistedState | null>(null)
   const spriteCacheRef = useRef<PlayerSpriteMap>({
@@ -2573,16 +2574,36 @@ function App() {
       const tryPlay = async () => {
         try {
           await audio.play()
+          musicUnlockRef.current = true
         } catch {
-          const unlock = () => {
-            audio.play().catch(() => {})
-          }
-          window.addEventListener('pointerdown', unlock, { once: true })
+          // Autoplay blocked. We'll unlock on first user interaction.
         }
       }
       void tryPlay()
     } else {
       audio.pause()
+    }
+  }, [musicEnabled])
+
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    const unlock = () => {
+      if (!musicEnabled || musicUnlockRef.current) return
+      audio
+        .play()
+        .then(() => {
+          musicUnlockRef.current = true
+        })
+        .catch(() => {})
+    }
+    window.addEventListener('pointerdown', unlock, { passive: true })
+    window.addEventListener('touchstart', unlock, { passive: true })
+    window.addEventListener('keydown', unlock)
+    return () => {
+      window.removeEventListener('pointerdown', unlock)
+      window.removeEventListener('touchstart', unlock)
+      window.removeEventListener('keydown', unlock)
     }
   }, [musicEnabled])
 
@@ -3605,7 +3626,7 @@ function App() {
 
   return (
     <div className={`app ${stage === 'auth' ? 'auth-mode' : ''} ${isMobile ? 'mobile' : ''}`}>
-      <audio ref={audioRef} src={bgMusic} preload="auto" />
+      <audio ref={audioRef} src={bgMusic} preload="auto" playsInline />
       {stage !== 'auth' && (
         <header className={topbarClass}>
           <div>
