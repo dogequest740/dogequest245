@@ -2807,17 +2807,7 @@ function App() {
 
   useEffect(() => {
     if (stage !== 'game') return
-    let active = true
-    const runSync = () => {
-      if (!active) return
-      void syncWorldBossFromServer()
-    }
-    runSync()
-    const interval = window.setInterval(runSync, 5000)
-    return () => {
-      active = false
-      window.clearInterval(interval)
-    }
+    void syncWorldBossFromServer()
   }, [stage, publicKey])
 
   const syncHud = () => {
@@ -2846,6 +2836,11 @@ function App() {
       setStakeTab('stake')
     }
   }, [activePanel])
+
+  useEffect(() => {
+    if (activePanel !== 'worldboss') return
+    void syncWorldBossFromServer()
+  }, [activePanel, publicKey])
 
   useEffect(() => {
     if (activePanel !== 'admin') return
@@ -4917,6 +4912,9 @@ function App() {
                         </div>
                       )
                     })}
+                  </div>
+                  <div className="worldboss-note">
+                    Leaderboard updates only while you are online or when you return to the game.
                   </div>
                 </>
               )
