@@ -4873,14 +4873,9 @@ function App() {
                       <img className="icon-img" src={iconCrystals} alt="" />
                       Prize Pool: <strong>{WORLD_BOSS_REWARD}</strong> crystals
                     </div>
-                    <div className="worldboss-actions">
-                      <button type="button" disabled={playerJoined} onClick={joinWorldBoss}>
-                        {playerJoined ? 'Joined' : 'Join Battle'}
-                      </button>
-                      <button type="button" className="worldboss-refresh" onClick={syncWorldBossFromServer}>
-                        Refresh
-                      </button>
-                    </div>
+                    <button type="button" disabled={playerJoined} onClick={joinWorldBoss}>
+                      {playerJoined ? 'Joined' : 'Join Battle'}
+                    </button>
                   </div>
                   </div>
                   <div className="worldboss-list">

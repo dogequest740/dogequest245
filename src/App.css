@@ -3406,11 +3406,6 @@ button.ghost {
   font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
 }
 
-.worldboss-actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
 
 .worldboss-timer {
   font-size: 15px;
@@ -3443,14 +3438,6 @@ button.ghost {
   text-transform: uppercase;
 }
 
-.worldboss-meta .worldboss-refresh {
-  background: linear-gradient(160deg, #2b2f3c, #141820);
-  border: 1px solid rgba(140, 110, 255, 0.28);
-  color: #dfe6ff;
-  box-shadow:
-    0 10px 16px rgba(10, 14, 20, 0.55),
-    inset 0 0 10px rgba(180, 200, 255, 0.08);
-}
 
 .worldboss-meta button:disabled {
   opacity: 0.6;
