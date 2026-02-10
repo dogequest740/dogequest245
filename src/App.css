@@ -27,6 +27,7 @@
   height: auto;
   min-height: 100vh;
   overflow: auto;
+  overflow-x: hidden;
 }
 
 .app.mobile .topbar {
@@ -65,6 +66,8 @@
   grid-template-columns: 1fr;
   width: 100%;
   max-width: 100%;
+  min-height: auto;
+  align-items: start;
 }
 
 .app.mobile .left-panel {
@@ -77,19 +80,25 @@
   max-width: 100%;
   overflow-x: hidden;
   grid-template-rows: auto auto;
+  min-height: auto;
 }
 
 .app.mobile .canvas-wrap {
-  padding: 6px;
+  padding: 4px;
   overflow-x: hidden;
   overflow-y: visible;
   align-items: center;
+  width: 100%;
+  max-width: 100%;
+  flex-direction: column;
+  min-height: auto;
 }
 
 .app.mobile .game-canvas {
-  max-width: 100%;
+  max-width: calc(100vw - 40px);
   width: 100%;
   height: auto;
+  max-height: none;
 }
 
 .app.mobile .menu-stack {
@@ -104,6 +113,27 @@
 .app.mobile .player-stats {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
+}
+
+.app.mobile .player-card {
+  padding: 8px;
+}
+
+.app.mobile .player-name {
+  font-size: 16px;
+}
+
+.app.mobile .player-level {
+  font-size: 14px;
+}
+
+.app.mobile .player-xp {
+  font-size: 11px;
+}
+
+.app.mobile .player-stats {
+  font-size: 11px;
+  padding: 8px;
 }
 
 .app.mobile .battle-controls {
@@ -169,6 +199,11 @@
 .app.mobile .starter-pack-btn {
   width: 100%;
   max-width: 240px;
+}
+
+.app.mobile .game-section {
+  flex: 0 0 auto;
+  min-height: auto;
 }
 
 .app.mobile .game-section {
