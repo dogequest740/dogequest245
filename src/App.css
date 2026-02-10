@@ -1548,6 +1548,64 @@
   color: var(--text-muted);
 }
 
+.auth-section.tokenomics {
+  padding: 18px;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top right, rgba(255, 210, 120, 0.18), transparent 55%),
+    linear-gradient(140deg, rgba(18, 16, 10, 0.9), rgba(10, 14, 20, 0.8));
+  border: 1px solid rgba(214, 178, 95, 0.35);
+  box-shadow:
+    inset 0 0 22px rgba(255, 200, 120, 0.12),
+    0 16px 28px rgba(5, 8, 12, 0.4);
+  position: relative;
+  overflow: hidden;
+}
+
+.auth-section.tokenomics::after {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  pointer-events: none;
+  opacity: 0.35;
+}
+
+.tokenomics-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  position: relative;
+  z-index: 1;
+}
+
+.tokenomics-card {
+  background: rgba(12, 18, 26, 0.75);
+  border: 1px solid rgba(214, 178, 95, 0.25);
+  border-radius: 14px;
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+  color: #f6e3b8;
+  box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.03);
+}
+
+.tokenomics-title {
+  font-family: 'Cinzel Decorative', 'Cinzel', system-ui, sans-serif;
+  font-size: 14px;
+  color: #ffd890;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.tokenomics-card p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
 .auth-section.roadmap {
   padding: 18px;
   border-radius: 18px;

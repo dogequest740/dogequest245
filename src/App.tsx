@@ -3955,7 +3955,27 @@ function App() {
             </div>
           </div>
 
-          <div className="auth-section roadmap reveal delay-7">
+          <div className="auth-section tokenomics reveal delay-7">
+            <h2>Tokenomics</h2>
+            <div className="tokenomics-grid">
+              <div className="tokenomics-card">
+                <div className="tokenomics-title">Creator rewards allocation</div>
+                <p>
+                  50% of creator rewards go to token buyback & burn. The remaining 50% flows into the treasury to fund
+                  player payouts.
+                </p>
+              </div>
+              <div className="tokenomics-card">
+                <div className="tokenomics-title">In‑game purchase revenue</div>
+                <p>
+                  Revenue from in‑game purchases follows the same split: 50% buyback & burn, 50% treasury for player
+                  rewards.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="auth-section roadmap reveal delay-8">
             <h2>Roadmap</h2>
             <ul className="roadmap-list">
               <li className="roadmap-item">
@@ -4013,7 +4033,7 @@ function App() {
             </ul>
           </div>
 
-          <div className="auth-footer reveal delay-8">
+          <div className="auth-footer reveal delay-9">
             <div>
               <div className="auth-footer-title">Ready to enter the realm?</div>
               <div className="auth-footer-copy">Connect your wallet and choose a class to begin.</div>
