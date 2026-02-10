@@ -76,16 +76,20 @@
   width: 100%;
   max-width: 100%;
   overflow-x: hidden;
+  grid-template-rows: auto auto;
 }
 
 .app.mobile .canvas-wrap {
   padding: 6px;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: visible;
+  align-items: center;
 }
 
 .app.mobile .game-canvas {
   max-width: 100%;
   width: 100%;
+  height: auto;
 }
 
 .app.mobile .menu-stack {
@@ -160,6 +164,11 @@
 .app.mobile .starter-pack-float {
   position: static;
   margin: 8px auto 0;
+}
+
+.app.mobile .starter-pack-btn {
+  width: 100%;
+  max-width: 240px;
 }
 
 .app.mobile .game-section {
