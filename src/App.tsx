@@ -4867,16 +4867,21 @@ function App() {
                 <>
                   <div className="worldboss-hero">
                     <img className="worldboss-image" src={worldBossImage} alt="World boss" />
-                    <div className="worldboss-meta">
-                      <div className="worldboss-timer">Resets in {formatLongTimer(boss.remaining)}</div>
-                      <div className="worldboss-reward">
-                        <img className="icon-img" src={iconCrystals} alt="" />
-                        Prize Pool: <strong>{WORLD_BOSS_REWARD}</strong> crystals
-                      </div>
+                  <div className="worldboss-meta">
+                    <div className="worldboss-timer">Resets in {formatLongTimer(boss.remaining)}</div>
+                    <div className="worldboss-reward">
+                      <img className="icon-img" src={iconCrystals} alt="" />
+                      Prize Pool: <strong>{WORLD_BOSS_REWARD}</strong> crystals
+                    </div>
+                    <div className="worldboss-actions">
                       <button type="button" disabled={playerJoined} onClick={joinWorldBoss}>
                         {playerJoined ? 'Joined' : 'Join Battle'}
                       </button>
+                      <button type="button" className="worldboss-refresh" onClick={syncWorldBossFromServer}>
+                        Refresh
+                      </button>
                     </div>
+                  </div>
                   </div>
                   <div className="worldboss-list">
                     <div className="worldboss-row header">
