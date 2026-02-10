@@ -3957,6 +3957,20 @@ function App() {
 
           <div className="auth-section tokenomics reveal delay-7">
             <h2>Tokenomics</h2>
+            <div className="tokenomics-split">
+              <div className="tokenomics-slice buyback">
+                <div className="tokenomics-slice-label">
+                  <strong>50%</strong>
+                  <span>Buyback & burn</span>
+                </div>
+              </div>
+              <div className="tokenomics-slice treasury">
+                <div className="tokenomics-slice-label">
+                  <strong>50%</strong>
+                  <span>Treasury for players</span>
+                </div>
+              </div>
+            </div>
             <div className="tokenomics-grid">
               <div className="tokenomics-card">
                 <div className="tokenomics-title">Creator rewards allocation</div>
