@@ -24,6 +24,9 @@
 .app.mobile {
   padding: 10px 12px 14px;
   gap: 12px;
+  height: auto;
+  min-height: 100vh;
+  overflow: auto;
 }
 
 .app.mobile .topbar {
@@ -99,6 +102,52 @@
 
 .app.mobile .battle-btn {
   width: 100%;
+}
+
+.app.mobile .panel {
+  padding: 16px;
+}
+
+.app.mobile .select-panel {
+  gap: 12px;
+}
+
+.app.mobile .character-grid {
+  grid-template-columns: 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.app.mobile .character-card {
+  padding: 12px;
+}
+
+.app.mobile .character-portrait {
+  width: 72px;
+  height: 72px;
+}
+
+.app.mobile .name-row {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.app.mobile .name-row input {
+  width: 100%;
+  min-width: 0;
+}
+
+.app.mobile .start-button {
+  width: 100%;
+}
+
+.app.mobile .left-panel,
+.app.mobile .game-main {
+  min-height: auto;
+}
+
+.app.mobile .canvas-wrap {
+  min-height: 240px;
 }
 
 .app.mobile .starter-pack-float {
