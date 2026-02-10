@@ -415,10 +415,6 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.app.mobile .roadmap-grid {
-  grid-template-columns: 1fr;
-}
-
 .app.mobile .auth-footer {
   flex-direction: column;
   align-items: flex-start;
@@ -1592,10 +1588,12 @@
   opacity: 0.4;
 }
 
-.roadmap-grid {
+.roadmap-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   position: relative;
   z-index: 1;
 }
@@ -1627,20 +1625,18 @@
     0 14px 24px rgba(0, 0, 0, 0.4);
 }
 
-.roadmap-step {
-  min-width: 40px;
-  height: 40px;
+.roadmap-icon {
+  width: 32px;
+  height: 32px;
+  padding: 6px;
   border-radius: 12px;
-  display: grid;
-  place-items: center;
   background:
     linear-gradient(160deg, rgba(255, 210, 120, 0.95), rgba(185, 128, 48, 0.95));
-  color: #1b1206;
-  font-weight: 700;
-  letter-spacing: 0.9px;
   box-shadow:
     0 10px 16px rgba(120, 90, 40, 0.4),
     inset 0 0 10px rgba(255, 255, 255, 0.35);
+  object-fit: contain;
+  image-rendering: pixelated;
 }
 
 .feature-card,

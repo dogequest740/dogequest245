@@ -3957,60 +3957,60 @@ function App() {
 
           <div className="auth-section roadmap reveal delay-7">
             <h2>Roadmap</h2>
-            <div className="roadmap-grid">
-              <div className="roadmap-item">
-                <div className="roadmap-step">01</div>
+            <ul className="roadmap-list">
+              <li className="roadmap-item">
+                <img className="roadmap-icon" src={iconBattle} alt="" />
                 <div>Game launch</div>
-              </div>
-              <div className="roadmap-item">
-                <div className="roadmap-step">02</div>
+              </li>
+              <li className="roadmap-item">
+                <img className="roadmap-icon" src={iconSolana} alt="" />
                 <div>Project token launch</div>
-              </div>
-              <div className="roadmap-item">
-                <div className="roadmap-step">03</div>
+              </li>
+              <li className="roadmap-item">
+                <img className="roadmap-icon" src={iconCrystals} alt="" />
                 <div>Token integration in-game</div>
-              </div>
-              <div className="roadmap-item">
-                <div className="roadmap-step">04</div>
+              </li>
+              <li className="roadmap-item">
+                <img className="roadmap-icon" src={iconName} alt="" />
                 <div>In‑game chat</div>
-              </div>
-              <div className="roadmap-item">
-                <div className="roadmap-step">05</div>
+              </li>
+              <li className="roadmap-item">
+                <img className="roadmap-icon" src={iconGold} alt="" />
                 <div>Daily rewards</div>
-              </div>
-              <div className="roadmap-item">
-                <div className="roadmap-step">06</div>
+              </li>
+              <li className="roadmap-item">
+                <img className="roadmap-icon" src={iconDungeons} alt="" />
                 <div>Guild system</div>
-              </div>
-              <div className="roadmap-item">
-                <div className="roadmap-step">07</div>
+              </li>
+              <li className="roadmap-item">
+                <img className="roadmap-icon" src={iconWorldBoss} alt="" />
                 <div>Guild wars</div>
-              </div>
-              <div className="roadmap-item">
-                <div className="roadmap-step">08</div>
+              </li>
+              <li className="roadmap-item">
+                <img className="roadmap-icon" src={iconBattle} alt="" />
                 <div>PvP arena with crystal wagers</div>
-              </div>
-              <div className="roadmap-item">
-                <div className="roadmap-step">09</div>
+              </li>
+              <li className="roadmap-item">
+                <img className="roadmap-icon" src={iconQuests} alt="" />
                 <div>Daily quests</div>
-              </div>
-              <div className="roadmap-item">
-                <div className="roadmap-step">10</div>
+              </li>
+              <li className="roadmap-item">
+                <img className="roadmap-icon" src={iconShop} alt="" />
                 <div>Player market for equipment trading</div>
-              </div>
-              <div className="roadmap-item">
-                <div className="roadmap-step">11</div>
+              </li>
+              <li className="roadmap-item">
+                <img className="roadmap-icon" src={iconWorldBoss} alt="" />
                 <div>Limited-time bosses & maps with unique rewards</div>
-              </div>
-              <div className="roadmap-item">
-                <div className="roadmap-step">12</div>
+              </li>
+              <li className="roadmap-item">
+                <img className="roadmap-icon" src={iconInventory} alt="" />
                 <div>Customization: skins & profile avatars</div>
-              </div>
-              <div className="roadmap-item">
-                <div className="roadmap-step">13</div>
+              </li>
+              <li className="roadmap-item">
+                <img className="roadmap-icon" src={iconSolana} alt="" />
                 <div>NFT collection</div>
-              </div>
-            </div>
+              </li>
+            </ul>
           </div>
 
           <div className="auth-footer reveal delay-8">
