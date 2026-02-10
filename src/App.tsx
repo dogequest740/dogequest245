@@ -2448,6 +2448,7 @@ function App() {
     | null
   >(null)
   const [inventoryTab, setInventoryTab] = useState<'equipment' | 'consumables'>('equipment')
+  const [inventoryView, setInventoryView] = useState<'equipped' | 'bag'>('equipped')
   const [adminData, setAdminData] = useState<AdminData | null>(null)
   const [adminLoading, setAdminLoading] = useState(false)
   const [adminError, setAdminError] = useState('')
@@ -2501,6 +2502,18 @@ function App() {
     () => CHARACTER_CLASSES.find((character) => character.id === selectedId) || CHARACTER_CLASSES[0],
     [selectedId],
   )
+  const selectedIndex = useMemo(
+    () => Math.max(0, CHARACTER_CLASSES.findIndex((character) => character.id === selectedId)),
+    [selectedId],
+  )
+  const selectPrevClass = () => {
+    const nextIndex = (selectedIndex - 1 + CHARACTER_CLASSES.length) % CHARACTER_CLASSES.length
+    setSelectedId(CHARACTER_CLASSES[nextIndex].id)
+  }
+  const selectNextClass = () => {
+    const nextIndex = (selectedIndex + 1) % CHARACTER_CLASSES.length
+    setSelectedId(CHARACTER_CLASSES[nextIndex].id)
+  }
 
   const adminWallets = useMemo(() => {
     const raw = (import.meta.env.VITE_ADMIN_WALLETS as string | undefined) ?? ''
@@ -3870,30 +3883,73 @@ function App() {
       {stage === 'select' && (
         <section className="panel select-panel">
           <h2>Choose a character</h2>
-          <div className="character-grid">
-            {CHARACTER_CLASSES.map((character) => (
-              <button
-                key={character.id}
-                className={`character-card ${selectedId === character.id ? 'active' : ''}`}
-                style={{ borderColor: character.color }}
-                onClick={() => setSelectedId(character.id)}
-              >
-                <div className="character-name" style={{ color: character.color }}>
-                  {character.label}
+          {isMobile ? (
+            <>
+              <div className="character-carousel">
+                <button type="button" className="carousel-btn" onClick={selectPrevClass}>
+                  ‹
+                </button>
+                <div
+                  className="character-card active"
+                  style={{ borderColor: selectedClass.color }}
+                  onClick={() => setSelectedId(selectedClass.id)}
+                >
+                  <div className="character-name" style={{ color: selectedClass.color }}>
+                    {selectedClass.label}
+                  </div>
+                  <img
+                    className="character-portrait"
+                    src={PLAYER_SPRITE_SOURCES[selectedClass.spriteKey]}
+                    alt={`${selectedClass.label} portrait`}
+                  />
+                  <div className="character-tag">{selectedClass.tagline}</div>
+                  <div className="character-stats">
+                    <span>ATK {selectedClass.stats.attack}</span>
+                    <span>SPD {selectedClass.stats.speed}</span>
+                  </div>
                 </div>
-                <img
-                  className="character-portrait"
-                  src={PLAYER_SPRITE_SOURCES[character.spriteKey]}
-                  alt={`${character.label} portrait`}
-                />
-                <div className="character-tag">{character.tagline}</div>
-                <div className="character-stats">
-                  <span>ATK {character.stats.attack}</span>
-                  <span>SPD {character.stats.speed}</span>
-                </div>
-              </button>
-            ))}
-          </div>
+                <button type="button" className="carousel-btn" onClick={selectNextClass}>
+                  ›
+                </button>
+              </div>
+              <div className="character-dots">
+                {CHARACTER_CLASSES.map((character) => (
+                  <button
+                    key={character.id}
+                    type="button"
+                    className={`character-dot ${character.id === selectedId ? 'active' : ''}`}
+                    onClick={() => setSelectedId(character.id)}
+                    aria-label={`Select ${character.label}`}
+                  />
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="character-grid">
+              {CHARACTER_CLASSES.map((character) => (
+                <button
+                  key={character.id}
+                  className={`character-card ${selectedId === character.id ? 'active' : ''}`}
+                  style={{ borderColor: character.color }}
+                  onClick={() => setSelectedId(character.id)}
+                >
+                  <div className="character-name" style={{ color: character.color }}>
+                    {character.label}
+                  </div>
+                  <img
+                    className="character-portrait"
+                    src={PLAYER_SPRITE_SOURCES[character.spriteKey]}
+                    alt={`${character.label} portrait`}
+                  />
+                  <div className="character-tag">{character.tagline}</div>
+                  <div className="character-stats">
+                    <span>ATK {character.stats.attack}</span>
+                    <span>SPD {character.stats.speed}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="name-row">
             <label>
@@ -4161,7 +4217,7 @@ function App() {
 
       {activePanel === 'inventory' && hud && (
         <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
-          <div className="modal wide" onClick={(event) => event.stopPropagation()}>
+          <div className="modal wide inventory-modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <h3>Inventory</h3>
               <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
@@ -4184,68 +4240,90 @@ function App() {
                 Consumables
               </button>
             </div>
+            {isMobile && inventoryTab === 'equipment' && (
+              <div className="inventory-subtabs">
+                <button
+                  type="button"
+                  className={`tab-btn ${inventoryView === 'equipped' ? 'active' : ''}`}
+                  onClick={() => setInventoryView('equipped')}
+                >
+                  Equipped
+                </button>
+                <button
+                  type="button"
+                  className={`tab-btn ${inventoryView === 'bag' ? 'active' : ''}`}
+                  onClick={() => setInventoryView('bag')}
+                >
+                  Bag
+                </button>
+              </div>
+            )}
             {inventoryTab === 'equipment' && (
               <>
-                <div className="slot-grid">
-                  {EQUIPMENT_SLOTS.map((slot) => {
-                    const item = hud.equipment[slot.id]
-                    const rarityId = item ? getRarityId(item.rarity) : ''
-                    return (
-                      <div key={slot.id} className={`slot-card slot-${slot.id} ${rarityId ? `rarity-${rarityId}` : ''}`}>
-                        <div className="slot-header">
-                          <img className="icon-img equip-icon" src={EQUIPMENT_ICONS[slot.id]} alt="" />
-                          <div className="slot-label">{slot.label}</div>
-                        </div>
-                        {item ? (
-                          <>
-                            <div className="slot-item" style={{ color: item.color }}>
-                              {item.rarity} {item.name}
-                            </div>
-                            <div className="slot-score">Lv. {item.level}</div>
-                            <div className="slot-score">Score {item.tierScore}</div>
-                          </>
-                        ) : (
-                          <div className="slot-empty">Empty</div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-                <div className="inventory-section">
-                  <h4>Equipment</h4>
-                  <div className="inventory-list">
-                    {hud.inventory.length === 0 && <div className="muted">No items yet.</div>}
-                    {hud.inventory.map((item) => {
-                      const rarityId = getRarityId(item.rarity)
+                {(!isMobile || inventoryView === 'equipped') && (
+                  <div className="slot-grid">
+                    {EQUIPMENT_SLOTS.map((slot) => {
+                      const item = hud.equipment[slot.id]
+                      const rarityId = item ? getRarityId(item.rarity) : ''
                       return (
-                        <div
-                          key={item.id}
-                          className={`inventory-item rarity-${rarityId}`}
-                          style={{ borderColor: item.color, ['--item-color' as never]: item.color }}
-                        >
-                        <div>
-                          <div className="inventory-name" style={{ color: item.color }}>
-                            <img className="icon-img equip-icon small" src={EQUIPMENT_ICONS[item.slot]} alt="" />
-                            {item.rarity} {item.name}
+                        <div key={slot.id} className={`slot-card slot-${slot.id} ${rarityId ? `rarity-${rarityId}` : ''}`}>
+                          <div className="slot-header">
+                            <img className="icon-img equip-icon" src={EQUIPMENT_ICONS[slot.id]} alt="" />
+                            <div className="slot-label">{slot.label}</div>
                           </div>
-                          <div className="inventory-slot">
-                            Lv. {item.level} - {EQUIPMENT_SLOTS.find((slot) => slot.id === item.slot)?.label ?? item.slot} - Score {item.tierScore}
-                          </div>
+                          {item ? (
+                            <>
+                              <div className="slot-item" style={{ color: item.color }}>
+                                {item.rarity} {item.name}
+                              </div>
+                              <div className="slot-score">Lv. {item.level}</div>
+                              <div className="slot-score">Score {item.tierScore}</div>
+                            </>
+                          ) : (
+                            <div className="slot-empty">Empty</div>
+                          )}
                         </div>
-                        <div className="inventory-actions">
-                          <button type="button" onClick={() => equipItem(item, 'inventory')}>
-                            Equip
-                          </button>
-                      <button type="button" className="ghost" onClick={() => sellItem(item, 'inventory')}>
-                        <img className="icon-img small" src={iconGold} alt="" />
-                        Sell {item.sellValue}
-                      </button>
-                        </div>
-                      </div>
                       )
                     })}
                   </div>
-                </div>
+                )}
+                {(!isMobile || inventoryView === 'bag') && (
+                  <div className="inventory-section">
+                    {!isMobile && <h4>Equipment</h4>}
+                    <div className="inventory-list">
+                      {hud.inventory.length === 0 && <div className="muted">No items yet.</div>}
+                      {hud.inventory.map((item) => {
+                        const rarityId = getRarityId(item.rarity)
+                        return (
+                          <div
+                            key={item.id}
+                            className={`inventory-item rarity-${rarityId}`}
+                            style={{ borderColor: item.color, ['--item-color' as never]: item.color }}
+                          >
+                            <div>
+                              <div className="inventory-name" style={{ color: item.color }}>
+                                <img className="icon-img equip-icon small" src={EQUIPMENT_ICONS[item.slot]} alt="" />
+                                {item.rarity} {item.name}
+                              </div>
+                              <div className="inventory-slot">
+                                Lv. {item.level} - {EQUIPMENT_SLOTS.find((slot) => slot.id === item.slot)?.label ?? item.slot} - Score {item.tierScore}
+                              </div>
+                            </div>
+                            <div className="inventory-actions">
+                              <button type="button" onClick={() => equipItem(item, 'inventory')}>
+                                Equip
+                              </button>
+                              <button type="button" className="ghost" onClick={() => sellItem(item, 'inventory')}>
+                                <img className="icon-img small" src={iconGold} alt="" />
+                                Sell {item.sellValue}
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
               </>
             )}
             {inventoryTab === 'consumables' && (

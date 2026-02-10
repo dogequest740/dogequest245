@@ -220,10 +220,44 @@
   gap: 12px;
 }
 
-.app.mobile .character-grid {
-  grid-template-columns: 1fr;
-  gap: 12px;
-  margin-top: 12px;
+.app.mobile .character-carousel {
+  display: grid;
+  grid-template-columns: 40px 1fr 40px;
+  gap: 10px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.app.mobile .carousel-btn {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(12, 18, 26, 0.8);
+  color: #f6d488;
+  border-radius: 12px;
+  font-size: 20px;
+  height: 44px;
+  cursor: pointer;
+}
+
+.app.mobile .character-dots {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.app.mobile .character-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(12, 18, 26, 0.6);
+  cursor: pointer;
+}
+
+.app.mobile .character-dot.active {
+  background: #f6d488;
+  border-color: #f6d488;
+  box-shadow: 0 0 10px rgba(246, 212, 136, 0.6);
 }
 
 .app.mobile .character-card {
@@ -231,8 +265,8 @@
 }
 
 .app.mobile .character-portrait {
-  width: 72px;
-  height: 72px;
+  width: 82px;
+  height: 82px;
 }
 
 .app.mobile .name-row {
@@ -256,6 +290,43 @@
 
 .app.mobile .canvas-wrap {
   min-height: 240px;
+}
+
+.app.mobile .inventory-modal {
+  width: min(96vw, 560px);
+  max-height: 88vh;
+  overflow: hidden;
+}
+
+.app.mobile .inventory-subtabs {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.app.mobile .inventory-modal .slot-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.app.mobile .inventory-modal .inventory-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 42vh;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.app.mobile .inventory-modal .inventory-item {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.app.mobile .inventory-modal .inventory-actions {
+  width: 100%;
+  justify-content: space-between;
 }
 
 .app.mobile .starter-pack-float {
