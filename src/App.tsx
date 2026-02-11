@@ -750,6 +750,7 @@ const STARTER_PACK_ITEMS: { type: ConsumableType; qty: number }[] = [
 ]
 const CONTRACT_ADDRESS = 'MwrJUawMcT9TUmViZJnReBPzUeeZDtx6DvHY2ukBAGS'
 const TOKEN_SYMBOL = (import.meta.env.VITE_TOKEN_SYMBOL as string | undefined) ?? 'DQ'
+const TOKEN_PRICE_SOL_OVERRIDE = Number(import.meta.env.VITE_TOKEN_PRICE_SOL ?? '')
 const TOKEN_MINT = new PublicKey(CONTRACT_ADDRESS)
 const SOL_MINT = new PublicKey('So11111111111111111111111111111111111111112')
 
@@ -2616,6 +2617,12 @@ function App() {
   }
 
   const fetchTokenPriceSol = async (force = false) => {
+    if (Number.isFinite(TOKEN_PRICE_SOL_OVERRIDE) && TOKEN_PRICE_SOL_OVERRIDE > 0) {
+      tokenPriceRef.current = TOKEN_PRICE_SOL_OVERRIDE
+      tokenPriceTsRef.current = Date.now()
+      setTokenPriceSol(TOKEN_PRICE_SOL_OVERRIDE)
+      return TOKEN_PRICE_SOL_OVERRIDE
+    }
     const now = Date.now()
     if (!force && tokenPriceRef.current && now - tokenPriceTsRef.current < 60_000) {
       return tokenPriceRef.current
