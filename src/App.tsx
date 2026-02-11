@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
-import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
+import { PublicKey, Transaction } from '@solana/web3.js'
+import {
+  createAssociatedTokenAccountInstruction,
+  createTransferInstruction,
+  getAccount,
+  getAssociatedTokenAddress,
+  getMint,
+} from '@solana/spl-token'
 import knightSprite from './assets/knight.png'
 import mageSprite from './assets/mage.png'
 import archerSprite from './assets/archer.png'
@@ -742,6 +749,9 @@ const STARTER_PACK_ITEMS: { type: ConsumableType; qty: number }[] = [
   { type: 'key', qty: 20 },
 ]
 const CONTRACT_ADDRESS = 'MwrJUawMcT9TUmViZJnReBPzUeeZDtx6DvHY2ukBAGS'
+const TOKEN_SYMBOL = (import.meta.env.VITE_TOKEN_SYMBOL as string | undefined) ?? 'DQ'
+const TOKEN_MINT = new PublicKey(CONTRACT_ADDRESS)
+const SOL_MINT = new PublicKey('So11111111111111111111111111111111111111112')
 
 const MONSTER_HP_TIER_TARGET = 30000
 const MONSTER_HP_TIER_EXCESS = 0.2
@@ -1358,6 +1368,11 @@ const formatLongTimer = (seconds: number) => {
 }
 
 const formatNumber = (value: number) => value.toLocaleString('en-US')
+const formatTokenAmount = (value: number) => {
+  if (!Number.isFinite(value)) return '-'
+  const decimals = value < 1 ? 4 : 2
+  return value.toLocaleString('en-US', { maximumFractionDigits: decimals, minimumFractionDigits: decimals })
+}
 const formatShortWallet = (wallet: string) => `${wallet.slice(0, 4)}...${wallet.slice(-4)}`
 const formatDateTime = (value: string) => {
   const date = new Date(value)
@@ -2478,8 +2493,11 @@ function App() {
   const [buyGoldLoading, setBuyGoldLoading] = useState<string | null>(null)
   const [starterPackError, setStarterPackError] = useState('')
   const [starterPackLoading, setStarterPackLoading] = useState(false)
-  const [solBalance, setSolBalance] = useState(0)
-  const [solBalanceLoading, setSolBalanceLoading] = useState(false)
+  const [tokenBalance, setTokenBalance] = useState(0)
+  const [tokenBalanceLoading, setTokenBalanceLoading] = useState(false)
+  const [tokenPriceSol, setTokenPriceSol] = useState<number | null>(null)
+  const [tokenPriceLoading, setTokenPriceLoading] = useState(false)
+  const [tokenPriceError, setTokenPriceError] = useState('')
   const [stakeAmount, setStakeAmount] = useState('')
   const [stakeError, setStakeError] = useState('')
   const [stakeTab, setStakeTab] = useState<'stake' | 'my'>('stake')
@@ -2490,6 +2508,9 @@ function App() {
   const gameStateRef = useRef<GameState | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const musicUnlockRef = useRef(false)
+  const tokenDecimalsRef = useRef<number | null>(null)
+  const tokenPriceRef = useRef<number | null>(null)
+  const tokenPriceTsRef = useRef(0)
   const serverLoadedRef = useRef(false)
   const pendingProfileRef = useRef<PersistedState | null>(null)
   const spriteCacheRef = useRef<PlayerSpriteMap>({
@@ -2584,6 +2605,61 @@ function App() {
       window.setTimeout(() => setContractCopied(false), 1600)
     } catch (error) {
       console.warn('Copy failed', error)
+    }
+  }
+
+  const ensureTokenDecimals = async () => {
+    if (tokenDecimalsRef.current !== null) return tokenDecimalsRef.current
+    const mintInfo = await getMint(connection, TOKEN_MINT)
+    tokenDecimalsRef.current = mintInfo.decimals
+    return mintInfo.decimals
+  }
+
+  const fetchTokenPriceSol = async (force = false) => {
+    const now = Date.now()
+    if (!force && tokenPriceRef.current && now - tokenPriceTsRef.current < 60_000) {
+      return tokenPriceRef.current
+    }
+    setTokenPriceLoading(true)
+    setTokenPriceError('')
+    try {
+      const url = `https://lite-api.jup.ag/price/v2?ids=${TOKEN_MINT.toBase58()},${SOL_MINT.toBase58()}`
+      const response = await fetch(url)
+      const payload = await response.json()
+      const tokenUsd = Number(payload?.data?.[TOKEN_MINT.toBase58()]?.price)
+      const solUsd = Number(payload?.data?.[SOL_MINT.toBase58()]?.price)
+      if (!Number.isFinite(tokenUsd) || !Number.isFinite(solUsd) || tokenUsd <= 0 || solUsd <= 0) {
+        throw new Error('Invalid price response')
+      }
+      const priceSol = tokenUsd / solUsd
+      tokenPriceRef.current = priceSol
+      tokenPriceTsRef.current = now
+      setTokenPriceSol(priceSol)
+      return priceSol
+    } catch (error) {
+      console.warn('Token price fetch failed', error)
+      setTokenPriceError('Token price unavailable.')
+      setTokenPriceSol(null)
+      return null
+    } finally {
+      setTokenPriceLoading(false)
+    }
+  }
+
+  const loadTokenBalance = async () => {
+    if (!publicKey) return
+    setTokenBalanceLoading(true)
+    try {
+      const decimals = await ensureTokenDecimals()
+      const ata = await getAssociatedTokenAddress(TOKEN_MINT, publicKey)
+      const account = await getAccount(connection, ata)
+      const balance = Number(account.amount) / 10 ** decimals
+      setTokenBalance(balance)
+    } catch (error) {
+      console.warn('Token balance load failed', error)
+      setTokenBalance(0)
+    } finally {
+      setTokenBalanceLoading(false)
     }
   }
 
@@ -2874,6 +2950,9 @@ function App() {
       setStarterPackError('')
       setStarterPackLoading(false)
     }
+    if (activePanel !== 'buygold' && activePanel !== 'starterpack') {
+      setTokenPriceError('')
+    }
     if (activePanel !== 'stake') {
       setStakeError('')
       setStakeTab('stake')
@@ -2925,29 +3004,13 @@ function App() {
   }, [activePanel, isAdmin])
 
   useEffect(() => {
-    if (activePanel !== 'buygold') return
+    if (activePanel !== 'buygold' && activePanel !== 'starterpack') return
     if (!publicKey) {
-      setSolBalance(0)
+      setTokenBalance(0)
       return
     }
-    let active = true
-    const loadBalance = async () => {
-      setSolBalanceLoading(true)
-      try {
-        const balance = await connection.getBalance(publicKey)
-        if (active) {
-          setSolBalance(balance / LAMPORTS_PER_SOL)
-        }
-      } catch (error) {
-        console.warn('Balance load failed', error)
-      } finally {
-        if (active) setSolBalanceLoading(false)
-      }
-    }
-    void loadBalance()
-    return () => {
-      active = false
-    }
+    void loadTokenBalance()
+    void fetchTokenPriceSol()
   }, [activePanel, publicKey, connection])
 
   const startBattleOnce = () => {
@@ -3242,31 +3305,48 @@ function App() {
     setBuyGoldLoading(packId)
     setBuyGoldError('')
     try {
-      const lamports = Math.round(pack.sol * LAMPORTS_PER_SOL)
-      const balance = await connection.getBalance(publicKey)
-      const feeBuffer = 5000
-      if (balance < lamports + feeBuffer) {
-        setBuyGoldError(`Not enough SOL. Need ${pack.sol} SOL + network fee.`)
+      const priceSol = (await fetchTokenPriceSol(true)) ?? tokenPriceSol
+      if (!priceSol) {
+        setBuyGoldError('Token price unavailable. Try again in a moment.')
         setBuyGoldLoading(null)
         return
+      }
+      const tokenAmount = pack.sol / priceSol
+      const decimals = await ensureTokenDecimals()
+      const rawAmount = BigInt(Math.ceil(tokenAmount * 10 ** decimals))
+      const fromAta = await getAssociatedTokenAddress(TOKEN_MINT, publicKey)
+      let fromAccount
+      try {
+        fromAccount = await getAccount(connection, fromAta)
+      } catch {
+        setBuyGoldError(`No ${TOKEN_SYMBOL} balance found for this wallet.`)
+        setBuyGoldLoading(null)
+        return
+      }
+      if (fromAccount.amount < rawAmount) {
+        setBuyGoldError(`Not enough ${TOKEN_SYMBOL}. Need ${formatTokenAmount(tokenAmount)} ${TOKEN_SYMBOL}.`)
+        setBuyGoldLoading(null)
+        return
+      }
+      const toAta = await getAssociatedTokenAddress(TOKEN_MINT, GOLD_STORE_WALLET)
+      const instructions = []
+      try {
+        await getAccount(connection, toAta)
+      } catch {
+        instructions.push(createAssociatedTokenAccountInstruction(publicKey, toAta, GOLD_STORE_WALLET, TOKEN_MINT))
       }
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash()
       const tx = new Transaction({
         feePayer: publicKey,
         recentBlockhash: blockhash,
-      }).add(
-        SystemProgram.transfer({
-          fromPubkey: publicKey,
-          toPubkey: GOLD_STORE_WALLET,
-          lamports,
-        }),
-      )
+      }).add(...instructions, createTransferInstruction(fromAta, toAta, publicKey, rawAmount))
       const signature = await sendTransaction(tx, connection)
       await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
       state.gold += pack.gold
       pushLog(state.eventLog, `Purchased ${formatNumber(pack.gold)} gold.`)
       syncHud()
       void saveGameState()
+      void loadTokenBalance()
       setActivePanel(null)
     } catch (error) {
       console.warn('Gold purchase failed', error)
@@ -3290,25 +3370,41 @@ function App() {
     setStarterPackLoading(true)
     setStarterPackError('')
     try {
-      const lamports = Math.round(STARTER_PACK_PRICE * LAMPORTS_PER_SOL)
-      const balance = await connection.getBalance(publicKey)
-      const feeBuffer = 5000
-      if (balance < lamports + feeBuffer) {
-        setStarterPackError(`Not enough SOL. Need ${STARTER_PACK_PRICE} SOL + network fee.`)
+      const priceSol = (await fetchTokenPriceSol(true)) ?? tokenPriceSol
+      if (!priceSol) {
+        setStarterPackError('Token price unavailable. Try again in a moment.')
         setStarterPackLoading(false)
         return
+      }
+      const tokenAmount = STARTER_PACK_PRICE / priceSol
+      const decimals = await ensureTokenDecimals()
+      const rawAmount = BigInt(Math.ceil(tokenAmount * 10 ** decimals))
+      const fromAta = await getAssociatedTokenAddress(TOKEN_MINT, publicKey)
+      let fromAccount
+      try {
+        fromAccount = await getAccount(connection, fromAta)
+      } catch {
+        setStarterPackError(`No ${TOKEN_SYMBOL} balance found for this wallet.`)
+        setStarterPackLoading(false)
+        return
+      }
+      if (fromAccount.amount < rawAmount) {
+        setStarterPackError(`Not enough ${TOKEN_SYMBOL}. Need ${formatTokenAmount(tokenAmount)} ${TOKEN_SYMBOL}.`)
+        setStarterPackLoading(false)
+        return
+      }
+      const toAta = await getAssociatedTokenAddress(TOKEN_MINT, GOLD_STORE_WALLET)
+      const instructions = []
+      try {
+        await getAccount(connection, toAta)
+      } catch {
+        instructions.push(createAssociatedTokenAccountInstruction(publicKey, toAta, GOLD_STORE_WALLET, TOKEN_MINT))
       }
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash()
       const tx = new Transaction({
         feePayer: publicKey,
         recentBlockhash: blockhash,
-      }).add(
-        SystemProgram.transfer({
-          fromPubkey: publicKey,
-          toPubkey: GOLD_STORE_WALLET,
-          lamports,
-        }),
-      )
+      }).add(...instructions, createTransferInstruction(fromAta, toAta, publicKey, rawAmount))
       const signature = await sendTransaction(tx, connection)
       await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
 
@@ -3322,6 +3418,7 @@ function App() {
       pushLog(state.eventLog, 'Starter Pack purchased.')
       syncHud()
       void saveGameState()
+      void loadTokenBalance()
       setActivePanel(null)
     } catch (error) {
       console.warn('Starter pack purchase failed', error)
@@ -4696,9 +4793,11 @@ function App() {
               <div className="withdraw-info">
                 <span className="withdraw-info-label">
                   <img className="icon-img small" src={iconSolana} alt="" />
-                  Wallet balance
+                  Token balance
                 </span>
-                <strong>{solBalanceLoading ? 'Loading...' : `${solBalance.toFixed(4)} SOL`}</strong>
+                <strong>
+                  {tokenBalanceLoading ? 'Loading...' : `${formatTokenAmount(tokenBalance)} ${TOKEN_SYMBOL}`}
+                </strong>
               </div>
               <div className="buygold-grid">
                 {GOLD_PACKAGES.map((pack) => (
@@ -4708,11 +4807,15 @@ function App() {
                     <div className="shop-desc">Instant delivery</div>
                     <div className="shop-meta">
                       <img className="icon-img small" src={iconSolana} alt="" />
-                      Price: {pack.sol} SOL
+                      {(() => {
+                        if (tokenPriceLoading) return 'Price: loading...'
+                        const tokenCost = tokenPriceSol ? pack.sol / tokenPriceSol : null
+                        return tokenCost ? `Price: ${formatTokenAmount(tokenCost)} ${TOKEN_SYMBOL}` : 'Price unavailable'
+                      })()}
                     </div>
                     <button
                       type="button"
-                      disabled={buyGoldLoading === pack.id}
+                      disabled={buyGoldLoading === pack.id || !tokenPriceSol || tokenPriceLoading}
                       onClick={() => buyGoldPackage(pack.id)}
                     >
                       {buyGoldLoading === pack.id ? 'Processing...' : 'Buy'}
@@ -4721,6 +4824,7 @@ function App() {
                 ))}
               </div>
               {buyGoldError && <div className="withdraw-error">{buyGoldError}</div>}
+              {tokenPriceError && !buyGoldError && <div className="withdraw-error">{tokenPriceError}</div>}
               <div className="withdraw-note">Gold is added instantly after the transaction confirms.</div>
             </div>
           </div>
@@ -4743,7 +4847,11 @@ function App() {
                   <div className="starterpack-title">Starter Pack</div>
                   <div className="starterpack-price">
                     <img className="icon-img small" src={iconSolana} alt="" />
-                    {STARTER_PACK_PRICE} SOL
+                    {tokenPriceLoading
+                      ? 'Price: loading...'
+                      : tokenPriceSol
+                        ? `Price: ${formatTokenAmount(STARTER_PACK_PRICE / tokenPriceSol)} ${TOKEN_SYMBOL}`
+                        : 'Price unavailable'}
                   </div>
                 </div>
               </div>
@@ -4774,7 +4882,13 @@ function App() {
                 </div>
               </div>
               {starterPackError && <div className="withdraw-error">{starterPackError}</div>}
-              <button type="button" className="withdraw-submit" disabled={starterPackLoading} onClick={buyStarterPack}>
+              {tokenPriceError && !starterPackError && <div className="withdraw-error">{tokenPriceError}</div>}
+              <button
+                type="button"
+                className="withdraw-submit"
+                disabled={starterPackLoading || !tokenPriceSol || tokenPriceLoading}
+                onClick={buyStarterPack}
+              >
                 {starterPackLoading ? 'Processing...' : 'Buy Starter Pack'}
               </button>
               <div className="withdraw-note">This pack can be purchased only once.</div>
