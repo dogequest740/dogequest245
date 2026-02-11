@@ -5,6 +5,8 @@ import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from '@solana
 import knightSprite from './assets/knight.png'
 import mageSprite from './assets/mage.png'
 import archerSprite from './assets/archer.png'
+import elonSprite from './assets/elon.png'
+import gakeSprite from './assets/gake.png'
 import goblinSprite from './assets/monsters/goblin.png'
 import deathEyeSprite from './assets/monsters/death eye.png'
 import mushroomSprite from './assets/monsters/mushroom.png'
@@ -266,7 +268,7 @@ type StakeEntry = {
   amount: number
   endsAt: number
 }
-type PlayerSpriteKey = 'knight' | 'mage' | 'archer'
+type PlayerSpriteKey = 'knight' | 'mage' | 'archer' | 'elon' | 'gake'
 type PlayerSpriteSource = HTMLImageElement | HTMLCanvasElement
 type MonsterSpriteKey =
   | 'goblin'
@@ -500,6 +502,22 @@ const CHARACTER_CLASSES: CharacterClass[] = [
     color: '#7bd88f',
     spriteKey: 'archer',
     stats: { attack: 14, attackSpeed: 1.4, speed: 78, range: 20 },
+  },
+  {
+    id: 'elon',
+    label: 'Elon',
+    tagline: 'Starlit commander',
+    color: '#7fd2ff',
+    spriteKey: 'elon',
+    stats: { attack: 17, attackSpeed: 1.05, speed: 68, range: 24 },
+  },
+  {
+    id: 'gake',
+    label: 'Gake',
+    tagline: 'Trickster scout',
+    color: '#ffb347',
+    spriteKey: 'gake',
+    stats: { attack: 15, attackSpeed: 1.25, speed: 82, range: 18 },
   },
 ]
 
@@ -1117,6 +1135,8 @@ const PLAYER_SPRITE_SOURCES: Record<PlayerSpriteKey, string> = {
   knight: knightSprite,
   mage: mageSprite,
   archer: archerSprite,
+  elon: elonSprite,
+  gake: gakeSprite,
 }
 
 const MONSTER_SPRITE_SOURCES: Record<MonsterSpriteKey, string> = {
@@ -2085,9 +2105,9 @@ const updateGame = (state: GameState, dt: number) => {
       addEffect(state, { kind: 'text', x: target.x, y: target.y - 12, t: 0, text: `-${damage}`, color: '#ffd36f' })
       addEffect(state, { kind: 'impact', x: target.x, y: target.y + 2, t: 0, size: 10, color: '#ffd36f' })
 
-      if (player.spriteKey === 'knight') {
+      if (player.spriteKey === 'knight' || player.spriteKey === 'gake') {
         addEffect(state, { kind: 'slash', x: target.x, y: target.y, t: 0, angle, size: 26, color: '#ffe2a3' })
-      } else if (player.spriteKey === 'mage') {
+      } else if (player.spriteKey === 'mage' || player.spriteKey === 'elon') {
         addEffect(state, {
           kind: 'bolt',
           fromX: player.x,
@@ -2475,6 +2495,8 @@ function App() {
     knight: null,
     mage: null,
     archer: null,
+    elon: null,
+    gake: null,
   })
   const monsterSpriteCacheRef = useRef<MonsterSpriteMap>({
     goblin: null,
@@ -3853,6 +3875,14 @@ function App() {
               <div className="roster-card">
                 <img src={archerSprite} alt="Swift Archer" />
                 <span>Swift Archer</span>
+              </div>
+              <div className="roster-card">
+                <img src={elonSprite} alt="Elon" />
+                <span>Elon Commander</span>
+              </div>
+              <div className="roster-card">
+                <img src={gakeSprite} alt="Gake" />
+                <span>Gake Trickster</span>
               </div>
             </div>
           </div>
