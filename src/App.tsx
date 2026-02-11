@@ -741,7 +741,7 @@ const STARTER_PACK_ITEMS: { type: ConsumableType; qty: number }[] = [
   { type: 'attack', qty: 10 },
   { type: 'key', qty: 20 },
 ]
-const CONTRACT_ADDRESS = 'Frw5WfuyBuC13TgDJUhyWREqvkNoFUdeKuQ7PYkopump'
+const CONTRACT_ADDRESS = 'Soon'
 
 const MONSTER_HP_TIER_TARGET = 30000
 const MONSTER_HP_TIER_EXCESS = 0.2
