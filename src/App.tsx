@@ -741,6 +741,7 @@ const STARTER_PACK_ITEMS: { type: ConsumableType; qty: number }[] = [
   { type: 'attack', qty: 10 },
   { type: 'key', qty: 20 },
 ]
+const CONTRACT_ADDRESS = 'Frw5WfuyBuC13TgDJUhyWREqvkNoFUdeKuQ7PYkopump'
 
 const MONSTER_HP_TIER_TARGET = 30000
 const MONSTER_HP_TIER_EXCESS = 0.2
@@ -2564,7 +2565,7 @@ function App() {
   }, [])
 
   const copyContractAddress = async () => {
-    const contractValue = 'Soon'
+    const contractValue = CONTRACT_ADDRESS
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(contractValue)
@@ -3780,7 +3781,7 @@ function App() {
                 <div className="auth-cta-row">
                   <WalletMultiButton className="wallet-button auth-wallet" />
                   <button type="button" className="contract-button" onClick={copyContractAddress}>
-                    Contract Address: <strong>Soon</strong>
+                    Contract Address: <strong>{CONTRACT_ADDRESS}</strong>
                     <span className="copy-icon" aria-hidden>⧉</span>
                     {contractCopied && <span className="copy-tag">Copied</span>}
                   </button>
