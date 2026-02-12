@@ -4637,10 +4637,10 @@ function App() {
                 <div className="shop-desc">Restore 10 energy.</div>
                 <div className="shop-meta">
                   <img className="icon-img small" src={iconGold} alt="" />
-                  Cost: 1500
+                  Cost: 3000
                 </div>
                 <img className="shop-icon" src={iconEnergyTonic} alt="Energy tonic" />
-                <button type="button" onClick={() => buyEnergyPotion(1500)}>
+                <button type="button" onClick={() => buyEnergyPotion(3000)}>
                   Buy
                 </button>
               </div>
@@ -4649,10 +4649,10 @@ function App() {
                 <div className="shop-desc">Restore energy to full.</div>
                 <div className="shop-meta">
                   <img className="icon-img small" src={iconGold} alt="" />
-                  Cost: 5000
+                  Cost: 10000
                 </div>
                 <img className="shop-icon" src={iconGrandEnergy} alt="Grand energy elixir" />
-                <button type="button" onClick={() => buyFullEnergy(5000)}>
+                <button type="button" onClick={() => buyFullEnergy(10000)}>
                   Buy
                 </button>
               </div>
@@ -4661,10 +4661,10 @@ function App() {
                 <div className="shop-desc">+50% speed for 5 minutes.</div>
                 <div className="shop-meta">
                   <img className="icon-img small" src={iconGold} alt="" />
-                  Cost: 500
+                  Cost: 1000
                 </div>
                 <img className="shop-icon" src={iconSwiftDraught} alt="Swift draught" />
-                <button type="button" onClick={() => buySpeedPotion(500)}>
+                <button type="button" onClick={() => buySpeedPotion(1000)}>
                   Buy
                 </button>
               </div>
@@ -4673,10 +4673,10 @@ function App() {
                 <div className="shop-desc">+50% attack speed for 5 minutes.</div>
                 <div className="shop-meta">
                   <img className="icon-img small" src={iconGold} alt="" />
-                  Cost: 500
+                  Cost: 1000
                 </div>
                 <img className="shop-icon" src={iconAttackSpeed} alt="Attack speed tonic" />
-                <button type="button" onClick={() => buyAttackSpeedPotion(500)}>
+                <button type="button" onClick={() => buyAttackSpeedPotion(1000)}>
                   Buy
                 </button>
               </div>
@@ -4685,10 +4685,10 @@ function App() {
                 <div className="shop-desc">+1 dungeon entry.</div>
                 <div className="shop-meta">
                   <img className="icon-img small" src={iconGold} alt="" />
-                  Cost: 25000
+                  Cost: 50000
                 </div>
                 <img className="shop-icon" src={iconKey} alt="Dungeon key" />
-                <button type="button" onClick={() => buyDungeonTicket(25000)}>
+                <button type="button" onClick={() => buyDungeonTicket(50000)}>
                   Buy
                 </button>
               </div>
