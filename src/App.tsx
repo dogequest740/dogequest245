@@ -639,13 +639,24 @@ const scaleRewardGold = (index: number, total: number, min: number, max: number)
   return Math.round(min + (max - min) * ratio)
 }
 
+const withEveryOtherEnergyReward = (
+  rewardItem: QuestRewardItem,
+  index: number,
+): QuestRewardItem | undefined => {
+  if (rewardItem === 'energy-small' || rewardItem === 'energy-full') {
+    return index % 2 === 0 ? rewardItem : undefined
+  }
+  return rewardItem
+}
+
 const buildQuestList = (): QuestDefinition[] => {
   const quests: QuestDefinition[] = []
 
   LEVEL_QUEST_TARGETS.forEach((target, index) => {
-    const rewardGold = scaleRewardGold(index, LEVEL_QUEST_TARGETS.length, 200, 2200)
-    const rewardItem: QuestRewardItem =
+    const rewardGold = Math.round(scaleRewardGold(index, LEVEL_QUEST_TARGETS.length, 200, 2200) / 2)
+    const baseRewardItem: QuestRewardItem =
       target >= 255 ? 'key' : target >= 200 ? 'energy-full' : target >= 140 ? 'attack' : target >= 80 ? 'speed' : 'energy-small'
+    const rewardItem = withEveryOtherEnergyReward(baseRewardItem, index)
     quests.push({
       id: `level-${target}`,
       title: `Reach level ${target}`,
@@ -658,9 +669,10 @@ const buildQuestList = (): QuestDefinition[] => {
   })
 
   KILL_QUEST_TARGETS.forEach((target, index) => {
-    const rewardGold = scaleRewardGold(index, KILL_QUEST_TARGETS.length, 250, 2500)
-    const rewardItem: QuestRewardItem =
+    const rewardGold = Math.round(scaleRewardGold(index, KILL_QUEST_TARGETS.length, 250, 2500) / 2)
+    const baseRewardItem: QuestRewardItem =
       target >= 56000 ? 'key' : target >= 32000 ? 'energy-full' : target >= 16000 ? 'attack' : target >= 4500 ? 'speed' : 'energy-small'
+    const rewardItem = withEveryOtherEnergyReward(baseRewardItem, index)
     quests.push({
       id: `kills-${target}`,
       title: `Slay ${target} monsters`,
@@ -673,9 +685,10 @@ const buildQuestList = (): QuestDefinition[] => {
   })
 
   TIER_QUEST_TARGETS.forEach((target, index) => {
-    const rewardGold = scaleRewardGold(index, TIER_QUEST_TARGETS.length, 300, 3000)
-    const rewardItem: QuestRewardItem =
+    const rewardGold = Math.round(scaleRewardGold(index, TIER_QUEST_TARGETS.length, 300, 3000) / 2)
+    const baseRewardItem: QuestRewardItem =
       target >= 45000 ? 'key' : target >= 32000 ? 'energy-full' : target >= 19000 ? 'attack' : target >= 8000 ? 'speed' : 'energy-small'
+    const rewardItem = withEveryOtherEnergyReward(baseRewardItem, index)
     quests.push({
       id: `tier-${target}`,
       title: `Tier Score ${target}`,
@@ -688,9 +701,10 @@ const buildQuestList = (): QuestDefinition[] => {
   })
 
   DUNGEON_QUEST_TARGETS.forEach((target, index) => {
-    const rewardGold = scaleRewardGold(index, DUNGEON_QUEST_TARGETS.length, 350, 3200)
-    const rewardItem: QuestRewardItem =
+    const rewardGold = Math.round(scaleRewardGold(index, DUNGEON_QUEST_TARGETS.length, 350, 3200) / 2)
+    const baseRewardItem: QuestRewardItem =
       target >= 165 ? 'key' : target >= 104 ? 'energy-full' : target >= 62 ? 'attack' : target >= 23 ? 'speed' : 'energy-small'
+    const rewardItem = withEveryOtherEnergyReward(baseRewardItem, index)
     quests.push({
       id: `dungeons-${target}`,
       title: `Clear dungeons ${target}x`,
@@ -716,7 +730,7 @@ const DUNGEONS = DUNGEON_REQUIREMENTS.map((tierScore, index) => ({
   id: `crypt-${index + 1}`,
   name: `Crypt ${index + 1}`,
   tierScore,
-  reward: Math.round(6 + (index + 1) * 4 + Math.pow(index + 1, 1.1)),
+  reward: Math.max(1, Math.round((6 + (index + 1) * 4 + Math.pow(index + 1, 1.1)) / 2)),
 }))
 
 const WORLD_BOSS_DURATION = 5 * 60 * 60
@@ -741,7 +755,7 @@ const STARTER_PACK_ITEMS: { type: ConsumableType; qty: number }[] = [
   { type: 'attack', qty: 10 },
   { type: 'key', qty: 20 },
 ]
-const CONTRACT_ADDRESS = 'Frw5WfuyBuC13TgDJUhyWREqvkNoFUdeKuQ7PYkopump'
+const CONTRACT_ADDRESS = 'Soon'
 
 const MONSTER_HP_TIER_TARGET = 30000
 const MONSTER_HP_TIER_EXCESS = 0.2
