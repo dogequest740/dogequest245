@@ -653,7 +653,7 @@ const buildQuestList = (): QuestDefinition[] => {
   const quests: QuestDefinition[] = []
 
   LEVEL_QUEST_TARGETS.forEach((target, index) => {
-    const rewardGold = Math.round(scaleRewardGold(index, LEVEL_QUEST_TARGETS.length, 200, 2200) / 2)
+    const rewardGold = Math.round(scaleRewardGold(index, LEVEL_QUEST_TARGETS.length, 200, 2200) / 4)
     const baseRewardItem: QuestRewardItem =
       target >= 255 ? 'key' : target >= 200 ? 'energy-full' : target >= 140 ? 'attack' : target >= 80 ? 'speed' : 'energy-small'
     const rewardItem = withEveryOtherEnergyReward(baseRewardItem, index)
@@ -669,7 +669,7 @@ const buildQuestList = (): QuestDefinition[] => {
   })
 
   KILL_QUEST_TARGETS.forEach((target, index) => {
-    const rewardGold = Math.round(scaleRewardGold(index, KILL_QUEST_TARGETS.length, 250, 2500) / 2)
+    const rewardGold = Math.round(scaleRewardGold(index, KILL_QUEST_TARGETS.length, 250, 2500) / 4)
     const baseRewardItem: QuestRewardItem =
       target >= 56000 ? 'key' : target >= 32000 ? 'energy-full' : target >= 16000 ? 'attack' : target >= 4500 ? 'speed' : 'energy-small'
     const rewardItem = withEveryOtherEnergyReward(baseRewardItem, index)
@@ -685,7 +685,7 @@ const buildQuestList = (): QuestDefinition[] => {
   })
 
   TIER_QUEST_TARGETS.forEach((target, index) => {
-    const rewardGold = Math.round(scaleRewardGold(index, TIER_QUEST_TARGETS.length, 300, 3000) / 2)
+    const rewardGold = Math.round(scaleRewardGold(index, TIER_QUEST_TARGETS.length, 300, 3000) / 4)
     const baseRewardItem: QuestRewardItem =
       target >= 45000 ? 'key' : target >= 32000 ? 'energy-full' : target >= 19000 ? 'attack' : target >= 8000 ? 'speed' : 'energy-small'
     const rewardItem = withEveryOtherEnergyReward(baseRewardItem, index)
@@ -701,7 +701,7 @@ const buildQuestList = (): QuestDefinition[] => {
   })
 
   DUNGEON_QUEST_TARGETS.forEach((target, index) => {
-    const rewardGold = Math.round(scaleRewardGold(index, DUNGEON_QUEST_TARGETS.length, 350, 3200) / 2)
+    const rewardGold = Math.round(scaleRewardGold(index, DUNGEON_QUEST_TARGETS.length, 350, 3200) / 4)
     const baseRewardItem: QuestRewardItem =
       target >= 165 ? 'key' : target >= 104 ? 'energy-full' : target >= 62 ? 'attack' : target >= 23 ? 'speed' : 'energy-small'
     const rewardItem = withEveryOtherEnergyReward(baseRewardItem, index)
@@ -730,7 +730,7 @@ const DUNGEONS = DUNGEON_REQUIREMENTS.map((tierScore, index) => ({
   id: `crypt-${index + 1}`,
   name: `Crypt ${index + 1}`,
   tierScore,
-  reward: Math.max(1, Math.round((6 + (index + 1) * 4 + Math.pow(index + 1, 1.1)) / 2)),
+  reward: Math.max(1, Math.round((6 + (index + 1) * 4 + Math.pow(index + 1, 1.1)) / 4)),
 }))
 
 const WORLD_BOSS_DURATION = 5 * 60 * 60
