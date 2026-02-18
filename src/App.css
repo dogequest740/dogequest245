@@ -2215,8 +2215,20 @@
   width: auto;
 }
 
-.referral-float.with-starterpack {
+.premium-float {
+  top: 18px;
+}
+
+.premium-float.with-starterpack {
   top: 176px;
+}
+
+.referral-float {
+  top: 176px;
+}
+
+.referral-float.with-starterpack {
+  top: 334px;
 }
 
 .referral-float .starter-pack-icon {
@@ -3825,6 +3837,39 @@ button.ghost {
 
 .referral-body .withdraw-submit {
   margin-top: 2px;
+}
+
+.premium-body {
+  gap: 12px;
+}
+
+.premium-hero {
+  background: linear-gradient(135deg, rgba(40, 26, 10, 0.96), rgba(14, 12, 20, 0.94));
+  border: 1px solid rgba(250, 210, 110, 0.42);
+}
+
+.premium-image {
+  width: 96px;
+  height: 96px;
+}
+
+.premium-plans .premium-card {
+  justify-items: stretch;
+}
+
+.premium-plans .premium-card .shop-title,
+.premium-plans .premium-card .shop-desc,
+.premium-plans .premium-card .shop-meta {
+  text-align: center;
+  justify-content: center;
+}
+
+.premium-plans .premium-card button {
+  width: 100%;
+}
+
+.premium-list .starterpack-item {
+  border-color: rgba(125, 180, 255, 0.26);
 }
 
 .referral-conditions {

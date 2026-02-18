@@ -28,6 +28,7 @@ import iconInventory from './assets/icons/inventory.png'
 import iconDungeons from './assets/icons/dungeons.png'
 import iconShop from './assets/icons/shop.png'
 import iconName from './assets/icons/name.png'
+import iconLevel from './assets/icons/level.png'
 import iconKey from './assets/icons/key.png'
 import iconEnergyTonic from './assets/icons/energy-tonic.png'
 import iconGrandEnergy from './assets/icons/grand-energy-elixir.png'
@@ -41,6 +42,7 @@ import iconSolana from './assets/icons/solana.png'
 import iconStacking from './assets/icons/stacking.png'
 import iconBuyGold from './assets/icons/buy-gold.png'
 import iconStarterPack from './assets/icons/starter-pack.png'
+import iconPremium from './assets/icons/premium.png'
 import iconReferrals from './assets/icons/referrals.png'
 import iconWeapon from './assets/icons/armory-weapon.png'
 import iconArmor from './assets/icons/armory-armor.png'
@@ -219,6 +221,8 @@ type PersistedState = {
   monsterKills: number
   dungeonRuns: number
   starterPackPurchased: boolean
+  premiumEndsAt: number
+  premiumClaimDay: string
   stake: StakeEntry[] | { active: boolean; amount: number; endsAt: number }
   stakeId: number
 }
@@ -474,6 +478,8 @@ type GameState = {
   worldBoss: WorldBossState
   questStates: Record<string, QuestState>
   starterPackPurchased: boolean
+  premiumEndsAt: number
+  premiumClaimDay: string
   stake: StakeEntry[]
   stakeId: number
 }
@@ -512,6 +518,8 @@ type HudState = {
   worldBoss: WorldBossState
   questStates: Record<string, QuestState>
   starterPackPurchased: boolean
+  premiumEndsAt: number
+  premiumClaimDay: string
   stake: StakeEntry[]
 }
 
@@ -797,6 +805,17 @@ const STARTER_PACK_ITEMS: { type: ConsumableType; qty: number }[] = [
   { type: 'key', qty: 20 },
 ]
 const CONTRACT_ADDRESS = 'soon'
+const PREMIUM_PLANS = [
+  { id: 'premium-30', days: 30, sol: 0.5 },
+  { id: 'premium-90', days: 90, sol: 1 },
+] as const
+type PremiumPlanId = (typeof PREMIUM_PLANS)[number]['id']
+const PREMIUM_DAILY_KEYS = 5
+const PREMIUM_DAILY_GOLD = 50000
+const PREMIUM_DAILY_SMALL_POTIONS = 5
+const PREMIUM_DAILY_BIG_POTIONS = 3
+const PREMIUM_XP_MULTIPLIER = 1.5
+const PREMIUM_DUNGEON_CRYSTAL_MULTIPLIER = 1.5
 const REFERRAL_LEVEL_TARGET = 15
 const REFERRAL_KEY_BONUS = 3
 const REFERRAL_CRYSTAL_RATE = 0.05
@@ -1003,6 +1022,8 @@ const buildPersistedState = (state: GameState): PersistedState => ({
   monsterKills: state.monsterKills,
   dungeonRuns: state.dungeonRuns,
   starterPackPurchased: state.starterPackPurchased,
+  premiumEndsAt: state.premiumEndsAt,
+  premiumClaimDay: state.premiumClaimDay,
   stake: state.stake,
   stakeId: state.stakeId,
 })
@@ -1048,6 +1069,8 @@ const applyPersistedState = (state: GameState, saved: PersistedState) => {
   state.monsterKills = Math.max(0, saved.monsterKills ?? state.monsterKills)
   state.dungeonRuns = Math.max(0, saved.dungeonRuns ?? state.dungeonRuns)
   state.starterPackPurchased = Boolean(saved.starterPackPurchased)
+  state.premiumEndsAt = Math.max(0, Number(saved.premiumEndsAt ?? state.premiumEndsAt))
+  state.premiumClaimDay = saved.premiumClaimDay || state.premiumClaimDay
   if (saved.stake) {
     if (Array.isArray(saved.stake)) {
       state.stake = saved.stake
@@ -1463,6 +1486,11 @@ const isValidWalletAddress = (value: string) => {
   } catch {
     return false
   }
+}
+const isPremiumActiveAt = (premiumEndsAt: number, nowMs = Date.now()) => premiumEndsAt > nowMs
+const getPremiumDaysLeft = (premiumEndsAt: number, nowMs = Date.now()) => {
+  if (!isPremiumActiveAt(premiumEndsAt, nowMs)) return 0
+  return Math.max(1, Math.ceil((premiumEndsAt - nowMs) / (24 * 60 * 60 * 1000)))
 }
 
 const getXpForLevel = (level: number) => Math.round(XP_BASE + XP_SCALE * Math.pow(level, XP_POWER))
@@ -1939,6 +1967,8 @@ const buildHud = (state: GameState): HudState => ({
   worldBoss: state.worldBoss,
   questStates: state.questStates,
   starterPackPurchased: state.starterPackPurchased,
+  premiumEndsAt: state.premiumEndsAt,
+  premiumClaimDay: state.premiumClaimDay,
   stake: state.stake,
 })
 
@@ -2014,6 +2044,8 @@ const initGameState = (chosenClass: CharacterClass, name: string): GameState => 
     monsterHpScale: getMonsterHpMultiplier(0),
     worldBoss: createWorldBossState(name),
     starterPackPurchased: false,
+    premiumEndsAt: 0,
+    premiumClaimDay: '',
     stake: [],
     stakeId: 0,
     questStates: QUESTS.reduce((acc, quest) => {
@@ -2216,7 +2248,10 @@ const updateGame = (state: GameState, dt: number) => {
       if (target.hp <= 0) {
         state.monsterKills += 1
         if (player.level < MAX_LEVEL) {
-          const xpGain = Math.max(1, Math.round((target.xp + randomInt(2, 8)) / 3))
+          const baseXpGain = Math.max(1, Math.round((target.xp + randomInt(2, 8)) / 3))
+          const xpGain = isPremiumActiveAt(state.premiumEndsAt)
+            ? Math.max(1, Math.round(baseXpGain * PREMIUM_XP_MULTIPLIER))
+            : baseXpGain
           player.xp += xpGain
           pushLog(state.eventLog, `Victory over ${target.name} (+${xpGain} XP)`)
         } else {
@@ -2545,6 +2580,7 @@ function App() {
     | 'stake'
     | 'buygold'
     | 'starterpack'
+    | 'premium'
     | 'referrals'
     | null
   >(null)
@@ -2562,6 +2598,9 @@ function App() {
   const [buyGoldLoading, setBuyGoldLoading] = useState<string | null>(null)
   const [starterPackError, setStarterPackError] = useState('')
   const [starterPackLoading, setStarterPackLoading] = useState(false)
+  const [premiumError, setPremiumError] = useState('')
+  const [premiumLoading, setPremiumLoading] = useState<string | null>(null)
+  const [premiumClaimLoading, setPremiumClaimLoading] = useState(false)
   const [solBalance, setSolBalance] = useState(0)
   const [solBalanceLoading, setSolBalanceLoading] = useState(false)
   const [stakeAmount, setStakeAmount] = useState('')
@@ -3345,6 +3384,11 @@ function App() {
       setStarterPackError('')
       setStarterPackLoading(false)
     }
+    if (activePanel !== 'premium') {
+      setPremiumError('')
+      setPremiumLoading(null)
+      setPremiumClaimLoading(false)
+    }
     if (activePanel !== 'stake') {
       setStakeError('')
       setStakeTab('stake')
@@ -3413,7 +3457,7 @@ function App() {
   }, [activePanel, isAdmin])
 
   useEffect(() => {
-    if (activePanel !== 'buygold') return
+    if (activePanel !== 'buygold' && activePanel !== 'premium' && activePanel !== 'starterpack') return
     if (!publicKey) {
       setSolBalance(0)
       return
@@ -3820,6 +3864,94 @@ function App() {
     }
   }
 
+  const buyPremiumPlan = async (planId: PremiumPlanId) => {
+    const state = gameStateRef.current
+    const plan = PREMIUM_PLANS.find((entry) => entry.id === planId)
+    if (!state || !publicKey || !plan) {
+      setPremiumError('Connect your wallet to buy Premium.')
+      return
+    }
+    setPremiumLoading(plan.id)
+    setPremiumError('')
+    try {
+      const lamports = Math.round(plan.sol * LAMPORTS_PER_SOL)
+      const balance = await connection.getBalance(publicKey)
+      const feeBuffer = 5000
+      if (balance < lamports + feeBuffer) {
+        setPremiumError(`Not enough SOL. Need ${plan.sol} SOL + network fee.`)
+        setPremiumLoading(null)
+        return
+      }
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash()
+      const tx = new Transaction({
+        feePayer: publicKey,
+        recentBlockhash: blockhash,
+      }).add(
+        SystemProgram.transfer({
+          fromPubkey: publicKey,
+          toPubkey: GOLD_STORE_WALLET,
+          lamports,
+        }),
+      )
+      const signature = await sendTransaction(tx, connection)
+      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
+
+      const now = Date.now()
+      const base = Math.max(now, state.premiumEndsAt)
+      state.premiumEndsAt = base + plan.days * 24 * 60 * 60 * 1000
+      pushLog(state.eventLog, `Premium activated for ${plan.days} days.`)
+      syncHud()
+      void saveGameState()
+    } catch (error) {
+      console.warn('Premium purchase failed', error)
+      const message = error instanceof Error ? error.message : String(error)
+      setPremiumError(`Transaction failed: ${message}`)
+    } finally {
+      setPremiumLoading(null)
+    }
+  }
+
+  const claimPremiumDailyRewards = async () => {
+    const state = gameStateRef.current
+    if (!state) return
+    if (premiumClaimLoading) return
+    if (!isPremiumActiveAt(state.premiumEndsAt)) {
+      setPremiumError('Premium subscription is inactive.')
+      return
+    }
+    const dayKey = getDayKey()
+    if (state.premiumClaimDay === dayKey) {
+      setPremiumError('Daily Premium rewards already claimed today.')
+      return
+    }
+
+    setPremiumClaimLoading(true)
+    setPremiumError('')
+    try {
+      state.tickets = Math.min(SHOP_TICKET_CAP, Math.max(0, Math.floor(state.tickets)) + PREMIUM_DAILY_KEYS)
+      state.gold = Math.max(0, Math.floor(state.gold)) + PREMIUM_DAILY_GOLD
+      for (let i = 0; i < PREMIUM_DAILY_SMALL_POTIONS; i += 1) {
+        addConsumable(state, 'energy-small')
+      }
+      for (let i = 0; i < PREMIUM_DAILY_BIG_POTIONS; i += 1) {
+        addConsumable(state, 'energy-full')
+      }
+      state.premiumClaimDay = dayKey
+      pushLog(
+        state.eventLog,
+        `Premium claim: +${PREMIUM_DAILY_KEYS} keys, +${formatNumber(PREMIUM_DAILY_GOLD)} gold, +${PREMIUM_DAILY_SMALL_POTIONS} Energy Tonic, +${PREMIUM_DAILY_BIG_POTIONS} Grand Energy Elixir.`,
+      )
+      syncHud()
+      await saveGameState()
+    } catch (error) {
+      console.warn('Premium claim failed', error)
+      const message = error instanceof Error ? error.message : String(error)
+      setPremiumError(`Claim failed: ${message}`)
+    } finally {
+      setPremiumClaimLoading(false)
+    }
+  }
+
   const startStake = () => {
     const state = gameStateRef.current
     if (!state) return
@@ -4093,7 +4225,10 @@ function App() {
       return
     }
 
-    const reward = Math.max(0, Math.round(result.reward ?? dungeon.reward))
+    const baseReward = Math.max(0, Math.round(result.reward ?? dungeon.reward))
+    const reward = isPremiumActiveAt(state.premiumEndsAt)
+      ? Math.max(0, Math.round(baseReward * PREMIUM_DUNGEON_CRYSTAL_MULTIPLIER))
+      : baseReward
     state.tickets = Math.max(0, Math.round(result.tickets ?? state.tickets))
     if (result.ticketDay) {
       state.ticketDay = result.ticketDay
@@ -4117,6 +4252,10 @@ function App() {
     : ''
 
   const levelUpNotice = hud?.levelUpNotice ?? null
+  const currentDayKey = getDayKey()
+  const premiumActive = Boolean(hud && isPremiumActiveAt(hud.premiumEndsAt))
+  const premiumDaysLeft = hud ? getPremiumDaysLeft(hud.premiumEndsAt) : 0
+  const premiumClaimReady = Boolean(hud && premiumActive && hud.premiumClaimDay !== currentDayKey)
 
   const getQuestProgressValue = (quest: QuestDefinition) => {
     if (!hud) return 0
@@ -4762,6 +4901,17 @@ function App() {
                 )}
                 <button
                   type="button"
+                  className={`starter-pack-btn starter-pack-float premium-float ${!hud?.starterPackPurchased ? 'with-starterpack' : ''}`}
+                  onClick={() => setActivePanel('premium')}
+                >
+                  <img className="starter-pack-icon" src={iconPremium} alt="" />
+                  <div className="starter-pack-text">
+                    <strong>Premium</strong>
+                    <span>{premiumActive ? `${premiumDaysLeft}d left` : 'Subscription'}</span>
+                  </div>
+                </button>
+                <button
+                  type="button"
                   className={`starter-pack-btn starter-pack-float referral-float ${!hud?.starterPackPurchased ? 'with-starterpack' : ''}`}
                   onClick={() => setActivePanel('referrals')}
                 >
@@ -5102,12 +5252,15 @@ function App() {
               {DUNGEONS.map((dungeon) => {
                 const canEnter = hud.tierScore >= dungeon.tierScore && hud.tickets > 0
                 const progress = Math.min(100, Math.round((hud.tierScore / dungeon.tierScore) * 100))
+                const reward = premiumActive
+                  ? Math.max(0, Math.round(dungeon.reward * PREMIUM_DUNGEON_CRYSTAL_MULTIPLIER))
+                  : dungeon.reward
                 return (
                   <div key={dungeon.id} className={`dungeon-row ${canEnter ? 'ready' : 'locked'}`}>
                     <div className="dungeon-name">{dungeon.name}</div>
                     <div className="dungeon-reward">
                       <span className="icon icon-crystal" aria-hidden />
-                      +{dungeon.reward} crystals
+                      +{reward} crystals
                     </div>
                     <div className="dungeon-req">Requires Tier Score {dungeon.tierScore}</div>
                     <div className="dungeon-bar">
@@ -5299,6 +5452,89 @@ function App() {
                 {starterPackLoading ? 'Processing...' : 'Buy Starter Pack'}
               </button>
               <div className="withdraw-note">This pack can be purchased only once.</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activePanel === 'premium' && hud && (
+        <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Premium</h3>
+              <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
+                Close
+              </button>
+            </div>
+            <div className="withdraw-body starterpack-body premium-body">
+              <div className="starterpack-hero premium-hero">
+                <img className="starterpack-image premium-image" src={iconPremium} alt="" />
+                <div className="starterpack-meta">
+                  <div className="starterpack-title">Premium Membership</div>
+                  <div className="withdraw-note">
+                    {premiumActive ? `Active: ${premiumDaysLeft} day${premiumDaysLeft === 1 ? '' : 's'} left.` : 'Inactive.'}
+                  </div>
+                  {premiumActive && <div className="withdraw-note">Ends: {new Date(hud.premiumEndsAt).toLocaleString()}</div>}
+                </div>
+              </div>
+              <div className="withdraw-info">
+                <span className="withdraw-info-label">
+                  <img className="icon-img small" src={iconSolana} alt="" />
+                  Wallet balance
+                </span>
+                <strong>{solBalanceLoading ? 'Loading...' : `${solBalance.toFixed(4)} SOL`}</strong>
+              </div>
+              <div className="shop-grid premium-plans">
+                {PREMIUM_PLANS.map((plan) => (
+                  <div key={plan.id} className="shop-card premium-card">
+                    <div className="shop-title">{plan.days} days</div>
+                    <div className="shop-desc">{plan.id === 'premium-90' ? 'Best value' : 'Starter premium plan'}</div>
+                    <div className="shop-meta">
+                      <img className="icon-img small" src={iconSolana} alt="" />
+                      {plan.sol} SOL
+                    </div>
+                    <button type="button" disabled={premiumLoading === plan.id} onClick={() => buyPremiumPlan(plan.id)}>
+                      {premiumLoading === plan.id ? 'Processing...' : premiumActive ? `Extend +${plan.days}d` : `Buy ${plan.days}d`}
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="starterpack-list premium-list">
+                <div className="starterpack-item">
+                  <img className="icon-img" src={iconKey} alt="" />
+                  <span>+{PREMIUM_DAILY_KEYS} dungeon keys daily (claim)</span>
+                </div>
+                <div className="starterpack-item">
+                  <img className="icon-img" src={iconGold} alt="" />
+                  <span>+{formatNumber(PREMIUM_DAILY_GOLD)} gold daily (claim)</span>
+                </div>
+                <div className="starterpack-item">
+                  <img className="icon-img" src={iconEnergyTonic} alt="" />
+                  <span>{PREMIUM_DAILY_SMALL_POTIONS} Energy Tonic daily (claim)</span>
+                </div>
+                <div className="starterpack-item">
+                  <img className="icon-img" src={iconGrandEnergy} alt="" />
+                  <span>{PREMIUM_DAILY_BIG_POTIONS} Grand Energy Elixir daily (claim)</span>
+                </div>
+                <div className="starterpack-item">
+                  <img className="icon-img" src={iconLevel} alt="" />
+                  <span>+{Math.round((PREMIUM_XP_MULTIPLIER - 1) * 100)}% XP from mobs</span>
+                </div>
+                <div className="starterpack-item">
+                  <img className="icon-img" src={iconCrystals} alt="" />
+                  <span>+{Math.round((PREMIUM_DUNGEON_CRYSTAL_MULTIPLIER - 1) * 100)}% crystals from dungeons</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="withdraw-submit"
+                disabled={premiumClaimLoading || !premiumClaimReady}
+                onClick={claimPremiumDailyRewards}
+              >
+                {premiumClaimLoading ? 'Claiming...' : premiumClaimReady ? 'Claim daily rewards' : premiumActive ? 'Already claimed today' : 'Premium inactive'}
+              </button>
+              {premiumError && <div className="withdraw-error">{premiumError}</div>}
+              <div className="withdraw-note">Daily claim resets at 00:00 UTC (same as dungeon keys).</div>
             </div>
           </div>
         </div>
