@@ -3866,6 +3866,10 @@ button.ghost {
 
 .premium-plans .premium-card button {
   width: 100%;
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  text-shadow: 0 0 10px rgba(255, 224, 160, 0.45);
 }
 
 .premium-list .starterpack-item {

@@ -5494,7 +5494,7 @@ function App() {
                       {plan.sol} SOL
                     </div>
                     <button type="button" disabled={premiumLoading === plan.id} onClick={() => buyPremiumPlan(plan.id)}>
-                      {premiumLoading === plan.id ? 'Processing...' : premiumActive ? `Extend +${plan.days}d` : `Buy ${plan.days}d`}
+                      {premiumLoading === plan.id ? 'PROCESSING...' : premiumActive ? `EXTEND +${plan.days}D` : `BUY ${plan.days}D`}
                     </button>
                   </div>
                 ))}
@@ -5502,19 +5502,19 @@ function App() {
               <div className="starterpack-list premium-list">
                 <div className="starterpack-item">
                   <img className="icon-img" src={iconKey} alt="" />
-                  <span>+{PREMIUM_DAILY_KEYS} dungeon keys daily (claim)</span>
+                  <span>+{PREMIUM_DAILY_KEYS} dungeon keys daily</span>
                 </div>
                 <div className="starterpack-item">
                   <img className="icon-img" src={iconGold} alt="" />
-                  <span>+{formatNumber(PREMIUM_DAILY_GOLD)} gold daily (claim)</span>
+                  <span>+{formatNumber(PREMIUM_DAILY_GOLD)} gold daily</span>
                 </div>
                 <div className="starterpack-item">
                   <img className="icon-img" src={iconEnergyTonic} alt="" />
-                  <span>{PREMIUM_DAILY_SMALL_POTIONS} Energy Tonic daily (claim)</span>
+                  <span>{PREMIUM_DAILY_SMALL_POTIONS} Energy Tonic daily</span>
                 </div>
                 <div className="starterpack-item">
                   <img className="icon-img" src={iconGrandEnergy} alt="" />
-                  <span>{PREMIUM_DAILY_BIG_POTIONS} Grand Energy Elixir daily (claim)</span>
+                  <span>{PREMIUM_DAILY_BIG_POTIONS} Grand Energy Elixir daily</span>
                 </div>
                 <div className="starterpack-item">
                   <img className="icon-img" src={iconLevel} alt="" />
@@ -5534,7 +5534,7 @@ function App() {
                 {premiumClaimLoading ? 'Claiming...' : premiumClaimReady ? 'Claim daily rewards' : premiumActive ? 'Already claimed today' : 'Premium inactive'}
               </button>
               {premiumError && <div className="withdraw-error">{premiumError}</div>}
-              <div className="withdraw-note">Daily claim resets at 00:00 UTC (same as dungeon keys).</div>
+              <div className="withdraw-note">Daily rewards reset at 00:00 UTC.</div>
             </div>
           </div>
         </div>
