@@ -2480,6 +2480,7 @@ function App() {
   const musicUnlockRef = useRef(false)
   const serverLoadedRef = useRef(false)
   const dungeonSessionRef = useRef<{ token: string; expiresAt: number } | null>(null)
+  const dungeonSessionRequestRef = useRef<Promise<string | null> | null>(null)
   const secureSessionInitRef = useRef(false)
   const isNewProfileRef = useRef(false)
   const referralProcessedRef = useRef(false)
@@ -2587,6 +2588,10 @@ function App() {
       return cached.token
     }
 
+    if (dungeonSessionRequestRef.current) {
+      return dungeonSessionRequestRef.current
+    }
+
     if (!interactive) {
       return null
     }
@@ -2595,34 +2600,45 @@ function App() {
       return null
     }
 
-    const challenge = await callDungeonSecure({ action: 'challenge', wallet })
-    if (!challenge.ok || !challenge.message) {
-      return null
-    }
+    const request = (async () => {
+      const challenge = await callDungeonSecure({ action: 'challenge', wallet })
+      if (!challenge.ok || !challenge.message) {
+        return null
+      }
 
-    let signature: Uint8Array
+      let signature: Uint8Array
+      try {
+        signature = await signMessage(new TextEncoder().encode(challenge.message))
+      } catch {
+        return null
+      }
+
+      const login = await callDungeonSecure({
+        action: 'login',
+        wallet,
+        signature: bytesToBase64(signature),
+      })
+      if (!login.ok || !login.token) {
+        return null
+      }
+
+      const expiresAtMs = login.expiresAt ? new Date(login.expiresAt).getTime() : Number.NaN
+      dungeonSessionRef.current = {
+        token: login.token,
+        expiresAt: Number.isFinite(expiresAtMs) ? expiresAtMs : Date.now() + 24 * 60 * 60 * 1000,
+      }
+
+      return login.token
+    })()
+
+    dungeonSessionRequestRef.current = request
     try {
-      signature = await signMessage(new TextEncoder().encode(challenge.message))
-    } catch {
-      return null
+      return await request
+    } finally {
+      if (dungeonSessionRequestRef.current === request) {
+        dungeonSessionRequestRef.current = null
+      }
     }
-
-    const login = await callDungeonSecure({
-      action: 'login',
-      wallet,
-      signature: bytesToBase64(signature),
-    })
-    if (!login.ok || !login.token) {
-      return null
-    }
-
-    const expiresAtMs = login.expiresAt ? new Date(login.expiresAt).getTime() : Number.NaN
-    dungeonSessionRef.current = {
-      token: login.token,
-      expiresAt: Number.isFinite(expiresAtMs) ? expiresAtMs : Date.now() + 24 * 60 * 60 * 1000,
-    }
-
-    return login.token
   }
 
   const callDungeonSecureAuthed = async (
@@ -2956,6 +2972,7 @@ function App() {
     let active = true
     if (!connected) {
       dungeonSessionRef.current = null
+      dungeonSessionRequestRef.current = null
       secureSessionInitRef.current = false
       isNewProfileRef.current = false
       referralProcessedRef.current = false
@@ -2972,6 +2989,7 @@ function App() {
 
     const wallet = publicKey?.toBase58()
     dungeonSessionRef.current = null
+    dungeonSessionRequestRef.current = null
     secureSessionInitRef.current = false
     if (!wallet || !supabase) {
       isNewProfileRef.current = false

@@ -8,6 +8,7 @@ const TICKETS_MAX = 10;
 const SHOP_TICKET_CAP = 30;
 const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const CHALLENGE_TTL_SECONDS = 5 * 60;
+const CHALLENGE_REUSE_WINDOW_SECONDS = 10;
 const ITEM_TIER_SCORE_MULTIPLIER = 0.5;
 
 const DUNGEON_BASE_REQUIREMENTS = [
@@ -179,6 +180,34 @@ serve(async (req) => {
     const wallet = String(body.wallet ?? "");
     if (!isValidWallet(wallet)) return json({ ok: false, error: "Invalid wallet address." });
 
+    await supabase.from("wallet_auth_nonces").delete().lt("expires_at", now.toISOString());
+
+    const { data: existingChallenge, error: existingChallengeError } = await supabase
+      .from("wallet_auth_nonces")
+      .select("wallet, nonce, message, expires_at, updated_at")
+      .eq("wallet", wallet)
+      .maybeSingle();
+
+    if (existingChallengeError) {
+      return json({ ok: false, error: "Failed to load signature challenge." });
+    }
+
+    if (existingChallenge) {
+      const expiresAtMs = new Date(String(existingChallenge.expires_at)).getTime();
+      const updatedAtMs = new Date(String(existingChallenge.updated_at ?? existingChallenge.expires_at)).getTime();
+      const stillValid = Number.isFinite(expiresAtMs) && expiresAtMs > now.getTime();
+      const recentlyIssued = Number.isFinite(updatedAtMs) &&
+        now.getTime() - updatedAtMs <= CHALLENGE_REUSE_WINDOW_SECONDS * 1000;
+      if (stillValid && recentlyIssued) {
+        return json({
+          ok: true,
+          wallet,
+          message: String(existingChallenge.message),
+          expiresAt: String(existingChallenge.expires_at),
+        });
+      }
+    }
+
     const nonce = crypto.randomUUID().replace(/-/g, "");
     const issuedAt = now.toISOString();
     const expiresAt = new Date(now.getTime() + CHALLENGE_TTL_SECONDS * 1000).toISOString();
@@ -229,12 +258,23 @@ serve(async (req) => {
     }
 
     const signature = decodeBase64(signatureBase64);
-    if (!signature || signature.length !== 64) return json({ ok: false, error: "Invalid signature format." });
+    if (!signature || signature.length !== 64) {
+      await supabase.from("wallet_auth_nonces").delete().eq("wallet", wallet);
+      return json({ ok: false, error: "Invalid signature format. Request a new challenge." });
+    }
 
     const messageBytes = textEncoder.encode(String(challenge.message));
     const publicKeyBytes = bs58.decode(wallet);
     const verified = nacl.sign.detached.verify(messageBytes, signature, publicKeyBytes);
-    if (!verified) return json({ ok: false, error: "Signature verification failed." });
+    if (!verified) {
+      await supabase.from("wallet_auth_nonces").delete().eq("wallet", wallet);
+      await supabase.from("security_events").insert({
+        wallet,
+        kind: "wallet_login_failed",
+        details: { reason: "signature_verification_failed", at: now.toISOString() },
+      });
+      return json({ ok: false, error: "Signature verification failed. Request a new challenge." });
+    }
 
     await supabase.from("wallet_auth_nonces").delete().eq("wallet", wallet);
     await supabase

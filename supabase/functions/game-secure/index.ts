@@ -11,6 +11,12 @@ const WORLD_BOSS_DAMAGE_PER_SEC_CAP = 5000;
 const REFERRAL_LEVEL_TARGET = 15;
 const REFERRAL_KEY_BONUS = 3;
 const REFERRAL_CRYSTAL_RATE = 0.05;
+const PREMIUM_MAX_FUTURE_DAYS = 180;
+const PREMIUM_MAX_EXTENSION_DAYS = 90;
+const STAKE_MIN_AMOUNT = 50;
+const STAKE_MAX_AMOUNT = 1_000_000;
+const STAKE_BONUS_RATE = 0.1;
+const STAKE_MAX_COUNT = 128;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -26,6 +32,12 @@ type Metrics = {
   crystalsEarned: number;
   monsterKills: number;
   dungeonRuns: number;
+};
+
+type StakeEntryState = {
+  id: number;
+  amount: number;
+  endsAt: number;
 };
 
 type WorldBossRow = {
@@ -87,6 +99,46 @@ const sanitizeName = (value: unknown) =>
 
 const isWalletLike = (value: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
 
+const normalizeStakes = (raw: unknown, fallbackId = 1): StakeEntryState[] => {
+  if (Array.isArray(raw)) {
+    return raw
+      .map((entry, index) => {
+        const row = entry && typeof entry === "object" ? entry as Record<string, unknown> : {};
+        const id = Math.max(1, asInt(row.id, index + 1));
+        const amount = Math.max(0, asInt(row.amount, 0));
+        const endsAt = Math.max(0, asInt(row.endsAt, 0));
+        return { id, amount, endsAt };
+      })
+      .filter((entry) => entry.amount > 0 && entry.endsAt > 0);
+  }
+
+  if (raw && typeof raw === "object") {
+    const legacy = raw as Record<string, unknown>;
+    const active = Boolean(legacy.active);
+    const amount = Math.max(0, asInt(legacy.amount, 0));
+    const endsAt = Math.max(0, asInt(legacy.endsAt, 0));
+    if (active && amount > 0 && endsAt > 0) {
+      return [{ id: Math.max(1, fallbackId), amount, endsAt }];
+    }
+  }
+
+  return [];
+};
+
+const stakeStats = (state: Record<string, unknown>) => {
+  const fallbackId = Math.max(1, asInt(state.stakeId, 1));
+  const stakes = normalizeStakes(state.stake, fallbackId);
+  const byId = new Map<number, StakeEntryState>();
+  let total = 0;
+  for (const entry of stakes) {
+    total += entry.amount;
+    if (!byId.has(entry.id)) {
+      byId.set(entry.id, entry);
+    }
+  }
+  return { stakes, byId, total: Math.max(0, total) };
+};
+
 const getMetrics = (state: Record<string, unknown>): Metrics => {
   const player = (state.player as Record<string, unknown> | undefined) ?? {};
   return {
@@ -127,31 +179,86 @@ const normalizeState = (raw: unknown) => {
   state.energy = Math.max(0, asInt(state.energy, 0));
   state.energyMax = Math.max(1, asInt(state.energyMax, 50));
   state.tickets = clampInt(state.tickets, 0, 30);
+  state.starterPackPurchased = Boolean(state.starterPackPurchased);
+  state.premiumEndsAt = Math.max(0, asInt(state.premiumEndsAt, 0));
+  state.premiumClaimDay = String(state.premiumClaimDay ?? "").slice(0, 10);
+  const stakeId = Math.max(0, asInt(state.stakeId, 0));
+  const stakes = normalizeStakes(state.stake, stakeId || 1);
+  const maxStakeId = stakes.reduce((max, entry) => Math.max(max, entry.id), stakeId);
+  state.stake = stakes;
+  state.stakeId = maxStakeId;
   return state;
 };
 
 const validateStateTransition = (
+  prevState: Record<string, unknown> | null,
+  nextState: Record<string, unknown>,
   prev: Metrics | null,
   next: Metrics,
   elapsedSec: number,
+  nowMs: number,
 ) => {
+  const nextPremiumEndsAt = Math.max(0, asInt(nextState.premiumEndsAt, 0));
+  const maxPremiumFutureMs = nowMs + PREMIUM_MAX_FUTURE_DAYS * 24 * 60 * 60 * 1000;
+  if (nextPremiumEndsAt > maxPremiumFutureMs) return "Premium expiry is too far in the future.";
+
+  const nextStake = stakeStats(nextState);
+  if (nextStake.stakes.length > STAKE_MAX_COUNT) return "Too many active stakes.";
+  for (const entry of nextStake.stakes) {
+    if (entry.amount < STAKE_MIN_AMOUNT) return "Invalid stake amount.";
+    if (entry.amount > STAKE_MAX_AMOUNT) return "Stake amount is too high.";
+    if (entry.endsAt > nowMs + 30 * 24 * 60 * 60 * 1000) return "Stake lock time is invalid.";
+  }
+
   if (!prev) {
     if (next.level > 30) return "Initial profile level is too high.";
     if (next.crystals > 10000) return "Initial profile crystals are too high.";
     if (next.gold > 500000) return "Initial profile gold is too high.";
+    if (nextPremiumEndsAt > nowMs + PREMIUM_MAX_EXTENSION_DAYS * 24 * 60 * 60 * 1000) {
+      return "Initial premium duration is too high.";
+    }
+    if (nextStake.total > 5000) return "Initial stake balance is too high.";
     return null;
   }
+
+  if (!prevState) return "Previous profile state is invalid.";
 
   if (next.level < prev.level) return "Level rollback is not allowed.";
   if (next.monsterKills < prev.monsterKills) return "Monster kill rollback is not allowed.";
   if (next.dungeonRuns < prev.dungeonRuns) return "Dungeon run rollback is not allowed.";
   if (next.crystalsEarned < prev.crystalsEarned) return "Crystals earned rollback is not allowed.";
 
+  const prevPremiumEndsAt = Math.max(0, asInt(prevState.premiumEndsAt, 0));
+  const maxPremiumExtensionMs = PREMIUM_MAX_EXTENSION_DAYS * 24 * 60 * 60 * 1000 + 60_000;
+  if (nextPremiumEndsAt > prevPremiumEndsAt + maxPremiumExtensionMs) {
+    return "Suspicious premium extension detected.";
+  }
+
+  const prevStarter = Boolean(prevState.starterPackPurchased);
+  const nextStarter = Boolean(nextState.starterPackPurchased);
+  if (prevStarter && !nextStarter) return "Starter pack rollback is not allowed.";
+
+  const prevStake = stakeStats(prevState);
+  const stakeIncrease = Math.max(0, nextStake.total - prevStake.total);
+  const stakeDecrease = Math.max(0, prevStake.total - nextStake.total);
+  const crystalSpend = Math.max(0, prev.crystals - next.crystals);
+  const crystalGain = Math.max(0, next.crystals - prev.crystals);
+
+  if (stakeIncrease > 0 && crystalSpend < stakeIncrease) {
+    return "Stake increase without crystal spend detected.";
+  }
+
+  for (const [id, entry] of prevStake.byId) {
+    if (nextStake.byId.has(id)) continue;
+    if (nowMs + 60_000 < entry.endsAt) {
+      return "Stake claimed too early.";
+    }
+  }
+
   const safeElapsed = Math.max(1, elapsedSec);
   const levelDelta = Math.max(0, next.level - prev.level);
   const killsDelta = Math.max(0, next.monsterKills - prev.monsterKills);
   const dungeonDelta = Math.max(0, next.dungeonRuns - prev.dungeonRuns);
-  const crystalDelta = Math.max(0, next.crystals - prev.crystals);
   const goldDelta = Math.max(0, next.gold - prev.gold);
 
   const maxLevelGain = Math.max(2, Math.floor(safeElapsed / 20));
@@ -165,8 +272,9 @@ const validateStateTransition = (
 
   const worldBossAllowance = Math.floor(safeElapsed / (12 * 60 * 60)) * 600 + 600;
   const referralAllowance = Math.floor(safeElapsed / (24 * 60 * 60)) * 5000 + 2000;
-  const maxCrystalGain = dungeonDelta * 35 + worldBossAllowance + referralAllowance + 500;
-  if (crystalDelta > maxCrystalGain) return "Suspicious crystal gain detected.";
+  const stakeAllowance = Math.floor(stakeDecrease * (1 + STAKE_BONUS_RATE));
+  const maxCrystalGain = dungeonDelta * 35 + worldBossAllowance + referralAllowance + stakeAllowance + 500;
+  if (crystalGain > maxCrystalGain) return "Suspicious crystal gain detected.";
 
   const maxGoldGain = Math.floor(safeElapsed / 60) * 15000 + killsDelta * 150 + dungeonDelta * 20000 + 100000;
   if (goldDelta > maxGoldGain) return "Suspicious gold gain detected.";
@@ -580,9 +688,10 @@ serve(async (req) => {
       return json({ ok: false, error: "Failed to load profile." });
     }
 
-    const prevState = existing?.state && typeof existing.state === "object"
+    const prevStateRaw = existing?.state && typeof existing.state === "object"
       ? (existing.state as Record<string, unknown>)
       : null;
+    const prevState = prevStateRaw ? normalizeState(prevStateRaw) : null;
     const prevMetrics = prevState ? getMetrics(prevState) : null;
     const nextMetrics = getMetrics(normalizedState);
     const previousUpdatedAtMs = existing?.updated_at ? new Date(String(existing.updated_at)).getTime() : Number.NaN;
@@ -590,7 +699,7 @@ serve(async (req) => {
       ? Math.max(1, Math.floor((now.getTime() - previousUpdatedAtMs) / 1000))
       : 3600;
 
-    const validationError = validateStateTransition(prevMetrics, nextMetrics, elapsedSec);
+    const validationError = validateStateTransition(prevState, normalizedState, prevMetrics, nextMetrics, elapsedSec, now.getTime());
     if (validationError) {
       await supabase.from("security_events").insert({
         wallet: auth.wallet,
