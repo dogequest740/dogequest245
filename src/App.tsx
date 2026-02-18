@@ -41,6 +41,7 @@ import iconSolana from './assets/icons/solana.png'
 import iconStacking from './assets/icons/stacking.png'
 import iconBuyGold from './assets/icons/buy-gold.png'
 import iconStarterPack from './assets/icons/starter-pack.png'
+import iconReferrals from './assets/icons/referrals.png'
 import iconWeapon from './assets/icons/armory-weapon.png'
 import iconArmor from './assets/icons/armory-armor.png'
 import iconHead from './assets/icons/armory-head.png'
@@ -208,6 +209,7 @@ type PersistedState = {
   energyTimer: number
   gold: number
   crystals: number
+  crystalsEarned: number
   tickets: number
   ticketDay: string
   inventory: EquipmentItem[]
@@ -273,6 +275,22 @@ type DungeonSecureResponse = {
   ticketDay?: string
   dungeonRuns?: number
   reward?: number
+}
+
+type ReferralRow = {
+  referrer_wallet: string
+  referee_wallet: string
+  level_bonus_claimed: boolean
+  last_referee_crystals: number
+  crystals_earned: number
+  created_at: string
+  updated_at?: string
+}
+
+type ReferralEntry = {
+  wallet: string
+  level: number
+  crystalsFromRef: number
 }
 
 type StakeEntry = {
@@ -429,6 +447,7 @@ type GameState = {
   energyTimer: number
   gold: number
   crystals: number
+  crystalsEarned: number
   tickets: number
   ticketDay: string
   inventory: EquipmentItem[]
@@ -772,6 +791,9 @@ const STARTER_PACK_ITEMS: { type: ConsumableType; qty: number }[] = [
   { type: 'key', qty: 20 },
 ]
 const CONTRACT_ADDRESS = 'soon'
+const REFERRAL_LEVEL_TARGET = 15
+const REFERRAL_KEY_BONUS = 3
+const REFERRAL_CRYSTAL_RATE = 0.05
 
 const MONSTER_HP_TIER_TARGET = 30000
 const MONSTER_HP_TIER_EXCESS = 0.2
@@ -935,7 +957,7 @@ const maybeClaimWorldBossReward = async (wallet: string, boss: WorldBossRow, sta
   const share = Math.floor((boss.last_prize_pool * Number(playerRow.damage)) / totalDamage)
   if (share <= 0) return
 
-  state.crystals += share
+  grantCrystals(state, share)
   pushLog(state.eventLog, `World boss rewards: +${share} crystals.`)
 
   await supabase
@@ -965,6 +987,7 @@ const buildPersistedState = (state: GameState): PersistedState => ({
   energyTimer: state.energyTimer,
   gold: state.gold,
   crystals: state.crystals,
+  crystalsEarned: state.crystalsEarned,
   tickets: state.tickets,
   ticketDay: state.ticketDay,
   inventory: state.inventory,
@@ -1008,6 +1031,7 @@ const applyPersistedState = (state: GameState, saved: PersistedState) => {
   state.energyTimer = Math.max(0, saved.energyTimer ?? state.energyTimer)
   state.gold = Math.max(0, saved.gold ?? state.gold)
   state.crystals = Math.max(0, saved.crystals ?? state.crystals)
+  state.crystalsEarned = Math.max(0, saved.crystalsEarned ?? saved.crystals ?? state.crystalsEarned)
   state.tickets = Math.max(0, saved.tickets ?? state.tickets)
   state.ticketDay = saved.ticketDay || state.ticketDay
 
@@ -1425,6 +1449,14 @@ const bytesToBase64 = (bytes: Uint8Array) => {
     binary += String.fromCharCode(value)
   }
   return btoa(binary)
+}
+const isValidWalletAddress = (value: string) => {
+  try {
+    new PublicKey(value)
+    return true
+  } catch {
+    return false
+  }
 }
 
 const getXpForLevel = (level: number) => Math.round(XP_BASE + XP_SCALE * Math.pow(level, XP_POWER))
@@ -1949,6 +1981,7 @@ const initGameState = (chosenClass: CharacterClass, name: string): GameState => 
     energyTimer: ENERGY_REGEN_SECONDS,
     gold: 0,
     crystals: 0,
+    crystalsEarned: 0,
     tickets: TICKETS_MAX,
     ticketDay: getDayKey(),
     inventory: [],
@@ -1992,6 +2025,13 @@ const pushLog = (list: string[], entry: string, limit = 6) => {
 const pushLoot = (list: LootEntry[], entry: LootEntry, limit = 6) => {
   list.unshift(entry)
   if (list.length > limit) list.pop()
+}
+
+const grantCrystals = (state: GameState, amount: number) => {
+  const value = Math.max(0, Math.floor(amount))
+  if (value <= 0) return
+  state.crystals += value
+  state.crystalsEarned += value
 }
 
 const addEffect = (state: GameState, effect: EffectInput) => {
@@ -2499,6 +2539,7 @@ function App() {
     | 'stake'
     | 'buygold'
     | 'starterpack'
+    | 'referrals'
     | null
   >(null)
   const [inventoryTab, setInventoryTab] = useState<'equipment' | 'consumables'>('equipment')
@@ -2522,6 +2563,10 @@ function App() {
   const [stakeTab, setStakeTab] = useState<'stake' | 'my'>('stake')
   const [musicEnabled, setMusicEnabled] = useState(true)
   const [contractCopied, setContractCopied] = useState(false)
+  const [referralCopied, setReferralCopied] = useState(false)
+  const [referralLoading, setReferralLoading] = useState(false)
+  const [referralError, setReferralError] = useState('')
+  const [referralEntries, setReferralEntries] = useState<ReferralEntry[]>([])
   const [isMobile, setIsMobile] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const gameStateRef = useRef<GameState | null>(null)
@@ -2529,6 +2574,8 @@ function App() {
   const musicUnlockRef = useRef(false)
   const serverLoadedRef = useRef(false)
   const dungeonSessionRef = useRef<{ token: string; expiresAt: number } | null>(null)
+  const isNewProfileRef = useRef(false)
+  const referralProcessedRef = useRef(false)
   const pendingProfileRef = useRef<PersistedState | null>(null)
   const spriteCacheRef = useRef<PlayerSpriteMap>({
     knight: null,
@@ -2589,6 +2636,24 @@ function App() {
     if (!wallet) return false
     return adminWallets.includes(wallet)
   }, [publicKey, adminWallets])
+
+  const referralWalletFromUrl = useMemo(() => {
+    if (typeof window === 'undefined') return ''
+    const raw = new URLSearchParams(window.location.search).get('ref')?.trim() ?? ''
+    if (!raw || !isValidWalletAddress(raw)) return ''
+    return raw
+  }, [])
+
+  const referralLink = useMemo(() => {
+    const wallet = publicKey?.toBase58()
+    if (!wallet) return ''
+    if (typeof window === 'undefined') return `?ref=${wallet}`
+    const url = new URL(window.location.href)
+    url.search = ''
+    url.hash = ''
+    url.searchParams.set('ref', wallet)
+    return url.toString()
+  }, [publicKey])
 
   const callDungeonSecure = async (
     payload: Record<string, unknown>,
@@ -2688,6 +2753,151 @@ function App() {
     setHud(buildHud(state))
   }
 
+  const loadReferralEntries = async (wallet: string, silent = false) => {
+    if (!supabase) return
+    if (!silent) setReferralLoading(true)
+    setReferralError('')
+
+    const { data: referralRows, error: referralsError } = await supabase
+      .from('referrals')
+      .select('referrer_wallet, referee_wallet, level_bonus_claimed, last_referee_crystals, crystals_earned, created_at, updated_at')
+      .eq('referrer_wallet', wallet)
+      .order('created_at', { ascending: false })
+
+    if (referralsError) {
+      setReferralError('Failed to load referrals.')
+      setReferralEntries([])
+      if (!silent) setReferralLoading(false)
+      return
+    }
+
+    const rows = (referralRows as ReferralRow[] | null) ?? []
+    if (!rows.length) {
+      setReferralEntries([])
+      if (!silent) setReferralLoading(false)
+      return
+    }
+
+    const refereeWallets = rows.map((row) => row.referee_wallet)
+    const { data: profilesData } = await supabase
+      .from('profiles')
+      .select('wallet, state')
+      .in('wallet', refereeWallets)
+
+    const profileLevelMap = new Map<string, number>()
+    for (const profile of profilesData ?? []) {
+      const profileWallet = String(profile.wallet ?? '')
+      const saved = (profile.state as PersistedState | null) ?? null
+      const level = Math.max(1, Math.floor(saved?.player?.level ?? 1))
+      profileLevelMap.set(profileWallet, level)
+    }
+
+    const entries: ReferralEntry[] = rows.map((row) => ({
+      wallet: row.referee_wallet,
+      level: profileLevelMap.get(row.referee_wallet) ?? 1,
+      crystalsFromRef: Math.max(0, Math.floor(Number(row.crystals_earned ?? 0))),
+    }))
+
+    setReferralEntries(entries)
+    if (!silent) setReferralLoading(false)
+  }
+
+  const syncReferralState = async () => {
+    const state = gameStateRef.current
+    const wallet = publicKey?.toBase58()
+    if (!state || !wallet || !supabase) return
+
+    const nowIso = new Date().toISOString()
+    if (!referralProcessedRef.current && isNewProfileRef.current && referralWalletFromUrl && referralWalletFromUrl !== wallet) {
+      const { data: existingReferral } = await supabase
+        .from('referrals')
+        .select('referee_wallet')
+        .eq('referee_wallet', wallet)
+        .maybeSingle()
+
+      if (!existingReferral) {
+        const { error } = await supabase.from('referrals').insert({
+          referrer_wallet: referralWalletFromUrl,
+          referee_wallet: wallet,
+          level_bonus_claimed: false,
+          last_referee_crystals: 0,
+          crystals_earned: 0,
+          created_at: nowIso,
+          updated_at: nowIso,
+        })
+        if (!error) {
+          pushLog(state.eventLog, 'Referral link applied.')
+          syncHud()
+        }
+      }
+      referralProcessedRef.current = true
+    }
+
+    const { data: ownReferralRow, error: ownReferralError } = await supabase
+      .from('referrals')
+      .select('referrer_wallet, referee_wallet, level_bonus_claimed, last_referee_crystals, crystals_earned, created_at, updated_at')
+      .eq('referee_wallet', wallet)
+      .maybeSingle()
+
+    if (!ownReferralError && ownReferralRow) {
+      const row = ownReferralRow as ReferralRow
+      const lastTrackedCrystals = Math.max(0, Math.floor(Number(row.last_referee_crystals ?? 0)))
+      const totalEarnedCrystals = Math.max(0, Math.floor(state.crystalsEarned))
+      const deltaEarned = Math.max(0, totalEarnedCrystals - lastTrackedCrystals)
+      const crystalBonus = Math.max(0, Math.floor(deltaEarned * REFERRAL_CRYSTAL_RATE))
+      const reachedLevelTarget = state.player.level >= REFERRAL_LEVEL_TARGET
+      const needsLevelBonus = reachedLevelTarget && !row.level_bonus_claimed
+
+      if (deltaEarned > 0 || needsLevelBonus) {
+        const nextCrystalsEarned = Math.max(0, Math.floor(Number(row.crystals_earned ?? 0))) + crystalBonus
+        await supabase
+          .from('referrals')
+          .update({
+            level_bonus_claimed: row.level_bonus_claimed || needsLevelBonus,
+            last_referee_crystals: totalEarnedCrystals,
+            crystals_earned: nextCrystalsEarned,
+            updated_at: nowIso,
+          })
+          .eq('referee_wallet', wallet)
+
+        if (needsLevelBonus || crystalBonus > 0) {
+          const { data: referrerProfileData } = await supabase
+            .from('profiles')
+            .select('state')
+            .eq('wallet', row.referrer_wallet)
+            .maybeSingle()
+
+          const referrerState = (referrerProfileData?.state as PersistedState | null) ?? null
+          if (referrerState) {
+            const nextTickets = needsLevelBonus
+              ? Math.min(SHOP_TICKET_CAP, Math.max(0, Math.floor(referrerState.tickets ?? 0)) + REFERRAL_KEY_BONUS)
+              : Math.max(0, Math.floor(referrerState.tickets ?? 0))
+            const nextCrystals = Math.max(0, Math.floor(referrerState.crystals ?? 0)) + crystalBonus
+            const nextCrystalsEarned = Math.max(
+              0,
+              Math.floor(referrerState.crystalsEarned ?? referrerState.crystals ?? 0),
+            ) + crystalBonus
+            await supabase.from('profiles').upsert(
+              {
+                wallet: row.referrer_wallet,
+                state: {
+                  ...referrerState,
+                  tickets: nextTickets,
+                  crystals: nextCrystals,
+                  crystalsEarned: nextCrystalsEarned,
+                },
+                updated_at: nowIso,
+              },
+              { onConflict: 'wallet' },
+            )
+          }
+        }
+      }
+    }
+
+    await loadReferralEntries(wallet, true)
+  }
+
   useEffect(() => {
     const detectMobile = () => {
       const ua = navigator.userAgent || ''
@@ -2741,6 +2951,13 @@ function App() {
     } catch (error) {
       console.warn('Copy failed', error)
     }
+  }
+
+  const copyReferralLink = async () => {
+    if (!referralLink) return
+    await copyToClipboard(referralLink)
+    setReferralCopied(true)
+    window.setTimeout(() => setReferralCopied(false), 1400)
   }
 
   useEffect(() => {
@@ -2853,7 +3070,11 @@ function App() {
     let active = true
     if (!connected) {
       dungeonSessionRef.current = null
+      isNewProfileRef.current = false
+      referralProcessedRef.current = false
       pendingProfileRef.current = null
+      setReferralEntries([])
+      setReferralError('')
       setStage('auth')
       return () => {
         active = false
@@ -2863,6 +3084,8 @@ function App() {
     const wallet = publicKey?.toBase58()
     dungeonSessionRef.current = null
     if (!wallet || !supabase) {
+      isNewProfileRef.current = false
+      referralProcessedRef.current = false
       setStage('select')
       return () => {
         active = false
@@ -2872,11 +3095,15 @@ function App() {
     loadProfileState(wallet).then((saved) => {
       if (!active) return
       if (saved) {
+        isNewProfileRef.current = false
+        referralProcessedRef.current = true
         pendingProfileRef.current = saved
         setSelectedId(saved.classId || CHARACTER_CLASSES[0].id)
         setPlayerName(sanitizePlayerName(saved.name || ''))
         setStage('game')
       } else {
+        isNewProfileRef.current = true
+        referralProcessedRef.current = false
         pendingProfileRef.current = null
         setStage('select')
       }
@@ -2926,6 +3153,8 @@ function App() {
 
     const wallet = publicKey?.toBase58()
     if (pendingProfile) {
+      isNewProfileRef.current = false
+      referralProcessedRef.current = true
       applyPersistedState(state, pendingProfile)
       pendingProfileRef.current = null
       serverLoadedRef.current = true
@@ -2935,7 +3164,12 @@ function App() {
       loadProfileState(wallet).then((saved) => {
         if (!gameStateRef.current) return
         if (saved) {
+          isNewProfileRef.current = false
+          referralProcessedRef.current = true
           applyPersistedState(gameStateRef.current, saved)
+        } else {
+          isNewProfileRef.current = true
+          referralProcessedRef.current = false
         }
         serverLoadedRef.current = true
         syncHud()
@@ -3000,6 +3234,19 @@ function App() {
     return () => window.clearInterval(interval)
   }, [stage, publicKey, connected])
 
+  useEffect(() => {
+    if (stage !== 'game') return
+    void syncReferralState()
+  }, [stage, publicKey])
+
+  useEffect(() => {
+    if (stage !== 'game') return
+    const interval = window.setInterval(() => {
+      void syncReferralState()
+    }, 30000)
+    return () => window.clearInterval(interval)
+  }, [stage, publicKey, connected])
+
   const syncHud = () => {
     const state = gameStateRef.current
     if (!state) return
@@ -3025,6 +3272,10 @@ function App() {
     if (activePanel !== 'stake') {
       setStakeError('')
       setStakeTab('stake')
+    }
+    if (activePanel !== 'referrals') {
+      setReferralError('')
+      setReferralCopied(false)
     }
   }, [activePanel])
 
@@ -3065,6 +3316,16 @@ function App() {
     if (activePanel !== 'worldboss') return
     void syncWorldBossFromServer()
   }, [activePanel, publicKey])
+
+  useEffect(() => {
+    if (activePanel !== 'referrals') return
+    const wallet = publicKey?.toBase58()
+    if (!wallet) {
+      setReferralEntries([])
+      return
+    }
+    void loadReferralEntries(wallet)
+  }, [activePanel, publicKey, hud?.level])
 
   useEffect(() => {
     if (activePanel !== 'admin') return
@@ -3525,7 +3786,7 @@ function App() {
     }
     const bonus = Math.floor(entry.amount * STAKE_BONUS)
     const total = entry.amount + bonus
-    state.crystals += total
+    grantCrystals(state, total)
     state.stake = state.stake.filter((item) => item.id !== stakeId)
     pushLog(state.eventLog, `Stake completed: +${total} crystals.`)
     setStakeError('')
@@ -3758,7 +4019,7 @@ function App() {
     if (result.ticketDay) {
       state.ticketDay = result.ticketDay
     }
-    state.crystals += reward
+    grantCrystals(state, reward)
     state.dungeonRuns += 1
     pushLog(state.eventLog, `${dungeon.name} cleared. +${reward} crystals.`)
     syncHud()
@@ -4420,6 +4681,17 @@ function App() {
                     </div>
                   </button>
                 )}
+                <button
+                  type="button"
+                  className={`starter-pack-btn starter-pack-float referral-float ${!hud?.starterPackPurchased ? 'with-starterpack' : ''}`}
+                  onClick={() => setActivePanel('referrals')}
+                >
+                  <img className="starter-pack-icon" src={iconReferrals} alt="" />
+                  <div className="starter-pack-text">
+                    <span>Referrals</span>
+                    <strong>Invite Friends</strong>
+                  </div>
+                </button>
                 <canvas ref={canvasRef} className="game-canvas" />
                 <div className="buff-stack">
                   <div className={`buff-chip ${hud?.speedBuffTime ? 'active' : ''}`}>
@@ -4949,6 +5221,61 @@ function App() {
                 {starterPackLoading ? 'Processing...' : 'Buy Starter Pack'}
               </button>
               <div className="withdraw-note">This pack can be purchased only once.</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activePanel === 'referrals' && hud && (
+        <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Referrals</h3>
+              <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
+                Close
+              </button>
+            </div>
+            <div className="withdraw-body referral-body">
+              <div className="starterpack-hero referral-hero">
+                <img className="starterpack-image referral-image" src={iconReferrals} alt="" />
+                <div className="starterpack-meta">
+                  <div className="starterpack-title">Invite Friends</div>
+                  <div className="withdraw-note">Share your link and receive referral rewards.</div>
+                </div>
+              </div>
+              <label className="withdraw-label">
+                Your referral link
+                <input type="text" value={referralLink} readOnly />
+              </label>
+              <button type="button" className="withdraw-submit" onClick={copyReferralLink}>
+                {referralCopied ? 'Copied' : 'Copy link'}
+              </button>
+              <div className="withdraw-info referral-conditions">
+                <strong>Conditions</strong>
+                <div>+{REFERRAL_KEY_BONUS} keys for each friend who reaches level {REFERRAL_LEVEL_TARGET}.</div>
+                <div>{Math.round(REFERRAL_CRYSTAL_RATE * 100)}% of crystals earned by each referred friend.</div>
+              </div>
+              <div className="withdraw-info referral-summary">
+                <span>
+                  Friends: <strong>{referralEntries.length}</strong>
+                </span>
+                <span>
+                  Crystals from referrals:{' '}
+                  <strong>{formatNumber(referralEntries.reduce((sum, entry) => sum + entry.crystalsFromRef, 0))}</strong>
+                </span>
+              </div>
+              <div className="referral-list">
+                {referralLoading && <div className="muted">Loading referrals...</div>}
+                {!referralLoading && referralEntries.length === 0 && <div className="muted">No referrals yet.</div>}
+                {referralEntries.map((entry) => (
+                  <div key={entry.wallet} className="referral-row">
+                    <span className="wallet-chip">{formatShortWallet(entry.wallet)}</span>
+                    <span>Lvl {formatNumber(entry.level)}</span>
+                    <span>{formatNumber(entry.crystalsFromRef)} crystals</span>
+                  </div>
+                ))}
+              </div>
+              {referralError && <div className="withdraw-error">{referralError}</div>}
             </div>
           </div>
         </div>

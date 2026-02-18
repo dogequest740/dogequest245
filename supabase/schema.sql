@@ -69,6 +69,27 @@ for all
 using (true)
 with check (true);
 
+create table if not exists public.referrals (
+  referrer_wallet text not null,
+  referee_wallet text primary key,
+  level_bonus_claimed boolean not null default false,
+  last_referee_crystals bigint not null default 0,
+  crystals_earned bigint not null default 0,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  check (referrer_wallet <> referee_wallet)
+);
+
+create index if not exists referrals_referrer_wallet_idx on public.referrals(referrer_wallet);
+
+alter table public.referrals enable row level security;
+
+create policy "public referrals read/write"
+on public.referrals
+for all
+using (true)
+with check (true);
+
 create table if not exists public.wallet_auth_nonces (
   wallet text primary key,
   nonce text not null,

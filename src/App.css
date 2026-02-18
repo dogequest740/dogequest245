@@ -2215,6 +2215,14 @@
   width: auto;
 }
 
+.referral-float.with-starterpack {
+  top: 176px;
+}
+
+.referral-float .starter-pack-icon {
+  filter: drop-shadow(0 0 14px rgba(255, 215, 120, 0.35));
+}
+
 .starter-pack-btn:hover {
   filter: drop-shadow(0 0 14px rgba(255, 200, 120, 0.35));
 }
@@ -3806,6 +3814,41 @@ button.ghost {
 .withdraw-note {
   font-size: 11px;
   color: rgba(231, 240, 245, 0.65);
+}
+
+.referral-body .withdraw-submit {
+  margin-top: 2px;
+}
+
+.referral-conditions {
+  display: grid;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.referral-summary {
+  font-size: 12px;
+}
+
+.referral-list {
+  display: grid;
+  gap: 6px;
+  max-height: 240px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.referral-row {
+  display: grid;
+  grid-template-columns: 1.3fr 0.7fr 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(12, 18, 26, 0.72);
+  border: 1px solid rgba(214, 178, 95, 0.2);
+  color: #e9efff;
+  font-size: 12px;
 }
 
 .withdraw-requests {
