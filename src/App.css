@@ -2216,11 +2216,18 @@
 }
 
 .referral-float.with-starterpack {
-  top: 176px;
+  top: 196px;
 }
 
 .referral-float .starter-pack-icon {
+  width: 224px;
+  height: 224px;
   filter: drop-shadow(0 0 14px rgba(255, 215, 120, 0.35));
+}
+
+.referral-float .starter-pack-text strong {
+  font-size: 16px;
+  letter-spacing: 1.2px;
 }
 
 .starter-pack-btn:hover {
@@ -3822,12 +3829,43 @@ button.ghost {
 
 .referral-conditions {
   display: grid;
-  gap: 4px;
+  gap: 8px;
   align-items: flex-start;
+}
+
+.referral-conditions strong {
+  font-size: 15px;
+}
+
+.referral-bonus {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.referral-bonus span {
+  width: 100%;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(231, 240, 245, 0.82);
+  margin-left: 24px;
+}
+
+.referral-bonus.keys {
+  color: #7bde98;
+}
+
+.referral-bonus.crystals {
+  color: #7fd2ff;
 }
 
 .referral-summary {
   font-size: 12px;
+  display: grid;
+  gap: 4px;
 }
 
 .referral-list {
@@ -3849,6 +3887,11 @@ button.ghost {
   border: 1px solid rgba(214, 178, 95, 0.2);
   color: #e9efff;
   font-size: 12px;
+}
+
+.referral-image {
+  width: 140px;
+  height: 140px;
 }
 
 .withdraw-requests {

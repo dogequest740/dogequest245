@@ -74,11 +74,20 @@ create table if not exists public.referrals (
   referee_wallet text primary key,
   level_bonus_claimed boolean not null default false,
   last_referee_crystals bigint not null default 0,
+  pending_keys bigint not null default 0,
+  pending_crystals bigint not null default 0,
+  claimed_keys bigint not null default 0,
+  claimed_crystals bigint not null default 0,
   crystals_earned bigint not null default 0,
   created_at timestamptz default now(),
   updated_at timestamptz default now(),
   check (referrer_wallet <> referee_wallet)
 );
+
+alter table public.referrals add column if not exists pending_keys bigint not null default 0;
+alter table public.referrals add column if not exists pending_crystals bigint not null default 0;
+alter table public.referrals add column if not exists claimed_keys bigint not null default 0;
+alter table public.referrals add column if not exists claimed_crystals bigint not null default 0;
 
 create index if not exists referrals_referrer_wallet_idx on public.referrals(referrer_wallet);
 

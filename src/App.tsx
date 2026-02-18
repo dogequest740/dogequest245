@@ -282,6 +282,10 @@ type ReferralRow = {
   referee_wallet: string
   level_bonus_claimed: boolean
   last_referee_crystals: number
+  pending_keys: number
+  pending_crystals: number
+  claimed_keys: number
+  claimed_crystals: number
   crystals_earned: number
   created_at: string
   updated_at?: string
@@ -291,6 +295,8 @@ type ReferralEntry = {
   wallet: string
   level: number
   crystalsFromRef: number
+  pendingCrystals: number
+  pendingKeys: number
 }
 
 type StakeEntry = {
@@ -2565,8 +2571,11 @@ function App() {
   const [contractCopied, setContractCopied] = useState(false)
   const [referralCopied, setReferralCopied] = useState(false)
   const [referralLoading, setReferralLoading] = useState(false)
+  const [referralClaimLoading, setReferralClaimLoading] = useState(false)
   const [referralError, setReferralError] = useState('')
   const [referralEntries, setReferralEntries] = useState<ReferralEntry[]>([])
+  const [referralPendingKeys, setReferralPendingKeys] = useState(0)
+  const [referralPendingCrystals, setReferralPendingCrystals] = useState(0)
   const [isMobile, setIsMobile] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const gameStateRef = useRef<GameState | null>(null)
@@ -2760,13 +2769,15 @@ function App() {
 
     const { data: referralRows, error: referralsError } = await supabase
       .from('referrals')
-      .select('referrer_wallet, referee_wallet, level_bonus_claimed, last_referee_crystals, crystals_earned, created_at, updated_at')
+      .select('referrer_wallet, referee_wallet, level_bonus_claimed, last_referee_crystals, pending_keys, pending_crystals, claimed_keys, claimed_crystals, crystals_earned, created_at, updated_at')
       .eq('referrer_wallet', wallet)
       .order('created_at', { ascending: false })
 
     if (referralsError) {
       setReferralError('Failed to load referrals.')
       setReferralEntries([])
+      setReferralPendingKeys(0)
+      setReferralPendingCrystals(0)
       if (!silent) setReferralLoading(false)
       return
     }
@@ -2774,6 +2785,8 @@ function App() {
     const rows = (referralRows as ReferralRow[] | null) ?? []
     if (!rows.length) {
       setReferralEntries([])
+      setReferralPendingKeys(0)
+      setReferralPendingCrystals(0)
       if (!silent) setReferralLoading(false)
       return
     }
@@ -2795,10 +2808,17 @@ function App() {
     const entries: ReferralEntry[] = rows.map((row) => ({
       wallet: row.referee_wallet,
       level: profileLevelMap.get(row.referee_wallet) ?? 1,
-      crystalsFromRef: Math.max(0, Math.floor(Number(row.crystals_earned ?? 0))),
+      crystalsFromRef: Math.max(0, Math.floor(Number(row.claimed_crystals ?? 0))),
+      pendingCrystals: Math.max(0, Math.floor(Number(row.pending_crystals ?? 0))),
+      pendingKeys: Math.max(0, Math.floor(Number(row.pending_keys ?? 0))),
     }))
 
+    const pendingKeys = rows.reduce((sum, row) => sum + Math.max(0, Math.floor(Number(row.pending_keys ?? 0))), 0)
+    const pendingCrystals = rows.reduce((sum, row) => sum + Math.max(0, Math.floor(Number(row.pending_crystals ?? 0))), 0)
+
     setReferralEntries(entries)
+    setReferralPendingKeys(pendingKeys)
+    setReferralPendingCrystals(pendingCrystals)
     if (!silent) setReferralLoading(false)
   }
 
@@ -2821,6 +2841,10 @@ function App() {
           referee_wallet: wallet,
           level_bonus_claimed: false,
           last_referee_crystals: 0,
+          pending_keys: 0,
+          pending_crystals: 0,
+          claimed_keys: 0,
+          claimed_crystals: 0,
           crystals_earned: 0,
           created_at: nowIso,
           updated_at: nowIso,
@@ -2835,7 +2859,7 @@ function App() {
 
     const { data: ownReferralRow, error: ownReferralError } = await supabase
       .from('referrals')
-      .select('referrer_wallet, referee_wallet, level_bonus_claimed, last_referee_crystals, crystals_earned, created_at, updated_at')
+      .select('referrer_wallet, referee_wallet, level_bonus_claimed, last_referee_crystals, pending_keys, pending_crystals, claimed_keys, claimed_crystals, crystals_earned, created_at, updated_at')
       .eq('referee_wallet', wallet)
       .maybeSingle()
 
@@ -2849,49 +2873,22 @@ function App() {
       const needsLevelBonus = reachedLevelTarget && !row.level_bonus_claimed
 
       if (deltaEarned > 0 || needsLevelBonus) {
+        const nextPendingKeys = Math.max(0, Math.floor(Number(row.pending_keys ?? 0))) + (needsLevelBonus ? REFERRAL_KEY_BONUS : 0)
+        const nextPendingCrystals = Math.max(0, Math.floor(Number(row.pending_crystals ?? 0))) + crystalBonus
         const nextCrystalsEarned = Math.max(0, Math.floor(Number(row.crystals_earned ?? 0))) + crystalBonus
         await supabase
           .from('referrals')
           .update({
             level_bonus_claimed: row.level_bonus_claimed || needsLevelBonus,
             last_referee_crystals: totalEarnedCrystals,
+            pending_keys: nextPendingKeys,
+            pending_crystals: nextPendingCrystals,
             crystals_earned: nextCrystalsEarned,
             updated_at: nowIso,
           })
           .eq('referee_wallet', wallet)
-
-        if (needsLevelBonus || crystalBonus > 0) {
-          const { data: referrerProfileData } = await supabase
-            .from('profiles')
-            .select('state')
-            .eq('wallet', row.referrer_wallet)
-            .maybeSingle()
-
-          const referrerState = (referrerProfileData?.state as PersistedState | null) ?? null
-          if (referrerState) {
-            const nextTickets = needsLevelBonus
-              ? Math.min(SHOP_TICKET_CAP, Math.max(0, Math.floor(referrerState.tickets ?? 0)) + REFERRAL_KEY_BONUS)
-              : Math.max(0, Math.floor(referrerState.tickets ?? 0))
-            const nextCrystals = Math.max(0, Math.floor(referrerState.crystals ?? 0)) + crystalBonus
-            const nextCrystalsEarned = Math.max(
-              0,
-              Math.floor(referrerState.crystalsEarned ?? referrerState.crystals ?? 0),
-            ) + crystalBonus
-            await supabase.from('profiles').upsert(
-              {
-                wallet: row.referrer_wallet,
-                state: {
-                  ...referrerState,
-                  tickets: nextTickets,
-                  crystals: nextCrystals,
-                  crystalsEarned: nextCrystalsEarned,
-                },
-                updated_at: nowIso,
-              },
-              { onConflict: 'wallet' },
-            )
-          }
-        }
+          .eq('last_referee_crystals', lastTrackedCrystals)
+          .eq('level_bonus_claimed', row.level_bonus_claimed)
       }
     }
 
@@ -2958,6 +2955,83 @@ function App() {
     await copyToClipboard(referralLink)
     setReferralCopied(true)
     window.setTimeout(() => setReferralCopied(false), 1400)
+  }
+
+  const claimReferralRewards = async () => {
+    const state = gameStateRef.current
+    const wallet = publicKey?.toBase58()
+    if (!state || !wallet || !supabase) return
+    if (referralClaimLoading) return
+
+    setReferralClaimLoading(true)
+    setReferralError('')
+
+    const { data, error } = await supabase
+      .from('referrals')
+      .select('referrer_wallet, referee_wallet, level_bonus_claimed, last_referee_crystals, pending_keys, pending_crystals, claimed_keys, claimed_crystals, crystals_earned, created_at, updated_at')
+      .eq('referrer_wallet', wallet)
+      .or('pending_keys.gt.0,pending_crystals.gt.0')
+
+    if (error) {
+      setReferralError('Failed to claim referral rewards.')
+      setReferralClaimLoading(false)
+      return
+    }
+
+    const rows = (data as ReferralRow[] | null) ?? []
+    if (!rows.length) {
+      setReferralError('No rewards available to claim.')
+      setReferralClaimLoading(false)
+      return
+    }
+
+    let claimKeys = 0
+    let claimCrystals = 0
+    const nowIso = new Date().toISOString()
+
+    for (const row of rows) {
+      const pendingKeys = Math.max(0, Math.floor(Number(row.pending_keys ?? 0)))
+      const pendingCrystals = Math.max(0, Math.floor(Number(row.pending_crystals ?? 0)))
+      if (pendingKeys <= 0 && pendingCrystals <= 0) continue
+
+      const nextClaimedKeys = Math.max(0, Math.floor(Number(row.claimed_keys ?? 0))) + pendingKeys
+      const nextClaimedCrystals = Math.max(0, Math.floor(Number(row.claimed_crystals ?? 0))) + pendingCrystals
+
+      const { data: updatedRow } = await supabase
+        .from('referrals')
+        .update({
+          pending_keys: 0,
+          pending_crystals: 0,
+          claimed_keys: nextClaimedKeys,
+          claimed_crystals: nextClaimedCrystals,
+          updated_at: nowIso,
+        })
+        .eq('referee_wallet', row.referee_wallet)
+        .eq('pending_keys', pendingKeys)
+        .eq('pending_crystals', pendingCrystals)
+        .select('referee_wallet')
+        .maybeSingle()
+
+      if (!updatedRow) continue
+
+      claimKeys += pendingKeys
+      claimCrystals += pendingCrystals
+    }
+
+    if (claimKeys <= 0 && claimCrystals <= 0) {
+      setReferralError('Rewards were already claimed. Try refresh.')
+      void loadReferralEntries(wallet)
+      setReferralClaimLoading(false)
+      return
+    }
+
+    state.tickets = Math.min(SHOP_TICKET_CAP, Math.max(0, Math.floor(state.tickets)) + claimKeys)
+    state.crystals = Math.max(0, Math.floor(state.crystals)) + claimCrystals
+    pushLog(state.eventLog, `Referral claim: +${claimKeys} keys, +${claimCrystals} crystals.`)
+    syncHud()
+    void saveGameState()
+    void loadReferralEntries(wallet)
+    setReferralClaimLoading(false)
   }
 
   useEffect(() => {
@@ -3074,6 +3148,8 @@ function App() {
       referralProcessedRef.current = false
       pendingProfileRef.current = null
       setReferralEntries([])
+      setReferralPendingKeys(0)
+      setReferralPendingCrystals(0)
       setReferralError('')
       setStage('auth')
       return () => {
@@ -3276,6 +3352,7 @@ function App() {
     if (activePanel !== 'referrals') {
       setReferralError('')
       setReferralCopied(false)
+      setReferralClaimLoading(false)
     }
   }, [activePanel])
 
@@ -3322,6 +3399,8 @@ function App() {
     const wallet = publicKey?.toBase58()
     if (!wallet) {
       setReferralEntries([])
+      setReferralPendingKeys(0)
+      setReferralPendingCrystals(0)
       return
     }
     void loadReferralEntries(wallet)
@@ -4688,7 +4767,6 @@ function App() {
                 >
                   <img className="starter-pack-icon" src={iconReferrals} alt="" />
                   <div className="starter-pack-text">
-                    <span>Referrals</span>
                     <strong>Invite Friends</strong>
                   </div>
                 </button>
@@ -5252,18 +5330,33 @@ function App() {
               </button>
               <div className="withdraw-info referral-conditions">
                 <strong>Conditions</strong>
-                <div>+{REFERRAL_KEY_BONUS} keys for each friend who reaches level {REFERRAL_LEVEL_TARGET}.</div>
-                <div>{Math.round(REFERRAL_CRYSTAL_RATE * 100)}% of crystals earned by each referred friend.</div>
+                <div className="referral-bonus keys">
+                  <img className="icon-img small" src={iconKey} alt="" />
+                  +{REFERRAL_KEY_BONUS} keys
+                  <span>for each friend who reaches level {REFERRAL_LEVEL_TARGET}</span>
+                </div>
+                <div className="referral-bonus crystals">
+                  <img className="icon-img small" src={iconCrystals} alt="" />
+                  {Math.round(REFERRAL_CRYSTAL_RATE * 100)}% of crystals
+                  <span>earned by each referred friend</span>
+                </div>
               </div>
               <div className="withdraw-info referral-summary">
                 <span>
                   Friends: <strong>{referralEntries.length}</strong>
                 </span>
                 <span>
+                  Pending: <strong>+{formatNumber(referralPendingKeys)}</strong> keys, <strong>+{formatNumber(referralPendingCrystals)}</strong>{' '}
+                  crystals
+                </span>
+                <span>
                   Crystals from referrals:{' '}
                   <strong>{formatNumber(referralEntries.reduce((sum, entry) => sum + entry.crystalsFromRef, 0))}</strong>
                 </span>
               </div>
+              <button type="button" className="withdraw-submit" disabled={referralClaimLoading} onClick={claimReferralRewards}>
+                {referralClaimLoading ? 'Claiming...' : 'Claim rewards'}
+              </button>
               <div className="referral-list">
                 {referralLoading && <div className="muted">Loading referrals...</div>}
                 {!referralLoading && referralEntries.length === 0 && <div className="muted">No referrals yet.</div>}
@@ -5271,7 +5364,7 @@ function App() {
                   <div key={entry.wallet} className="referral-row">
                     <span className="wallet-chip">{formatShortWallet(entry.wallet)}</span>
                     <span>Lvl {formatNumber(entry.level)}</span>
-                    <span>{formatNumber(entry.crystalsFromRef)} crystals</span>
+                    <span>{formatNumber(entry.crystalsFromRef)} claimed crystals</span>
                   </div>
                 ))}
               </div>
