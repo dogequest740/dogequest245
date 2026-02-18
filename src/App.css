@@ -363,14 +363,13 @@
 }
 
 .app.mobile .canvas-special-menu {
-  position: absolute;
-  left: 8px;
-  right: 8px;
-  top: 8px;
-  z-index: 4;
+  position: relative;
+  width: 100%;
   display: flex;
   gap: 8px;
   overflow-x: auto;
+  overflow-y: hidden;
+  margin: 0 0 8px;
   padding-bottom: 4px;
 }
 
