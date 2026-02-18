@@ -2220,13 +2220,13 @@
 }
 
 .referral-float .starter-pack-icon {
-  width: 112px;
-  height: 112px;
+  width: 134px;
+  height: 134px;
   filter: drop-shadow(0 0 14px rgba(255, 215, 120, 0.35));
 }
 
 .referral-float .starter-pack-text strong {
-  font-size: 16px;
+  font-size: 13px;
   letter-spacing: 1.2px;
 }
 
