@@ -286,22 +286,20 @@ type GameSecureResponse = {
   error?: string
   savedAt?: string
   remainingCrystals?: number
+  tickets?: number
+  crystals?: number
+  claimedKeys?: number
+  claimedCrystals?: number
+  referralApplied?: boolean
+  referralEntries?: ReferralEntry[]
+  referralPendingKeys?: number
+  referralPendingCrystals?: number
   withdrawal?: WithdrawalRow
   withdrawals?: WithdrawalRow[]
-}
-
-type ReferralRow = {
-  referrer_wallet: string
-  referee_wallet: string
-  level_bonus_claimed: boolean
-  last_referee_crystals: number
-  pending_keys: number
-  pending_crystals: number
-  claimed_keys: number
-  claimed_crystals: number
-  crystals_earned: number
-  created_at: string
-  updated_at?: string
+  worldBoss?: WorldBossRow
+  worldBossParticipants?: WorldBossParticipantRow[]
+  worldBossAppliedDamage?: number
+  worldBossRewardShare?: number
 }
 
 type ReferralEntry = {
@@ -865,145 +863,6 @@ const createWorldBossState = (playerName: string, cycleStart = '', cycleEnd = ''
     participants,
     pendingDamage: 0,
   }
-}
-
-const ensureWorldBossCycle = async (): Promise<WorldBossRow | null> => {
-  if (!supabase) return null
-  const now = new Date()
-  const { data: existing, error } = await supabase.from('world_boss').select('*').eq('id', 1).maybeSingle()
-  if (error) {
-    console.warn('World boss load failed', error)
-    return null
-  }
-
-  if (!existing) {
-    const cycleStart = now.toISOString()
-    const cycleEnd = new Date(now.getTime() + WORLD_BOSS_DURATION * 1000).toISOString()
-    const { data } = await supabase
-      .from('world_boss')
-      .upsert(
-        {
-          id: 1,
-          cycle_start: cycleStart,
-          cycle_end: cycleEnd,
-          prize_pool: WORLD_BOSS_REWARD,
-          last_cycle_start: null,
-          last_cycle_end: null,
-          last_prize_pool: null,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'id' },
-      )
-      .select()
-      .single()
-    return data as WorldBossRow
-  }
-
-  const cycleEnd = new Date(existing.cycle_end)
-  if (cycleEnd.getTime() <= now.getTime()) {
-    const newStart = now.toISOString()
-    const newEnd = new Date(now.getTime() + WORLD_BOSS_DURATION * 1000).toISOString()
-    const { data } = await supabase
-      .from('world_boss')
-      .update({
-        cycle_start: newStart,
-        cycle_end: newEnd,
-        prize_pool: WORLD_BOSS_REWARD,
-        last_cycle_start: existing.cycle_start,
-        last_cycle_end: existing.cycle_end,
-        last_prize_pool: existing.prize_pool,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', 1)
-      .select()
-      .single()
-    return data as WorldBossRow
-  }
-
-  return existing as WorldBossRow
-}
-
-const fetchWorldBossParticipants = async (cycleStart: string): Promise<WorldBossParticipantRow[]> => {
-  if (!supabase || !cycleStart) return []
-  const { data, error } = await supabase
-    .from('world_boss_participants')
-    .select('wallet, cycle_start, name, damage, joined, reward_claimed, updated_at')
-    .eq('cycle_start', cycleStart)
-    .order('damage', { ascending: false })
-    .limit(100)
-  if (error) {
-    console.warn('World boss participants load failed', error)
-    return []
-  }
-  return (data as WorldBossParticipantRow[]) ?? []
-}
-
-const upsertWorldBossParticipant = async (
-  wallet: string,
-  cycleStart: string,
-  name: string,
-  damage: number,
-  joined: boolean,
-) => {
-  if (!supabase) return
-  const { error } = await supabase
-    .from('world_boss_participants')
-    .upsert(
-      {
-        wallet,
-        cycle_start: cycleStart,
-        name,
-        damage,
-        joined,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'wallet,cycle_start' },
-    )
-  if (error) {
-    console.warn('World boss participant upsert failed', error)
-  }
-}
-
-const maybeClaimWorldBossReward = async (wallet: string, boss: WorldBossRow, state: GameState) => {
-  if (!supabase || !boss.last_cycle_start || !boss.last_cycle_end || !boss.last_prize_pool) return
-  const now = new Date()
-  if (now.getTime() <= new Date(boss.last_cycle_end).getTime()) return
-
-  const { data: playerRow, error: playerError } = await supabase
-    .from('world_boss_participants')
-    .select('wallet, cycle_start, name, damage, joined, reward_claimed')
-    .eq('cycle_start', boss.last_cycle_start)
-    .eq('wallet', wallet)
-    .maybeSingle()
-
-  if (playerError || !playerRow || playerRow.reward_claimed || !playerRow.joined) return
-
-  const { data: totals, error: totalError } = await supabase
-    .from('world_boss_participants')
-    .select('damage')
-    .eq('cycle_start', boss.last_cycle_start)
-    .eq('joined', true)
-
-  if (totalError || !totals) return
-  const totalDamage = totals.reduce((sum, entry) => sum + Number(entry.damage), 0)
-  if (totalDamage <= 0) return
-
-  const share = Math.floor((boss.last_prize_pool * Number(playerRow.damage)) / totalDamage)
-  if (share <= 0) return
-
-  const { data: claimedRow, error: claimError } = await supabase
-    .from('world_boss_participants')
-    .update({ reward_claimed: true, updated_at: new Date().toISOString() })
-    .eq('wallet', wallet)
-    .eq('cycle_start', boss.last_cycle_start)
-    .eq('reward_claimed', false)
-    .select('wallet')
-    .maybeSingle()
-
-  if (claimError || !claimedRow) return
-
-  grantCrystals(state, share)
-  pushLog(state.eventLog, `World boss rewards: +${share} crystals.`)
 }
 
 const buildPersistedState = (state: GameState): PersistedState => ({
@@ -2832,18 +2691,25 @@ function App() {
     setHud(buildHud(state))
   }
 
-  const loadReferralEntries = async (wallet: string, silent = false) => {
-    if (!supabase) return
+  const applyReferralSummary = (result: GameSecureResponse) => {
+    const entries = (result.referralEntries ?? []).map((entry) => ({
+      wallet: String(entry.wallet),
+      level: Math.max(1, Math.floor(Number(entry.level ?? 1))),
+      crystalsFromRef: Math.max(0, Math.floor(Number(entry.crystalsFromRef ?? 0))),
+      pendingCrystals: Math.max(0, Math.floor(Number(entry.pendingCrystals ?? 0))),
+      pendingKeys: Math.max(0, Math.floor(Number(entry.pendingKeys ?? 0))),
+    }))
+    setReferralEntries(entries)
+    setReferralPendingKeys(Math.max(0, Math.floor(Number(result.referralPendingKeys ?? 0))))
+    setReferralPendingCrystals(Math.max(0, Math.floor(Number(result.referralPendingCrystals ?? 0))))
+  }
+
+  const loadReferralEntries = async (_wallet: string, silent = false) => {
     if (!silent) setReferralLoading(true)
     setReferralError('')
 
-    const { data: referralRows, error: referralsError } = await supabase
-      .from('referrals')
-      .select('referrer_wallet, referee_wallet, level_bonus_claimed, last_referee_crystals, pending_keys, pending_crystals, claimed_keys, claimed_crystals, crystals_earned, created_at, updated_at')
-      .eq('referrer_wallet', wallet)
-      .order('created_at', { ascending: false })
-
-    if (referralsError) {
+    const result = await callGameSecureAuthed('referrals_status', {}, true)
+    if (!result.ok) {
       setReferralError('Failed to load referrals.')
       setReferralEntries([])
       setReferralPendingKeys(0)
@@ -2852,117 +2718,33 @@ function App() {
       return
     }
 
-    const rows = (referralRows as ReferralRow[] | null) ?? []
-    if (!rows.length) {
-      setReferralEntries([])
-      setReferralPendingKeys(0)
-      setReferralPendingCrystals(0)
-      if (!silent) setReferralLoading(false)
-      return
-    }
-
-    const refereeWallets = rows.map((row) => row.referee_wallet)
-    const { data: profilesData } = await supabase
-      .from('profiles')
-      .select('wallet, state')
-      .in('wallet', refereeWallets)
-
-    const profileLevelMap = new Map<string, number>()
-    for (const profile of profilesData ?? []) {
-      const profileWallet = String(profile.wallet ?? '')
-      const saved = (profile.state as PersistedState | null) ?? null
-      const level = Math.max(1, Math.floor(saved?.player?.level ?? 1))
-      profileLevelMap.set(profileWallet, level)
-    }
-
-    const entries: ReferralEntry[] = rows.map((row) => ({
-      wallet: row.referee_wallet,
-      level: profileLevelMap.get(row.referee_wallet) ?? 1,
-      crystalsFromRef: Math.max(0, Math.floor(Number(row.claimed_crystals ?? 0))),
-      pendingCrystals: Math.max(0, Math.floor(Number(row.pending_crystals ?? 0))),
-      pendingKeys: Math.max(0, Math.floor(Number(row.pending_keys ?? 0))),
-    }))
-
-    const pendingKeys = rows.reduce((sum, row) => sum + Math.max(0, Math.floor(Number(row.pending_keys ?? 0))), 0)
-    const pendingCrystals = rows.reduce((sum, row) => sum + Math.max(0, Math.floor(Number(row.pending_crystals ?? 0))), 0)
-
-    setReferralEntries(entries)
-    setReferralPendingKeys(pendingKeys)
-    setReferralPendingCrystals(pendingCrystals)
+    applyReferralSummary(result)
     if (!silent) setReferralLoading(false)
   }
 
   const syncReferralState = async () => {
     const state = gameStateRef.current
     const wallet = publicKey?.toBase58()
-    if (!state || !wallet || !supabase) return
+    if (!state || !wallet) return
 
-    const nowIso = new Date().toISOString()
-    if (!referralProcessedRef.current && isNewProfileRef.current && referralWalletFromUrl && referralWalletFromUrl !== wallet) {
-      const { data: existingReferral } = await supabase
-        .from('referrals')
-        .select('referee_wallet')
-        .eq('referee_wallet', wallet)
-        .maybeSingle()
+    const applyReferrer =
+      !referralProcessedRef.current && isNewProfileRef.current && referralWalletFromUrl && referralWalletFromUrl !== wallet
+        ? referralWalletFromUrl
+        : ''
 
-      if (!existingReferral) {
-        const { error } = await supabase.from('referrals').insert({
-          referrer_wallet: referralWalletFromUrl,
-          referee_wallet: wallet,
-          level_bonus_claimed: false,
-          last_referee_crystals: 0,
-          pending_keys: 0,
-          pending_crystals: 0,
-          claimed_keys: 0,
-          claimed_crystals: 0,
-          crystals_earned: 0,
-          created_at: nowIso,
-          updated_at: nowIso,
-        })
-        if (!error) {
-          pushLog(state.eventLog, 'Referral link applied.')
-          syncHud()
-        }
-      }
+    const result = await callGameSecureAuthed('referrals_status', { applyReferrer }, false)
+    if (!result.ok) return
+
+    if (applyReferrer) {
       referralProcessedRef.current = true
     }
 
-    const { data: ownReferralRow, error: ownReferralError } = await supabase
-      .from('referrals')
-      .select('referrer_wallet, referee_wallet, level_bonus_claimed, last_referee_crystals, pending_keys, pending_crystals, claimed_keys, claimed_crystals, crystals_earned, created_at, updated_at')
-      .eq('referee_wallet', wallet)
-      .maybeSingle()
-
-    if (!ownReferralError && ownReferralRow) {
-      const row = ownReferralRow as ReferralRow
-      const lastTrackedCrystals = Math.max(0, Math.floor(Number(row.last_referee_crystals ?? 0)))
-      const totalEarnedCrystals = Math.max(0, Math.floor(state.crystalsEarned))
-      const deltaEarned = Math.max(0, totalEarnedCrystals - lastTrackedCrystals)
-      const crystalBonus = Math.max(0, Math.floor(deltaEarned * REFERRAL_CRYSTAL_RATE))
-      const reachedLevelTarget = state.player.level >= REFERRAL_LEVEL_TARGET
-      const needsLevelBonus = reachedLevelTarget && !row.level_bonus_claimed
-
-      if (deltaEarned > 0 || needsLevelBonus) {
-        const nextPendingKeys = Math.max(0, Math.floor(Number(row.pending_keys ?? 0))) + (needsLevelBonus ? REFERRAL_KEY_BONUS : 0)
-        const nextPendingCrystals = Math.max(0, Math.floor(Number(row.pending_crystals ?? 0))) + crystalBonus
-        const nextCrystalsEarned = Math.max(0, Math.floor(Number(row.crystals_earned ?? 0))) + crystalBonus
-        await supabase
-          .from('referrals')
-          .update({
-            level_bonus_claimed: row.level_bonus_claimed || needsLevelBonus,
-            last_referee_crystals: totalEarnedCrystals,
-            pending_keys: nextPendingKeys,
-            pending_crystals: nextPendingCrystals,
-            crystals_earned: nextCrystalsEarned,
-            updated_at: nowIso,
-          })
-          .eq('referee_wallet', wallet)
-          .eq('last_referee_crystals', lastTrackedCrystals)
-          .eq('level_bonus_claimed', row.level_bonus_claimed)
-      }
+    if (result.referralApplied) {
+      pushLog(state.eventLog, 'Referral link applied.')
+      syncHud()
     }
 
-    await loadReferralEntries(wallet, true)
+    applyReferralSummary(result)
   }
 
   useEffect(() => {
@@ -3030,78 +2812,38 @@ function App() {
   const claimReferralRewards = async () => {
     const state = gameStateRef.current
     const wallet = publicKey?.toBase58()
-    if (!state || !wallet || !supabase) return
+    if (!state || !wallet) return
     if (referralClaimLoading) return
 
     setReferralClaimLoading(true)
     setReferralError('')
+    try {
+      const result = await callGameSecureAuthed('referrals_claim', {}, true)
+      if (!result.ok) {
+        setReferralError('Failed to claim referral rewards.')
+        return
+      }
 
-    const { data, error } = await supabase
-      .from('referrals')
-      .select('referrer_wallet, referee_wallet, level_bonus_claimed, last_referee_crystals, pending_keys, pending_crystals, claimed_keys, claimed_crystals, crystals_earned, created_at, updated_at')
-      .eq('referrer_wallet', wallet)
-      .or('pending_keys.gt.0,pending_crystals.gt.0')
+      const claimKeys = Math.max(0, Math.floor(Number(result.claimedKeys ?? 0)))
+      const claimCrystals = Math.max(0, Math.floor(Number(result.claimedCrystals ?? 0)))
+      if (claimKeys <= 0 && claimCrystals <= 0) {
+        setReferralError('No rewards available to claim.')
+        void loadReferralEntries(wallet)
+        return
+      }
 
-    if (error) {
-      setReferralError('Failed to claim referral rewards.')
-      setReferralClaimLoading(false)
-      return
-    }
-
-    const rows = (data as ReferralRow[] | null) ?? []
-    if (!rows.length) {
-      setReferralError('No rewards available to claim.')
-      setReferralClaimLoading(false)
-      return
-    }
-
-    let claimKeys = 0
-    let claimCrystals = 0
-    const nowIso = new Date().toISOString()
-
-    for (const row of rows) {
-      const pendingKeys = Math.max(0, Math.floor(Number(row.pending_keys ?? 0)))
-      const pendingCrystals = Math.max(0, Math.floor(Number(row.pending_crystals ?? 0)))
-      if (pendingKeys <= 0 && pendingCrystals <= 0) continue
-
-      const nextClaimedKeys = Math.max(0, Math.floor(Number(row.claimed_keys ?? 0))) + pendingKeys
-      const nextClaimedCrystals = Math.max(0, Math.floor(Number(row.claimed_crystals ?? 0))) + pendingCrystals
-
-      const { data: updatedRow } = await supabase
-        .from('referrals')
-        .update({
-          pending_keys: 0,
-          pending_crystals: 0,
-          claimed_keys: nextClaimedKeys,
-          claimed_crystals: nextClaimedCrystals,
-          updated_at: nowIso,
-        })
-        .eq('referee_wallet', row.referee_wallet)
-        .eq('pending_keys', pendingKeys)
-        .eq('pending_crystals', pendingCrystals)
-        .select('referee_wallet')
-        .maybeSingle()
-
-      if (!updatedRow) continue
-
-      claimKeys += pendingKeys
-      claimCrystals += pendingCrystals
-    }
-
-    if (claimKeys <= 0 && claimCrystals <= 0) {
-      setReferralError('Rewards were already claimed. Try refresh.')
+      state.tickets = Math.max(
+        0,
+        Math.floor(Number(result.tickets ?? Math.min(SHOP_TICKET_CAP, Math.max(0, Math.floor(state.tickets)) + claimKeys))),
+      )
+      state.crystals = Math.max(0, Math.floor(Number(result.crystals ?? Math.max(0, Math.floor(state.crystals)) + claimCrystals)))
+      pushLog(state.eventLog, `Referral claim: +${claimKeys} keys, +${claimCrystals} crystals.`)
+      syncHud()
+      void saveGameState()
       void loadReferralEntries(wallet)
+    } finally {
       setReferralClaimLoading(false)
-      return
     }
-
-    state.tickets = Math.min(SHOP_TICKET_CAP, Math.max(0, Math.floor(state.tickets)) + claimKeys)
-    state.crystals = Math.max(0, Math.floor(state.crystals)) + claimCrystals
-    pushLog(state.eventLog, `Referral claim: +${claimKeys} keys, +${claimCrystals} crystals.`)
-    syncHud()
-    void saveGameState()
-    void loadReferralEntries(wallet)
-    setReferralClaimLoading(false)
   }
 
   useEffect(() => {
@@ -3556,25 +3298,10 @@ function App() {
     }
   }
 
-  const syncWorldBossFromServer = async () => {
+  const syncWorldBossFromServer = async (interactive = false) => {
     const state = gameStateRef.current
     const wallet = publicKey?.toBase58()
-    if (!state || !wallet || !supabase) return
-
-    const bossRow = await ensureWorldBossCycle()
-    if (!bossRow) return
-
-    const cycleStart = bossRow.cycle_start
-    const cycleEnd = bossRow.cycle_end
-
-    if (state.worldBoss.cycleStart !== cycleStart) {
-      state.worldBoss = createWorldBossState(state.name, cycleStart, cycleEnd)
-    } else {
-      state.worldBoss.cycleEnd = cycleEnd
-    }
-
-    state.worldBoss.duration = WORLD_BOSS_DURATION
-    state.worldBoss.remaining = Math.max(0, (new Date(cycleEnd).getTime() - Date.now()) / 1000)
+    if (!state || !wallet) return
 
     let playerEntry = state.worldBoss.participants.find((entry) => entry.isPlayer)
     if (!playerEntry) {
@@ -3592,22 +3319,42 @@ function App() {
       playerEntry.isPlayer = true
     }
 
-    const rows = await fetchWorldBossParticipants(cycleStart)
-    const playerRow = rows.find((row) => row.wallet === wallet)
-    const serverDamage = Number(playerRow?.damage ?? 0)
-
-    if (serverDamage > playerEntry.damage) {
-      playerEntry.damage = serverDamage
+    const result = await callGameSecureAuthed(
+      'worldboss_sync',
+      {
+        playerName: playerEntry.name,
+        joined: playerEntry.joined,
+        pendingDamage: Math.max(0, Math.floor(state.worldBoss.pendingDamage)),
+        clientCycleStart: state.worldBoss.cycleStart,
+      },
+      interactive,
+    )
+    if (!result.ok || !result.worldBoss) {
+      if (result.error && result.error !== 'Wallet signature required for secure actions.') {
+        console.warn('World boss sync skipped:', result.error)
+      }
+      return
     }
 
-    const shouldUpsert =
-      playerEntry.joined && (!playerRow || playerEntry.damage > serverDamage || state.worldBoss.pendingDamage > 0)
+    const bossRow = result.worldBoss
+    const cycleStart = bossRow.cycle_start
+    const cycleEnd = bossRow.cycle_end
 
-    if (shouldUpsert) {
-      await upsertWorldBossParticipant(wallet, cycleStart, playerEntry.name, playerEntry.damage, playerEntry.joined)
-      state.worldBoss.pendingDamage = 0
+    if (state.worldBoss.cycleStart !== cycleStart) {
+      state.worldBoss = createWorldBossState(state.name, cycleStart, cycleEnd)
+      playerEntry = state.worldBoss.participants.find((entry) => entry.isPlayer) ?? playerEntry
+    } else {
+      state.worldBoss.cycleEnd = cycleEnd
     }
 
+    state.worldBoss.duration = WORLD_BOSS_DURATION
+    state.worldBoss.remaining = Math.max(0, (new Date(cycleEnd).getTime() - Date.now()) / 1000)
+    state.worldBoss.pendingDamage = Math.max(
+      0,
+      Math.floor(state.worldBoss.pendingDamage) - Math.max(0, Math.floor(Number(result.worldBossAppliedDamage ?? 0))),
+    )
+
+    const rows = (result.worldBossParticipants ?? []) as WorldBossParticipantRow[]
     const participants: WorldBossParticipant[] = rows.map((row) => ({
       id: row.wallet,
       name: row.name,
@@ -3619,16 +3366,21 @@ function App() {
 
     const serverPlayer = participants.find((entry) => entry.isPlayer)
     if (serverPlayer) {
-      serverPlayer.damage = Math.max(serverPlayer.damage, playerEntry.damage)
+      serverPlayer.damage = Math.max(0, Math.floor(Number(serverPlayer.damage)))
       serverPlayer.joined = serverPlayer.joined || playerEntry.joined
       serverPlayer.name = playerEntry.name
+      playerEntry.damage = serverPlayer.damage
     } else {
       participants.unshift({ ...playerEntry, isPlayer: true })
     }
 
     state.worldBoss.participants = participants
 
-    await maybeClaimWorldBossReward(wallet, bossRow, state)
+    const rewardShare = Math.max(0, Math.floor(Number(result.worldBossRewardShare ?? 0)))
+    if (rewardShare > 0) {
+      grantCrystals(state, rewardShare)
+      pushLog(state.eventLog, `World boss rewards: +${rewardShare} crystals.`)
+    }
     syncHud()
   }
 
@@ -4186,7 +3938,7 @@ function App() {
     participant.joined = true
     participant.name = state.name
     syncHud()
-    void syncWorldBossFromServer()
+    void syncWorldBossFromServer(true)
     void saveGameState()
   }
 

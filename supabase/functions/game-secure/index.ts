@@ -4,6 +4,13 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const MAX_LEVEL = 255;
 const WITHDRAW_RATE = 15000;
 const WITHDRAW_MIN = 2000;
+const MAX_TICKETS = 30;
+const WORLD_BOSS_DURATION_SECONDS = 12 * 60 * 60;
+const WORLD_BOSS_PRIZE_POOL = 500;
+const WORLD_BOSS_DAMAGE_PER_SEC_CAP = 5000;
+const REFERRAL_LEVEL_TARGET = 15;
+const REFERRAL_KEY_BONUS = 3;
+const REFERRAL_CRYSTAL_RATE = 0.05;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -19,6 +26,41 @@ type Metrics = {
   crystalsEarned: number;
   monsterKills: number;
   dungeonRuns: number;
+};
+
+type WorldBossRow = {
+  id: number;
+  cycle_start: string;
+  cycle_end: string;
+  prize_pool: number;
+  last_cycle_start: string | null;
+  last_cycle_end: string | null;
+  last_prize_pool: number | null;
+  updated_at?: string;
+};
+
+type WorldBossParticipantRow = {
+  wallet: string;
+  cycle_start: string;
+  name: string;
+  damage: number;
+  joined: boolean;
+  reward_claimed: boolean;
+  updated_at?: string;
+};
+
+type ReferralRow = {
+  referrer_wallet: string;
+  referee_wallet: string;
+  level_bonus_claimed: boolean;
+  last_referee_crystals: number;
+  pending_keys: number;
+  pending_crystals: number;
+  claimed_keys: number;
+  claimed_crystals: number;
+  crystals_earned: number;
+  created_at: string;
+  updated_at?: string;
 };
 
 const json = (payload: Record<string, unknown>) =>
@@ -42,6 +84,8 @@ const sanitizeName = (value: unknown) =>
     .replace(/[\u0000-\u001f\u007f]/g, "")
     .trim()
     .slice(0, 18) || "Hero";
+
+const isWalletLike = (value: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
 
 const getMetrics = (state: Record<string, unknown>): Metrics => {
   const player = (state.player as Record<string, unknown> | undefined) ?? {};
@@ -171,6 +215,329 @@ const toWalletList = (raw: string | undefined) =>
     .split(",")
     .map((entry) => entry.trim())
     .filter(Boolean);
+
+const ensureWorldBossCycle = async (
+  supabase: ReturnType<typeof createClient>,
+  now: Date,
+): Promise<WorldBossRow | null> => {
+  const { data: existing, error } = await supabase
+    .from("world_boss")
+    .select("id, cycle_start, cycle_end, prize_pool, last_cycle_start, last_cycle_end, last_prize_pool, updated_at")
+    .eq("id", 1)
+    .maybeSingle();
+
+  if (error) return null;
+
+  if (!existing) {
+    const cycleStart = now.toISOString();
+    const cycleEnd = new Date(now.getTime() + WORLD_BOSS_DURATION_SECONDS * 1000).toISOString();
+    const { data: created } = await supabase
+      .from("world_boss")
+      .upsert(
+        {
+          id: 1,
+          cycle_start: cycleStart,
+          cycle_end: cycleEnd,
+          prize_pool: WORLD_BOSS_PRIZE_POOL,
+          last_cycle_start: null,
+          last_cycle_end: null,
+          last_prize_pool: null,
+          updated_at: now.toISOString(),
+        },
+        { onConflict: "id" },
+      )
+      .select("id, cycle_start, cycle_end, prize_pool, last_cycle_start, last_cycle_end, last_prize_pool, updated_at")
+      .maybeSingle();
+    if (created) return created as WorldBossRow;
+
+    const { data: latest } = await supabase
+      .from("world_boss")
+      .select("id, cycle_start, cycle_end, prize_pool, last_cycle_start, last_cycle_end, last_prize_pool, updated_at")
+      .eq("id", 1)
+      .maybeSingle();
+    return (latest as WorldBossRow | null) ?? null;
+  }
+
+  const existingRow = existing as WorldBossRow;
+  if (new Date(existingRow.cycle_end).getTime() > now.getTime()) {
+    return existingRow;
+  }
+
+  const nextStart = now.toISOString();
+  const nextEnd = new Date(now.getTime() + WORLD_BOSS_DURATION_SECONDS * 1000).toISOString();
+  const { data: rotated } = await supabase
+    .from("world_boss")
+    .update({
+      cycle_start: nextStart,
+      cycle_end: nextEnd,
+      prize_pool: WORLD_BOSS_PRIZE_POOL,
+      last_cycle_start: existingRow.cycle_start,
+      last_cycle_end: existingRow.cycle_end,
+      last_prize_pool: existingRow.prize_pool,
+      updated_at: now.toISOString(),
+    })
+    .eq("id", 1)
+    .eq("cycle_end", existingRow.cycle_end)
+    .select("id, cycle_start, cycle_end, prize_pool, last_cycle_start, last_cycle_end, last_prize_pool, updated_at")
+    .maybeSingle();
+
+  if (rotated) return rotated as WorldBossRow;
+
+  const { data: latest } = await supabase
+    .from("world_boss")
+    .select("id, cycle_start, cycle_end, prize_pool, last_cycle_start, last_cycle_end, last_prize_pool, updated_at")
+    .eq("id", 1)
+    .maybeSingle();
+  return (latest as WorldBossRow | null) ?? null;
+};
+
+const loadWorldBossParticipants = async (
+  supabase: ReturnType<typeof createClient>,
+  cycleStart: string,
+) => {
+  const { data, error } = await supabase
+    .from("world_boss_participants")
+    .select("wallet, cycle_start, name, damage, joined, reward_claimed, updated_at")
+    .eq("cycle_start", cycleStart)
+    .order("damage", { ascending: false })
+    .limit(100);
+  if (error) return [];
+  return (data as WorldBossParticipantRow[] | null) ?? [];
+};
+
+const updateProfileWithRetry = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  mutate: (state: Record<string, unknown>) => void,
+) => {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const { data: profileRow, error: profileError } = await supabase
+      .from("profiles")
+      .select("state, updated_at")
+      .eq("wallet", wallet)
+      .maybeSingle();
+
+    if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+      return { ok: false as const };
+    }
+
+    const normalized = normalizeState(profileRow.state);
+    if (!normalized) return { ok: false as const };
+
+    const nextState = structuredClone(normalized) as Record<string, unknown>;
+    mutate(nextState);
+
+    const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+    const { data: updated, error: updateError } = await supabase
+      .from("profiles")
+      .update({
+        state: nextState,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("wallet", wallet)
+      .eq("updated_at", expectedUpdatedAt)
+      .select("wallet")
+      .maybeSingle();
+
+    if (!updateError && updated) {
+      return { ok: true as const, state: nextState };
+    }
+  }
+
+  const { data: fallbackRow, error: fallbackError } = await supabase
+    .from("profiles")
+    .select("state")
+    .eq("wallet", wallet)
+    .maybeSingle();
+
+  if (fallbackError || !fallbackRow || !fallbackRow.state || typeof fallbackRow.state !== "object") {
+    return { ok: false as const };
+  }
+
+  const fallbackState = normalizeState(fallbackRow.state);
+  if (!fallbackState) return { ok: false as const };
+
+  const nextFallbackState = structuredClone(fallbackState) as Record<string, unknown>;
+  mutate(nextFallbackState);
+
+  const { data: forceUpdated, error: forceError } = await supabase
+    .from("profiles")
+    .update({
+      state: nextFallbackState,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("wallet", wallet)
+    .select("wallet")
+    .maybeSingle();
+
+  if (forceError || !forceUpdated) return { ok: false as const };
+  return { ok: true as const, state: nextFallbackState };
+};
+
+const claimWorldBossReward = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  boss: WorldBossRow,
+  now: Date,
+) => {
+  if (!boss.last_cycle_start || !boss.last_cycle_end || !boss.last_prize_pool) return 0;
+  if (new Date(boss.last_cycle_end).getTime() > now.getTime()) return 0;
+
+  const { data: playerRow, error: playerError } = await supabase
+    .from("world_boss_participants")
+    .select("wallet, cycle_start, name, damage, joined, reward_claimed")
+    .eq("cycle_start", boss.last_cycle_start)
+    .eq("wallet", wallet)
+    .maybeSingle();
+
+  if (playerError || !playerRow) return 0;
+  if (Boolean(playerRow.reward_claimed) || !Boolean(playerRow.joined)) return 0;
+
+  const { data: totalRows, error: totalError } = await supabase
+    .from("world_boss_participants")
+    .select("damage")
+    .eq("cycle_start", boss.last_cycle_start)
+    .eq("joined", true);
+  if (totalError || !totalRows) return 0;
+
+  const totalDamage = totalRows.reduce((sum, row) => sum + Math.max(0, asInt(row.damage, 0)), 0);
+  const playerDamage = Math.max(0, asInt(playerRow.damage, 0));
+  const share = totalDamage > 0
+    ? Math.max(0, Math.floor((Math.max(0, asInt(boss.last_prize_pool, 0)) * playerDamage) / totalDamage))
+    : 0;
+
+  const { data: claimRow, error: claimError } = await supabase
+    .from("world_boss_participants")
+    .update({ reward_claimed: true, updated_at: now.toISOString() })
+    .eq("wallet", wallet)
+    .eq("cycle_start", boss.last_cycle_start)
+    .eq("reward_claimed", false)
+    .select("wallet")
+    .maybeSingle();
+
+  if (claimError || !claimRow || share <= 0) return 0;
+
+  const creditResult = await updateProfileWithRetry(supabase, wallet, (state) => {
+    state.crystals = Math.max(0, asInt(state.crystals, 0)) + share;
+    state.crystalsEarned = Math.max(0, asInt(state.crystalsEarned, 0)) + share;
+  });
+
+  if (!creditResult.ok) {
+    await supabase.from("security_events").insert({
+      wallet,
+      kind: "worldboss_reward_credit_failed",
+      details: { share, cycleStart: boss.last_cycle_start },
+    });
+    return 0;
+  }
+
+  return share;
+};
+
+const syncOwnReferralProgress = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  nowIso: string,
+) => {
+  const { data: row, error } = await supabase
+    .from("referrals")
+    .select("referrer_wallet, referee_wallet, level_bonus_claimed, last_referee_crystals, pending_keys, pending_crystals, claimed_keys, claimed_crystals, crystals_earned, created_at, updated_at")
+    .eq("referee_wallet", wallet)
+    .maybeSingle();
+
+  if (error || !row) return;
+
+  const referral = row as ReferralRow;
+  const { data: profileRow } = await supabase
+    .from("profiles")
+    .select("state")
+    .eq("wallet", wallet)
+    .maybeSingle();
+
+  const profileState = normalizeState(profileRow?.state ?? null);
+  const currentLevel = Math.max(1, asInt(profileState?.player && typeof profileState.player === "object"
+    ? (profileState.player as Record<string, unknown>).level
+    : 1, 1));
+  const currentCrystalsEarned = Math.max(0, asInt(profileState?.crystalsEarned ?? profileState?.crystals ?? 0, 0));
+
+  const lastTracked = Math.max(0, asInt(referral.last_referee_crystals, 0));
+  const deltaEarned = Math.max(0, currentCrystalsEarned - lastTracked);
+  const crystalBonus = Math.max(0, Math.floor(deltaEarned * REFERRAL_CRYSTAL_RATE));
+  const reachedLevelTarget = currentLevel >= REFERRAL_LEVEL_TARGET;
+  const needsLevelBonus = reachedLevelTarget && !Boolean(referral.level_bonus_claimed);
+
+  if (deltaEarned <= 0 && !needsLevelBonus) return;
+
+  const nextPendingKeys = Math.max(0, asInt(referral.pending_keys, 0)) + (needsLevelBonus ? REFERRAL_KEY_BONUS : 0);
+  const nextPendingCrystals = Math.max(0, asInt(referral.pending_crystals, 0)) + crystalBonus;
+  const nextCrystalsEarned = Math.max(0, asInt(referral.crystals_earned, 0)) + crystalBonus;
+
+  await supabase
+    .from("referrals")
+    .update({
+      level_bonus_claimed: Boolean(referral.level_bonus_claimed) || needsLevelBonus,
+      last_referee_crystals: currentCrystalsEarned,
+      pending_keys: nextPendingKeys,
+      pending_crystals: nextPendingCrystals,
+      crystals_earned: nextCrystalsEarned,
+      updated_at: nowIso,
+    })
+    .eq("referee_wallet", wallet)
+    .eq("last_referee_crystals", lastTracked)
+    .eq("level_bonus_claimed", Boolean(referral.level_bonus_claimed));
+};
+
+const getReferrerSummary = async (supabase: ReturnType<typeof createClient>, wallet: string) => {
+  const { data: referralRows, error } = await supabase
+    .from("referrals")
+    .select("referrer_wallet, referee_wallet, level_bonus_claimed, last_referee_crystals, pending_keys, pending_crystals, claimed_keys, claimed_crystals, crystals_earned, created_at, updated_at")
+    .eq("referrer_wallet", wallet)
+    .order("created_at", { ascending: false });
+
+  if (error) return { ok: false as const };
+
+  const rows = (referralRows as ReferralRow[] | null) ?? [];
+  if (!rows.length) {
+    return {
+      ok: true as const,
+      entries: [] as Array<Record<string, number | string>>,
+      pendingKeys: 0,
+      pendingCrystals: 0,
+    };
+  }
+
+  const refereeWallets = rows.map((entry) => entry.referee_wallet);
+  const { data: profileRows } = await supabase
+    .from("profiles")
+    .select("wallet, state")
+    .in("wallet", refereeWallets);
+
+  const levelByWallet = new Map<string, number>();
+  for (const profile of profileRows ?? []) {
+    const walletValue = String(profile.wallet ?? "");
+    const normalized = normalizeState(profile.state ?? null);
+    const level = Math.max(1, asInt(
+      normalized?.player && typeof normalized.player === "object"
+        ? (normalized.player as Record<string, unknown>).level
+        : 1,
+      1,
+    ));
+    levelByWallet.set(walletValue, level);
+  }
+
+  const entries = rows.map((row) => ({
+    wallet: row.referee_wallet,
+    level: levelByWallet.get(row.referee_wallet) ?? 1,
+    crystalsFromRef: Math.max(0, asInt(row.claimed_crystals, 0)),
+    pendingCrystals: Math.max(0, asInt(row.pending_crystals, 0)),
+    pendingKeys: Math.max(0, asInt(row.pending_keys, 0)),
+  }));
+
+  const pendingKeys = rows.reduce((sum, row) => sum + Math.max(0, asInt(row.pending_keys, 0)), 0);
+  const pendingCrystals = rows.reduce((sum, row) => sum + Math.max(0, asInt(row.pending_crystals, 0)), 0);
+
+  return { ok: true as const, entries, pendingKeys, pendingCrystals };
+};
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -334,6 +701,209 @@ serve(async (req) => {
 
     if (error) return json({ ok: false, error: "Failed to load withdrawals." });
     return json({ ok: true, withdrawals: data ?? [] });
+  }
+
+  if (action === "referrals_status") {
+    const nowIso = now.toISOString();
+    const applyReferrer = String(body.applyReferrer ?? "").trim();
+    let referralApplied = false;
+
+    if (
+      applyReferrer &&
+      applyReferrer !== auth.wallet &&
+      isWalletLike(applyReferrer)
+    ) {
+      const { data: existing } = await supabase
+        .from("referrals")
+        .select("referee_wallet")
+        .eq("referee_wallet", auth.wallet)
+        .maybeSingle();
+
+      if (!existing) {
+        const { error: insertError } = await supabase
+          .from("referrals")
+          .insert({
+            referrer_wallet: applyReferrer,
+            referee_wallet: auth.wallet,
+            level_bonus_claimed: false,
+            last_referee_crystals: 0,
+            pending_keys: 0,
+            pending_crystals: 0,
+            claimed_keys: 0,
+            claimed_crystals: 0,
+            crystals_earned: 0,
+            created_at: nowIso,
+            updated_at: nowIso,
+          });
+        if (!insertError) referralApplied = true;
+      }
+    }
+
+    await syncOwnReferralProgress(supabase, auth.wallet, nowIso);
+
+    const summary = await getReferrerSummary(supabase, auth.wallet);
+    if (!summary.ok) {
+      return json({ ok: false, error: "Failed to load referrals." });
+    }
+
+    return json({
+      ok: true,
+      referralApplied,
+      referralEntries: summary.entries,
+      referralPendingKeys: summary.pendingKeys,
+      referralPendingCrystals: summary.pendingCrystals,
+    });
+  }
+
+  if (action === "referrals_claim") {
+    const nowIso = now.toISOString();
+    const { data, error } = await supabase
+      .from("referrals")
+      .select("referrer_wallet, referee_wallet, level_bonus_claimed, last_referee_crystals, pending_keys, pending_crystals, claimed_keys, claimed_crystals, crystals_earned, created_at, updated_at")
+      .eq("referrer_wallet", auth.wallet)
+      .or("pending_keys.gt.0,pending_crystals.gt.0");
+
+    if (error) return json({ ok: false, error: "Failed to claim referral rewards." });
+
+    const rows = (data as ReferralRow[] | null) ?? [];
+    let claimedKeys = 0;
+    let claimedCrystals = 0;
+
+    for (const row of rows) {
+      const pendingKeys = Math.max(0, asInt(row.pending_keys, 0));
+      const pendingCrystals = Math.max(0, asInt(row.pending_crystals, 0));
+      if (pendingKeys <= 0 && pendingCrystals <= 0) continue;
+
+      const nextClaimedKeys = Math.max(0, asInt(row.claimed_keys, 0)) + pendingKeys;
+      const nextClaimedCrystals = Math.max(0, asInt(row.claimed_crystals, 0)) + pendingCrystals;
+
+      const { data: updatedRow } = await supabase
+        .from("referrals")
+        .update({
+          pending_keys: 0,
+          pending_crystals: 0,
+          claimed_keys: nextClaimedKeys,
+          claimed_crystals: nextClaimedCrystals,
+          updated_at: nowIso,
+        })
+        .eq("referee_wallet", row.referee_wallet)
+        .eq("pending_keys", pendingKeys)
+        .eq("pending_crystals", pendingCrystals)
+        .select("referee_wallet")
+        .maybeSingle();
+
+      if (!updatedRow) continue;
+      claimedKeys += pendingKeys;
+      claimedCrystals += pendingCrystals;
+    }
+
+    if (claimedKeys <= 0 && claimedCrystals <= 0) {
+      return json({
+        ok: true,
+        claimedKeys: 0,
+        claimedCrystals: 0,
+      });
+    }
+
+    const creditResult = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
+      state.tickets = Math.min(MAX_TICKETS, Math.max(0, asInt(state.tickets, 0)) + claimedKeys);
+      state.crystals = Math.max(0, asInt(state.crystals, 0)) + claimedCrystals;
+    });
+
+    if (!creditResult.ok || !creditResult.state) {
+      await supabase.from("security_events").insert({
+        wallet: auth.wallet,
+        kind: "referral_claim_credit_failed",
+        details: { claimedKeys, claimedCrystals },
+      });
+      return json({ ok: false, error: "Failed to credit referral rewards." });
+    }
+
+    return json({
+      ok: true,
+      claimedKeys,
+      claimedCrystals,
+      tickets: Math.max(0, asInt(creditResult.state.tickets, 0)),
+      crystals: Math.max(0, asInt(creditResult.state.crystals, 0)),
+    });
+  }
+
+  if (action === "worldboss_sync") {
+    const boss = await ensureWorldBossCycle(supabase, now);
+    if (!boss) return json({ ok: false, error: "Failed to load world boss." });
+
+    const playerName = sanitizeName(body.playerName);
+    const joinedInput = Boolean(body.joined);
+    const clientCycleStart = String(body.clientCycleStart ?? "");
+    const cycleMatches = !clientCycleStart || clientCycleStart === boss.cycle_start;
+    const pendingDamageInput = Math.max(0, asInt(body.pendingDamage, 0));
+    const safePendingDamage = cycleMatches ? pendingDamageInput : 0;
+    const safeJoined = cycleMatches ? joinedInput : false;
+
+    const rewardShare = await claimWorldBossReward(supabase, auth.wallet, boss, now);
+
+    const { data: existing, error: existingError } = await supabase
+      .from("world_boss_participants")
+      .select("wallet, cycle_start, name, damage, joined, reward_claimed, updated_at")
+      .eq("wallet", auth.wallet)
+      .eq("cycle_start", boss.cycle_start)
+      .maybeSingle();
+
+    if (existingError) return json({ ok: false, error: "Failed to sync world boss." });
+
+    const existingRow = (existing as WorldBossParticipantRow | null) ?? null;
+    const existingDamage = Math.max(0, asInt(existingRow?.damage ?? 0, 0));
+    const updatedAtMs = existingRow?.updated_at ? new Date(existingRow.updated_at).getTime() : Number.NaN;
+    const elapsedSec = Number.isFinite(updatedAtMs)
+      ? Math.max(1, Math.floor((now.getTime() - updatedAtMs) / 1000))
+      : 1;
+    const maxDamageGain = Math.max(200, elapsedSec * WORLD_BOSS_DAMAGE_PER_SEC_CAP);
+    const appliedDamage = Math.min(safePendingDamage, maxDamageGain);
+    const nextDamage = existingDamage + appliedDamage;
+    const nextJoined = Boolean(existingRow?.joined) || safeJoined;
+    const nextName = playerName || existingRow?.name || "Hero";
+
+    const shouldWrite =
+      !existingRow ||
+      appliedDamage > 0 ||
+      nextJoined !== Boolean(existingRow.joined) ||
+      nextName !== String(existingRow.name ?? "");
+
+    if (shouldWrite) {
+      const payload = {
+        wallet: auth.wallet,
+        cycle_start: boss.cycle_start,
+        name: nextName,
+        damage: nextDamage,
+        joined: nextJoined,
+        reward_claimed: Boolean(existingRow?.reward_claimed ?? false),
+        updated_at: now.toISOString(),
+      };
+
+      if (existingRow) {
+        const { error: updateError } = await supabase
+          .from("world_boss_participants")
+          .update(payload)
+          .eq("wallet", auth.wallet)
+          .eq("cycle_start", boss.cycle_start);
+        if (updateError) return json({ ok: false, error: "Failed to update world boss progress." });
+      } else {
+        const { error: insertError } = await supabase
+          .from("world_boss_participants")
+          .insert(payload);
+        if (insertError) return json({ ok: false, error: "Failed to join world boss." });
+      }
+    }
+
+    const participants = await loadWorldBossParticipants(supabase, boss.cycle_start);
+
+    return json({
+      ok: true,
+      worldBoss: boss,
+      worldBossParticipants: participants,
+      worldBossAppliedDamage: appliedDamage,
+      worldBossRewardShare: rewardShare,
+    });
   }
 
   if (action === "admin_mark_paid") {
