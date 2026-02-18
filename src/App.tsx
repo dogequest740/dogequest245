@@ -281,6 +281,15 @@ type DungeonSecureResponse = {
   reward?: number
 }
 
+type GameSecureResponse = {
+  ok: boolean
+  error?: string
+  savedAt?: string
+  remainingCrystals?: number
+  withdrawal?: WithdrawalRow
+  withdrawals?: WithdrawalRow[]
+}
+
 type ReferralRow = {
   referrer_wallet: string
   referee_wallet: string
@@ -982,16 +991,19 @@ const maybeClaimWorldBossReward = async (wallet: string, boss: WorldBossRow, sta
   const share = Math.floor((boss.last_prize_pool * Number(playerRow.damage)) / totalDamage)
   if (share <= 0) return
 
-  grantCrystals(state, share)
-  pushLog(state.eventLog, `World boss rewards: +${share} crystals.`)
-
-  await supabase
+  const { data: claimedRow, error: claimError } = await supabase
     .from('world_boss_participants')
     .update({ reward_claimed: true, updated_at: new Date().toISOString() })
     .eq('wallet', wallet)
     .eq('cycle_start', boss.last_cycle_start)
+    .eq('reward_claimed', false)
+    .select('wallet')
+    .maybeSingle()
 
-  await saveProfileState(wallet, state)
+  if (claimError || !claimedRow) return
+
+  grantCrystals(state, share)
+  pushLog(state.eventLog, `World boss rewards: +${share} crystals.`)
 }
 
 const buildPersistedState = (state: GameState): PersistedState => ({
@@ -1122,19 +1134,6 @@ const loadProfileState = async (wallet: string) => {
     return null
   }
   return (data?.state as PersistedState | null) ?? null
-}
-
-const saveProfileState = async (wallet: string, state: GameState) => {
-  if (!supabase) return
-  const payload = {
-    wallet,
-    state: buildPersistedState(state),
-    updated_at: new Date().toISOString(),
-  }
-  const { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'wallet' })
-  if (error) {
-    console.warn('Supabase save failed', error)
-  }
 }
 
 const MONSTER_TYPES = [
@@ -2622,6 +2621,7 @@ function App() {
   const musicUnlockRef = useRef(false)
   const serverLoadedRef = useRef(false)
   const dungeonSessionRef = useRef<{ token: string; expiresAt: number } | null>(null)
+  const secureSessionInitRef = useRef(false)
   const isNewProfileRef = useRef(false)
   const referralProcessedRef = useRef(false)
   const pendingProfileRef = useRef<PersistedState | null>(null)
@@ -2776,6 +2776,37 @@ function App() {
       return { ok: false, error: 'Wallet signature required for dungeon actions.' }
     }
     return callDungeonSecure(
+      { action, ...payload },
+      { 'x-session-token': token },
+    )
+  }
+
+  const callGameSecure = async (
+    payload: Record<string, unknown>,
+    headers?: Record<string, string>,
+  ): Promise<GameSecureResponse> => {
+    if (!supabase) return { ok: false, error: 'Supabase not configured.' }
+    const { data, error } = await supabase.functions.invoke('game-secure', {
+      body: payload,
+      headers,
+    })
+    if (error) {
+      console.warn('Game secure call failed', error)
+      return { ok: false, error: 'Secure service unavailable.' }
+    }
+    return (data as GameSecureResponse | null) ?? { ok: false, error: 'Empty secure service response.' }
+  }
+
+  const callGameSecureAuthed = async (
+    action: string,
+    payload: Record<string, unknown> = {},
+    interactive = true,
+  ): Promise<GameSecureResponse> => {
+    const token = await ensureDungeonSession(interactive)
+    if (!token) {
+      return { ok: false, error: 'Wallet signature required for secure actions.' }
+    }
+    return callGameSecure(
       { action, ...payload },
       { 'x-session-token': token },
     )
@@ -3183,6 +3214,7 @@ function App() {
     let active = true
     if (!connected) {
       dungeonSessionRef.current = null
+      secureSessionInitRef.current = false
       isNewProfileRef.current = false
       referralProcessedRef.current = false
       pendingProfileRef.current = null
@@ -3198,6 +3230,7 @@ function App() {
 
     const wallet = publicKey?.toBase58()
     dungeonSessionRef.current = null
+    secureSessionInitRef.current = false
     if (!wallet || !supabase) {
       isNewProfileRef.current = false
       referralProcessedRef.current = false
@@ -3228,6 +3261,14 @@ function App() {
       active = false
     }
   }, [connected, publicKey])
+
+  useEffect(() => {
+    if (stage !== 'game') return
+    if (!connected || !publicKey || !signMessage) return
+    if (secureSessionInitRef.current) return
+    secureSessionInitRef.current = true
+    void ensureDungeonSession(true)
+  }, [stage, connected, publicKey, signMessage])
 
   useEffect(() => {
     if (stage !== 'game') return
@@ -3403,8 +3444,7 @@ function App() {
   useEffect(() => {
     if (activePanel !== 'withdraw') return
     const wallet = publicKey?.toBase58()
-    const client = supabase
-    if (!wallet || !client) {
+    if (!wallet) {
       setPlayerWithdrawals([])
       return
     }
@@ -3412,18 +3452,17 @@ function App() {
     const loadWithdrawals = async () => {
       setPlayerWithdrawalsLoading(true)
       setPlayerWithdrawalsError('')
-      const { data, error } = await client
-        .from('withdrawals')
-        .select('id, wallet, name, crystals, sol_amount, status, created_at')
-        .eq('wallet', wallet)
-        .order('created_at', { ascending: false })
-        .limit(20)
+      const result = await callGameSecureAuthed('withdraw_list', {}, true)
       if (!active) return
-      if (error) {
+      if (!result.ok) {
         setPlayerWithdrawalsError('Failed to load withdrawal requests.')
         setPlayerWithdrawals([])
       } else {
-        setPlayerWithdrawals((data as WithdrawalRow[]) ?? [])
+        setPlayerWithdrawals((result.withdrawals ?? []).map((row) => ({
+          ...row,
+          crystals: Number(row.crystals ?? 0),
+          sol_amount: Number(row.sol_amount ?? 0),
+        })))
       }
       setPlayerWithdrawalsLoading(false)
     }
@@ -3431,7 +3470,7 @@ function App() {
     return () => {
       active = false
     }
-  }, [activePanel, publicKey])
+  }, [activePanel, publicKey, connected])
 
   useEffect(() => {
     if (activePanel !== 'worldboss') return
@@ -3506,8 +3545,15 @@ function App() {
     const state = gameStateRef.current
     if (!state) return
     const wallet = publicKey?.toBase58()
-    if (!wallet || !supabase || !serverLoadedRef.current) return
-    await saveProfileState(wallet, state)
+    if (!wallet || !serverLoadedRef.current) return
+    const result = await callGameSecureAuthed(
+      'profile_save',
+      { state: buildPersistedState(state) },
+      false,
+    )
+    if (!result.ok && result.error && result.error !== 'Wallet signature required for secure actions.') {
+      console.warn('Secure profile save skipped:', result.error)
+    }
   }
 
   const syncWorldBossFromServer = async () => {
@@ -3693,15 +3739,12 @@ function App() {
   }
 
   const markWithdrawalPaid = async (withdrawalId: string) => {
-    if (!isAdmin || !supabase) return
+    if (!isAdmin) return
     setAdminLoading(true)
     setAdminError('')
-    const { error } = await supabase
-      .from('withdrawals')
-      .update({ status: 'paid' })
-      .eq('id', withdrawalId)
-    if (error) {
-      setAdminError('Failed to update withdrawal.')
+    const result = await callGameSecureAuthed('admin_mark_paid', { withdrawalId }, true)
+    if (!result.ok) {
+      setAdminError(result.error || 'Failed to update withdrawal.')
       setAdminLoading(false)
       return
     }
@@ -3711,7 +3754,7 @@ function App() {
   const submitWithdrawal = async () => {
     const state = gameStateRef.current
     const wallet = publicKey?.toBase58()
-    if (!state || !wallet || !supabase) return
+    if (!state || !wallet) return
 
     const amount = Math.floor(Number(withdrawAmount))
     if (!Number.isFinite(amount) || amount <= 0) {
@@ -3727,36 +3770,28 @@ function App() {
       return
     }
 
-    const solAmount = Number((amount / WITHDRAW_RATE).toFixed(4))
-    const createdAt = new Date().toISOString()
-    const { error } = await supabase.from('withdrawals').insert({
-      wallet,
-      name: state.name,
-      crystals: amount,
-      sol_amount: solAmount,
-      status: 'pending',
-      created_at: createdAt,
-    })
-    if (error) {
-      setWithdrawError('Failed to submit request.')
+    const result = await callGameSecureAuthed('withdraw_submit', { amount }, true)
+    if (!result.ok || !result.withdrawal) {
+      setWithdrawError(result.error || 'Failed to submit request.')
       return
     }
 
-    state.crystals = Math.max(0, state.crystals - amount)
+    const remainingCrystals = Math.max(
+      0,
+      Math.floor(Number(result.remainingCrystals ?? (state.crystals - amount))),
+    )
+    state.crystals = remainingCrystals
     pushLog(state.eventLog, `Withdrawal requested: ${amount} crystals.`)
     setWithdrawAmount('')
     setWithdrawError('')
+    const serverRow: WithdrawalRow = {
+      ...result.withdrawal,
+      crystals: Number(result.withdrawal.crystals ?? amount),
+      sol_amount: Number(result.withdrawal.sol_amount ?? Number((amount / WITHDRAW_RATE).toFixed(4))),
+    }
     setPlayerWithdrawals((prev) => [
-      {
-        id: `local-${createdAt}`,
-        wallet,
-        name: state.name,
-        crystals: amount,
-        sol_amount: solAmount,
-        status: 'pending',
-        created_at: createdAt,
-      },
-      ...prev,
+      serverRow,
+      ...prev.filter((entry) => entry.id !== serverRow.id),
     ])
     syncHud()
     void saveGameState()

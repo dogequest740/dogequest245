@@ -8,11 +8,12 @@ create table if not exists public.profiles (
 
 alter table public.profiles enable row level security;
 
-create policy "public read/write"
+drop policy if exists "public read/write" on public.profiles;
+
+create policy "profiles read only"
 on public.profiles
-for all
-using (true)
-with check (true);
+for select
+using (true);
 
 create table if not exists public.world_boss (
   id int primary key,
@@ -39,17 +40,18 @@ create table if not exists public.world_boss_participants (
 alter table public.world_boss enable row level security;
 alter table public.world_boss_participants enable row level security;
 
-create policy "public world boss read/write"
-on public.world_boss
-for all
-using (true)
-with check (true);
+drop policy if exists "public world boss read/write" on public.world_boss;
+drop policy if exists "public world boss participants read/write" on public.world_boss_participants;
 
-create policy "public world boss participants read/write"
+create policy "world boss read only"
+on public.world_boss
+for select
+using (true);
+
+create policy "world boss participants read only"
 on public.world_boss_participants
-for all
-using (true)
-with check (true);
+for select
+using (true);
 
 create table if not exists public.withdrawals (
   id uuid primary key default gen_random_uuid(),
@@ -63,11 +65,22 @@ create table if not exists public.withdrawals (
 
 alter table public.withdrawals enable row level security;
 
-create policy "public withdrawals read/write"
+drop policy if exists "public withdrawals read/write" on public.withdrawals;
+
+create policy "withdrawals read only"
 on public.withdrawals
-for all
-using (true)
-with check (true);
+for select
+using (true);
+
+create table if not exists public.security_events (
+  id uuid primary key default gen_random_uuid(),
+  wallet text not null,
+  kind text not null,
+  details jsonb not null default '{}'::jsonb,
+  created_at timestamptz default now()
+);
+
+alter table public.security_events enable row level security;
 
 create table if not exists public.referrals (
   referrer_wallet text not null,
@@ -93,11 +106,12 @@ create index if not exists referrals_referrer_wallet_idx on public.referrals(ref
 
 alter table public.referrals enable row level security;
 
-create policy "public referrals read/write"
+drop policy if exists "public referrals read/write" on public.referrals;
+
+create policy "referrals read only"
 on public.referrals
-for all
-using (true)
-with check (true);
+for select
+using (true);
 
 create table if not exists public.wallet_auth_nonces (
   wallet text primary key,
