@@ -4886,40 +4886,42 @@ function App() {
             </aside>
             <div className="game-main">
               <div className="canvas-wrap">
-                {!hud?.starterPackPurchased && (
+                <div className="canvas-special-menu">
+                  {!hud?.starterPackPurchased && (
+                    <button
+                      type="button"
+                      className="starter-pack-btn starter-pack-float"
+                      onClick={() => setActivePanel('starterpack')}
+                    >
+                      <img className="starter-pack-icon" src={iconStarterPack} alt="" />
+                      <div className="starter-pack-text">
+                        <span>Starter Pack</span>
+                        <strong>One-time offer</strong>
+                      </div>
+                    </button>
+                  )}
                   <button
                     type="button"
-                    className="starter-pack-btn starter-pack-float"
-                    onClick={() => setActivePanel('starterpack')}
+                    className={`starter-pack-btn starter-pack-float premium-float ${!hud?.starterPackPurchased ? 'with-starterpack' : ''}`}
+                    onClick={() => setActivePanel('premium')}
                   >
-                    <img className="starter-pack-icon" src={iconStarterPack} alt="" />
+                    <img className="starter-pack-icon" src={iconPremium} alt="" />
                     <div className="starter-pack-text">
-                      <span>Starter Pack</span>
-                      <strong>One-time offer</strong>
+                      <strong>Premium</strong>
+                      <span>{premiumActive ? `${premiumDaysLeft}d left` : 'Subscription'}</span>
                     </div>
                   </button>
-                )}
-                <button
-                  type="button"
-                  className={`starter-pack-btn starter-pack-float premium-float ${!hud?.starterPackPurchased ? 'with-starterpack' : ''}`}
-                  onClick={() => setActivePanel('premium')}
-                >
-                  <img className="starter-pack-icon" src={iconPremium} alt="" />
-                  <div className="starter-pack-text">
-                    <strong>Premium</strong>
-                    <span>{premiumActive ? `${premiumDaysLeft}d left` : 'Subscription'}</span>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  className={`starter-pack-btn starter-pack-float referral-float ${!hud?.starterPackPurchased ? 'with-starterpack' : ''}`}
-                  onClick={() => setActivePanel('referrals')}
-                >
-                  <img className="starter-pack-icon" src={iconReferrals} alt="" />
-                  <div className="starter-pack-text">
-                    <strong>Invite Friends</strong>
-                  </div>
-                </button>
+                  <button
+                    type="button"
+                    className={`starter-pack-btn starter-pack-float referral-float ${!hud?.starterPackPurchased ? 'with-starterpack' : ''}`}
+                    onClick={() => setActivePanel('referrals')}
+                  >
+                    <img className="starter-pack-icon" src={iconReferrals} alt="" />
+                    <div className="starter-pack-text">
+                      <strong>Invite Friends</strong>
+                    </div>
+                  </button>
+                </div>
                 <canvas ref={canvasRef} className="game-canvas" />
                 <div className="buff-stack">
                   <div className={`buff-chip ${hud?.speedBuffTime ? 'active' : ''}`}>

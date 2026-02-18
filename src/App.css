@@ -354,12 +354,59 @@
 
 .app.mobile .starter-pack-float {
   position: static;
-  margin: 8px auto 0;
+  margin: 0;
 }
 
 .app.mobile .starter-pack-btn {
-  width: 100%;
-  max-width: 240px;
+  width: auto;
+  max-width: none;
+}
+
+.app.mobile .canvas-special-menu {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 8px;
+  z-index: 4;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.app.mobile .canvas-special-menu .starter-pack-btn {
+  flex: 0 0 110px;
+  min-width: 110px;
+  padding: 6px 4px;
+  border-radius: 12px;
+  background: linear-gradient(160deg, rgba(22, 16, 10, 0.9), rgba(10, 12, 18, 0.88));
+  border: 1px solid rgba(214, 178, 95, 0.32);
+  box-shadow: 0 8px 14px rgba(0, 0, 0, 0.35);
+}
+
+.app.mobile .canvas-special-menu .starter-pack-icon {
+  width: 58px;
+  height: 58px;
+}
+
+.app.mobile .canvas-special-menu .starter-pack-text {
+  gap: 2px;
+}
+
+.app.mobile .canvas-special-menu .starter-pack-text span {
+  font-size: 10px;
+}
+
+.app.mobile .canvas-special-menu .starter-pack-text strong {
+  font-size: 10px;
+  letter-spacing: 0.7px;
+}
+
+.app.mobile .canvas-special-menu .premium-float,
+.app.mobile .canvas-special-menu .premium-float.with-starterpack,
+.app.mobile .canvas-special-menu .referral-float,
+.app.mobile .canvas-special-menu .referral-float.with-starterpack {
+  top: auto;
 }
 
 .app.mobile .game-section {
