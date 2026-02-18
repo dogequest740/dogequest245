@@ -1,8 +1,8 @@
 import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const WORLD_BOSS_DURATION = 5 * 60 * 60;
-const WORLD_BOSS_REWARD = 1000;
+const WORLD_BOSS_DURATION = 12 * 60 * 60;
+const WORLD_BOSS_REWARD = 500;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",

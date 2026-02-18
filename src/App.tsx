@@ -651,12 +651,15 @@ const scaleRewardGold = (index: number, total: number, min: number, max: number)
   return Math.round(min + (max - min) * ratio)
 }
 
-const withEveryOtherEnergyReward = (
+const normalizeQuestRewardItem = (
   rewardItem: QuestRewardItem,
   index: number,
 ): QuestRewardItem | undefined => {
-  if (rewardItem === 'energy-small' || rewardItem === 'energy-full') {
-    return index % 2 === 0 ? rewardItem : undefined
+  if (rewardItem === 'energy-small') {
+    return index % 2 === 0 ? 'speed' : undefined
+  }
+  if (rewardItem === 'energy-full') {
+    return index % 2 === 0 ? 'attack' : undefined
   }
   return rewardItem
 }
@@ -665,10 +668,10 @@ const buildQuestList = (): QuestDefinition[] => {
   const quests: QuestDefinition[] = []
 
   LEVEL_QUEST_TARGETS.forEach((target, index) => {
-    const rewardGold = Math.round(scaleRewardGold(index, LEVEL_QUEST_TARGETS.length, 200, 2200) / 4)
+    const rewardGold = Math.round(scaleRewardGold(index, LEVEL_QUEST_TARGETS.length, 200, 2200) / 12)
     const baseRewardItem: QuestRewardItem =
       target >= 255 ? 'key' : target >= 200 ? 'energy-full' : target >= 140 ? 'attack' : target >= 80 ? 'speed' : 'energy-small'
-    const rewardItem = withEveryOtherEnergyReward(baseRewardItem, index)
+    const rewardItem = normalizeQuestRewardItem(baseRewardItem, index)
     quests.push({
       id: `level-${target}`,
       title: `Reach level ${target}`,
@@ -681,10 +684,10 @@ const buildQuestList = (): QuestDefinition[] => {
   })
 
   KILL_QUEST_TARGETS.forEach((target, index) => {
-    const rewardGold = Math.round(scaleRewardGold(index, KILL_QUEST_TARGETS.length, 250, 2500) / 4)
+    const rewardGold = Math.round(scaleRewardGold(index, KILL_QUEST_TARGETS.length, 250, 2500) / 12)
     const baseRewardItem: QuestRewardItem =
       target >= 56000 ? 'key' : target >= 32000 ? 'energy-full' : target >= 16000 ? 'attack' : target >= 4500 ? 'speed' : 'energy-small'
-    const rewardItem = withEveryOtherEnergyReward(baseRewardItem, index)
+    const rewardItem = normalizeQuestRewardItem(baseRewardItem, index)
     quests.push({
       id: `kills-${target}`,
       title: `Slay ${target} monsters`,
@@ -697,10 +700,10 @@ const buildQuestList = (): QuestDefinition[] => {
   })
 
   TIER_QUEST_TARGETS.forEach((target, index) => {
-    const rewardGold = Math.round(scaleRewardGold(index, TIER_QUEST_TARGETS.length, 300, 3000) / 4)
+    const rewardGold = Math.round(scaleRewardGold(index, TIER_QUEST_TARGETS.length, 300, 3000) / 12)
     const baseRewardItem: QuestRewardItem =
       target >= 45000 ? 'key' : target >= 32000 ? 'energy-full' : target >= 19000 ? 'attack' : target >= 8000 ? 'speed' : 'energy-small'
-    const rewardItem = withEveryOtherEnergyReward(baseRewardItem, index)
+    const rewardItem = normalizeQuestRewardItem(baseRewardItem, index)
     quests.push({
       id: `tier-${target}`,
       title: `Tier Score ${target}`,
@@ -713,10 +716,10 @@ const buildQuestList = (): QuestDefinition[] => {
   })
 
   DUNGEON_QUEST_TARGETS.forEach((target, index) => {
-    const rewardGold = Math.round(scaleRewardGold(index, DUNGEON_QUEST_TARGETS.length, 350, 3200) / 4)
+    const rewardGold = Math.round(scaleRewardGold(index, DUNGEON_QUEST_TARGETS.length, 350, 3200) / 12)
     const baseRewardItem: QuestRewardItem =
       target >= 165 ? 'key' : target >= 104 ? 'energy-full' : target >= 62 ? 'attack' : target >= 23 ? 'speed' : 'energy-small'
-    const rewardItem = withEveryOtherEnergyReward(baseRewardItem, index)
+    const rewardItem = normalizeQuestRewardItem(baseRewardItem, index)
     quests.push({
       id: `dungeons-${target}`,
       title: `Clear dungeons ${target}x`,
@@ -733,10 +736,11 @@ const buildQuestList = (): QuestDefinition[] => {
 
 const QUESTS = buildQuestList()
 
-const DUNGEON_REQUIREMENTS = [
+const DUNGEON_BASE_REQUIREMENTS = [
   450, 1673, 3002, 4447, 6133, 7818, 9619, 11536, 13569, 15718,
   18162, 20551, 23056, 25677, 28414, 31267, 34468, 37562, 40771, 44096,
 ]
+const DUNGEON_REQUIREMENTS = DUNGEON_BASE_REQUIREMENTS.map((value) => Math.round(value * 2.5))
 
 const DUNGEONS = DUNGEON_REQUIREMENTS.map((tierScore, index) => ({
   id: `crypt-${index + 1}`,
@@ -745,10 +749,10 @@ const DUNGEONS = DUNGEON_REQUIREMENTS.map((tierScore, index) => ({
   reward: Math.max(1, Math.round((6 + (index + 1) * 4 + Math.pow(index + 1, 1.1)) / 4)),
 }))
 
-const WORLD_BOSS_DURATION = 5 * 60 * 60
-const WORLD_BOSS_REWARD = 1000
-const WITHDRAW_RATE = 10000
-const WITHDRAW_MIN = 1000
+const WORLD_BOSS_DURATION = 12 * 60 * 60
+const WORLD_BOSS_REWARD = 500
+const WITHDRAW_RATE = 15000
+const WITHDRAW_MIN = 2000
 const STAKE_DURATION = 12 * 60 * 60
 const STAKE_BONUS = 0.1
 const STAKE_MIN = 50
@@ -1490,7 +1494,7 @@ const computeItemTierScore = (level: number, rarity: EquipmentRarity) => {
 const computeSellValue = (level: number, rarity: EquipmentRarity) => {
   const levelMultiplier = 1 + (level - 1) * 0.003
   const levelBonus = (level - 1) * 0.25
-  return Math.round(rarity.sellValue * levelMultiplier + levelBonus)
+  return Math.round((rarity.sellValue * levelMultiplier + levelBonus) * 0.6)
 }
 
 const rollRarity = (level: number) => {
@@ -2159,7 +2163,7 @@ const updateGame = (state: GameState, dt: number) => {
       if (target.hp <= 0) {
         state.monsterKills += 1
         if (player.level < MAX_LEVEL) {
-          const xpGain = target.xp + randomInt(2, 8)
+          const xpGain = Math.max(1, Math.round((target.xp + randomInt(2, 8)) / 3))
           player.xp += xpGain
           pushLog(state.eventLog, `Victory over ${target.name} (+${xpGain} XP)`)
         } else {
@@ -4778,10 +4782,10 @@ function App() {
                 <div className="shop-desc">Restore 10 energy.</div>
                 <div className="shop-meta">
                   <img className="icon-img small" src={iconGold} alt="" />
-                  Cost: 3000
+                  Cost: 4500
                 </div>
                 <img className="shop-icon" src={iconEnergyTonic} alt="Energy tonic" />
-                <button type="button" onClick={() => buyEnergyPotion(3000)}>
+                <button type="button" onClick={() => buyEnergyPotion(4500)}>
                   Buy
                 </button>
               </div>
@@ -4790,10 +4794,10 @@ function App() {
                 <div className="shop-desc">Restore energy to full.</div>
                 <div className="shop-meta">
                   <img className="icon-img small" src={iconGold} alt="" />
-                  Cost: 10000
+                  Cost: 15000
                 </div>
                 <img className="shop-icon" src={iconGrandEnergy} alt="Grand energy elixir" />
-                <button type="button" onClick={() => buyFullEnergy(10000)}>
+                <button type="button" onClick={() => buyFullEnergy(15000)}>
                   Buy
                 </button>
               </div>

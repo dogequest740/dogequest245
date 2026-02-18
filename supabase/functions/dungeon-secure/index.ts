@@ -9,10 +9,11 @@ const SHOP_TICKET_CAP = 30;
 const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const CHALLENGE_TTL_SECONDS = 5 * 60;
 
-const DUNGEON_REQUIREMENTS = [
+const DUNGEON_BASE_REQUIREMENTS = [
   450, 1673, 3002, 4447, 6133, 7818, 9619, 11536, 13569, 15718,
   18162, 20551, 23056, 25677, 28414, 31267, 34468, 37562, 40771, 44096,
 ];
+const DUNGEON_REQUIREMENTS = DUNGEON_BASE_REQUIREMENTS.map((value) => Math.round(value * 2.5));
 
 const DUNGEON_REWARDS = DUNGEON_REQUIREMENTS.map((_, index) =>
   Math.max(1, Math.round((6 + (index + 1) * 4 + Math.pow(index + 1, 1.1)) / 4))

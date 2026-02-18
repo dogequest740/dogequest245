@@ -18,7 +18,7 @@ create table if not exists public.world_boss (
   id int primary key,
   cycle_start timestamptz not null,
   cycle_end timestamptz not null,
-  prize_pool int not null default 1000,
+  prize_pool int not null default 500,
   last_cycle_start timestamptz,
   last_cycle_end timestamptz,
   last_prize_pool int,

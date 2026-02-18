@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 
-const WORLD_BOSS_DURATION = 5 * 60 * 60
-const WORLD_BOSS_REWARD = 1000
+const WORLD_BOSS_DURATION = 12 * 60 * 60
+const WORLD_BOSS_REWARD = 500
 
 const getAttackFromState = (state: unknown) => {
   if (!state || typeof state !== 'object') return 1
