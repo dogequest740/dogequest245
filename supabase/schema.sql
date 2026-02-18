@@ -68,3 +68,33 @@ on public.withdrawals
 for all
 using (true)
 with check (true);
+
+create table if not exists public.wallet_auth_nonces (
+  wallet text primary key,
+  nonce text not null,
+  message text not null,
+  expires_at timestamptz not null,
+  updated_at timestamptz default now()
+);
+
+create table if not exists public.wallet_sessions (
+  token text primary key,
+  wallet text not null,
+  expires_at timestamptz not null,
+  updated_at timestamptz default now()
+);
+
+create index if not exists wallet_sessions_wallet_idx on public.wallet_sessions(wallet);
+create index if not exists wallet_sessions_expires_at_idx on public.wallet_sessions(expires_at);
+
+create table if not exists public.dungeon_state (
+  wallet text primary key,
+  tickets int not null default 10,
+  ticket_day text not null,
+  dungeon_runs bigint not null default 0,
+  updated_at timestamptz default now()
+);
+
+alter table public.wallet_auth_nonces enable row level security;
+alter table public.wallet_sessions enable row level security;
+alter table public.dungeon_state enable row level security;

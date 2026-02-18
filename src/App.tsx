@@ -263,6 +263,18 @@ type AdminData = {
   withdrawals: WithdrawalRow[]
 }
 
+type DungeonSecureResponse = {
+  ok: boolean
+  error?: string
+  token?: string
+  expiresAt?: string
+  message?: string
+  tickets?: number
+  ticketDay?: string
+  dungeonRuns?: number
+  reward?: number
+}
+
 type StakeEntry = {
   id: number
   amount: number
@@ -1401,6 +1413,13 @@ const shadeColor = (hex: string, amount: number) => {
 }
 
 const getDayKey = () => new Date().toISOString().slice(0, 10)
+const bytesToBase64 = (bytes: Uint8Array) => {
+  let binary = ''
+  for (const value of bytes) {
+    binary += String.fromCharCode(value)
+  }
+  return btoa(binary)
+}
 
 const getXpForLevel = (level: number) => Math.round(XP_BASE + XP_SCALE * Math.pow(level, XP_POWER))
 
@@ -2022,13 +2041,6 @@ const updateGame = (state: GameState, dt: number) => {
     }
   }
 
-  const todayKey = getDayKey()
-  if (state.ticketDay !== todayKey) {
-    state.tickets = TICKETS_MAX
-    state.ticketDay = todayKey
-    pushLog(state.eventLog, 'Daily dungeon tickets replenished.')
-  }
-
   if (state.energy < state.energyMax) {
     state.energyTimer -= dt
     while (state.energyTimer <= 0 && state.energy < state.energyMax) {
@@ -2459,7 +2471,7 @@ const drawGame = (
 }
 
 function App() {
-  const { connected, publicKey, sendTransaction } = useWallet()
+  const { connected, publicKey, sendTransaction, signMessage } = useWallet()
   const { connection } = useConnection()
   const [stage, setStage] = useState<'auth' | 'select' | 'game'>('auth')
   const [selectedId, setSelectedId] = useState(CHARACTER_CLASSES[0].id)
@@ -2505,6 +2517,7 @@ function App() {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const musicUnlockRef = useRef(false)
   const serverLoadedRef = useRef(false)
+  const dungeonSessionRef = useRef<{ token: string; expiresAt: number } | null>(null)
   const pendingProfileRef = useRef<PersistedState | null>(null)
   const spriteCacheRef = useRef<PlayerSpriteMap>({
     knight: null,
@@ -2565,6 +2578,104 @@ function App() {
     if (!wallet) return false
     return adminWallets.includes(wallet)
   }, [publicKey, adminWallets])
+
+  const callDungeonSecure = async (
+    payload: Record<string, unknown>,
+    headers?: Record<string, string>,
+  ): Promise<DungeonSecureResponse> => {
+    if (!supabase) return { ok: false, error: 'Supabase not configured.' }
+    const { data, error } = await supabase.functions.invoke('dungeon-secure', {
+      body: payload,
+      headers,
+    })
+    if (error) {
+      console.warn('Dungeon secure call failed', error)
+      return { ok: false, error: 'Dungeon service unavailable.' }
+    }
+    return (data as DungeonSecureResponse | null) ?? { ok: false, error: 'Empty dungeon service response.' }
+  }
+
+  const ensureDungeonSession = async (interactive = true) => {
+    const wallet = publicKey?.toBase58()
+    if (!wallet) return null
+
+    const cached = dungeonSessionRef.current
+    if (cached && cached.expiresAt > Date.now() + 5000) {
+      return cached.token
+    }
+
+    if (!interactive) {
+      return null
+    }
+
+    if (!signMessage) {
+      return null
+    }
+
+    const challenge = await callDungeonSecure({ action: 'challenge', wallet })
+    if (!challenge.ok || !challenge.message) {
+      return null
+    }
+
+    let signature: Uint8Array
+    try {
+      signature = await signMessage(new TextEncoder().encode(challenge.message))
+    } catch {
+      return null
+    }
+
+    const login = await callDungeonSecure({
+      action: 'login',
+      wallet,
+      signature: bytesToBase64(signature),
+    })
+    if (!login.ok || !login.token) {
+      return null
+    }
+
+    const expiresAtMs = login.expiresAt ? new Date(login.expiresAt).getTime() : Number.NaN
+    dungeonSessionRef.current = {
+      token: login.token,
+      expiresAt: Number.isFinite(expiresAtMs) ? expiresAtMs : Date.now() + 24 * 60 * 60 * 1000,
+    }
+
+    return login.token
+  }
+
+  const callDungeonSecureAuthed = async (
+    action: string,
+    payload: Record<string, unknown> = {},
+    interactive = true,
+  ): Promise<DungeonSecureResponse> => {
+    const token = await ensureDungeonSession(interactive)
+    if (!token) {
+      return { ok: false, error: 'Wallet signature required for dungeon actions.' }
+    }
+    return callDungeonSecure(
+      { action, ...payload },
+      { 'x-session-token': token },
+    )
+  }
+
+  const syncDungeonStateFromServer = async () => {
+    const state = gameStateRef.current
+    if (!state || !connected || !publicKey || !supabase) return
+    if (!signMessage) return
+
+    const result = await callDungeonSecureAuthed('status', {}, false)
+    if (!result.ok) {
+      if (result.error && result.error !== 'Wallet signature required for dungeon actions.') {
+        console.warn('Dungeon state sync skipped:', result.error)
+      }
+      return
+    }
+
+    state.tickets = Math.max(0, Math.round(result.tickets ?? state.tickets))
+    if (result.ticketDay) {
+      state.ticketDay = result.ticketDay
+    }
+    setHud(buildHud(state))
+  }
 
   useEffect(() => {
     const detectMobile = () => {
@@ -2730,6 +2841,7 @@ function App() {
   useEffect(() => {
     let active = true
     if (!connected) {
+      dungeonSessionRef.current = null
       pendingProfileRef.current = null
       setStage('auth')
       return () => {
@@ -2738,6 +2850,7 @@ function App() {
     }
 
     const wallet = publicKey?.toBase58()
+    dungeonSessionRef.current = null
     if (!wallet || !supabase) {
       setStage('select')
       return () => {
@@ -2806,6 +2919,7 @@ function App() {
       pendingProfileRef.current = null
       serverLoadedRef.current = true
       syncHud()
+      void syncDungeonStateFromServer()
     } else if (wallet && supabase) {
       loadProfileState(wallet).then((saved) => {
         if (!gameStateRef.current) return
@@ -2814,6 +2928,7 @@ function App() {
         }
         serverLoadedRef.current = true
         syncHud()
+        void syncDungeonStateFromServer()
       })
     } else {
       serverLoadedRef.current = true
@@ -2865,6 +2980,14 @@ function App() {
     if (stage !== 'game') return
     void syncWorldBossFromServer()
   }, [stage, publicKey])
+
+  useEffect(() => {
+    if (stage !== 'game') return
+    const interval = window.setInterval(() => {
+      void syncDungeonStateFromServer()
+    }, 60000)
+    return () => window.clearInterval(interval)
+  }, [stage, publicKey, connected])
 
   const syncHud = () => {
     const state = gameStateRef.current
@@ -3485,7 +3608,7 @@ function App() {
     return { label: questRewardItemName(item), applied: true }
   }
 
-  const useConsumable = (item: ConsumableItem) => {
+  const useConsumable = async (item: ConsumableItem) => {
     const state = gameStateRef.current
     if (!state) return
     let applied = true
@@ -3509,14 +3632,20 @@ function App() {
         message = 'Attack speed increased for 300s.'
         break
       case 'key':
-        if (state.tickets >= SHOP_TICKET_CAP) {
+      {
+        const result = await callDungeonSecureAuthed('use_key')
+        if (!result.ok) {
           applied = false
-          message = 'Key storage is full.'
+          message = result.error || 'Failed to use dungeon key.'
           break
         }
-        state.tickets += 1
+        state.tickets = Math.max(0, Math.round(result.tickets ?? state.tickets))
+        if (result.ticketDay) {
+          state.ticketDay = result.ticketDay
+        }
         message = 'Dungeon key used.'
         break
+      }
       default:
         applied = false
         message = 'Cannot use item.'
@@ -3600,15 +3729,27 @@ function App() {
     void saveGameState()
   }
 
-  const runDungeon = (dungeon: (typeof DUNGEONS)[number]) => {
+  const runDungeon = async (dungeon: (typeof DUNGEONS)[number]) => {
     const state = gameStateRef.current
     if (!state) return
     const score = getTierScore(state.equipment)
-    if (state.tickets <= 0 || score < dungeon.tierScore) return
-    state.tickets -= 1
-    state.crystals += dungeon.reward
+    if (score < dungeon.tierScore) return
+
+    const result = await callDungeonSecureAuthed('run', { dungeonId: dungeon.id })
+    if (!result.ok) {
+      pushLog(state.eventLog, result.error || 'Dungeon entry failed.')
+      syncHud()
+      return
+    }
+
+    const reward = Math.max(0, Math.round(result.reward ?? dungeon.reward))
+    state.tickets = Math.max(0, Math.round(result.tickets ?? state.tickets))
+    if (result.ticketDay) {
+      state.ticketDay = result.ticketDay
+    }
+    state.crystals += reward
     state.dungeonRuns += 1
-    pushLog(state.eventLog, `${dungeon.name} cleared. +${dungeon.reward} crystals.`)
+    pushLog(state.eventLog, `${dungeon.name} cleared. +${reward} crystals.`)
     syncHud()
     void saveGameState()
   }
