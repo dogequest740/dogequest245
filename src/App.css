@@ -3864,6 +3864,14 @@ button.ghost {
   justify-content: center;
 }
 
+.premium-plans .premium-card .shop-meta {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: #ffe2a3;
+  text-shadow: 0 0 10px rgba(255, 210, 120, 0.42);
+}
+
 .premium-plans .premium-card button {
   width: 100%;
   font-size: 14px;
