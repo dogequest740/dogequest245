@@ -775,6 +775,7 @@ const CONTRACT_ADDRESS = 'soon'
 
 const MONSTER_HP_TIER_TARGET = 30000
 const MONSTER_HP_TIER_EXCESS = 0.2
+const MONSTER_HP_BASE_MULTIPLIER = 2
 const PERSIST_VERSION = 1
 
 const getMonsterHpMultiplier = (tierScore: number) => {
@@ -1158,7 +1159,7 @@ const MONSTER_TYPES = [
 ]
 
 const MONSTER_BASE_HP = MONSTER_TYPES.reduce((acc, monster) => {
-  acc[monster.spriteKey as MonsterSpriteKey] = monster.maxHp
+  acc[monster.spriteKey as MonsterSpriteKey] = Math.round(monster.maxHp * MONSTER_HP_BASE_MULTIPLIER)
   return acc
 }, {} as Record<MonsterSpriteKey, number>)
 
@@ -1840,7 +1841,7 @@ const drawWorldBase = (
 const createMonster = (id: number, tierScore = 0): Monster => {
   const template = MONSTER_TYPES[randomInt(0, MONSTER_TYPES.length - 1)]
   const hpMultiplier = getMonsterHpMultiplier(tierScore)
-  const maxHp = Math.max(1, Math.round(template.maxHp * hpMultiplier))
+  const maxHp = Math.max(1, Math.round(template.maxHp * MONSTER_HP_BASE_MULTIPLIER * hpMultiplier))
   const x = randomBetween(MAP.tile, WORLD.width - MAP.tile)
   const y = randomBetween(MAP.tile, WORLD.height - MAP.tile)
   return {
