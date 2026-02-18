@@ -775,7 +775,7 @@ const CONTRACT_ADDRESS = 'soon'
 
 const MONSTER_HP_TIER_TARGET = 30000
 const MONSTER_HP_TIER_EXCESS = 0.2
-const MONSTER_HP_BASE_MULTIPLIER = 2
+const MONSTER_HP_BASE_MULTIPLIER = 5
 const PERSIST_VERSION = 1
 
 const getMonsterHpMultiplier = (tierScore: number) => {
