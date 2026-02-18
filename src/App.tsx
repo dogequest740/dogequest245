@@ -3216,8 +3216,16 @@ function App() {
 
   useEffect(() => {
     if (activePanel !== 'worldboss') return
-    void syncWorldBossFromServer()
+    void syncWorldBossFromServer(true)
   }, [activePanel, publicKey])
+
+  useEffect(() => {
+    if (activePanel !== 'worldboss') return
+    const interval = window.setInterval(() => {
+      void syncWorldBossFromServer(false)
+    }, 5000)
+    return () => window.clearInterval(interval)
+  }, [activePanel, publicKey, connected])
 
   useEffect(() => {
     if (activePanel !== 'referrals') return

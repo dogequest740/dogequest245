@@ -838,7 +838,7 @@ serve(async (req) => {
     const cycleMatches = !clientCycleStart || clientCycleStart === boss.cycle_start;
     const pendingDamageInput = Math.max(0, asInt(body.pendingDamage, 0));
     const safePendingDamage = cycleMatches ? pendingDamageInput : 0;
-    const safeJoined = cycleMatches ? joinedInput : false;
+    const safeJoined = joinedInput;
 
     const rewardShare = await claimWorldBossReward(supabase, auth.wallet, boss, now);
 
