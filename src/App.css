@@ -2216,12 +2216,12 @@
 }
 
 .referral-float.with-starterpack {
-  top: 196px;
+  top: 176px;
 }
 
 .referral-float .starter-pack-icon {
-  width: 224px;
-  height: 224px;
+  width: 112px;
+  height: 112px;
   filter: drop-shadow(0 0 14px rgba(255, 215, 120, 0.35));
 }
 
