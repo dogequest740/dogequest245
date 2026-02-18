@@ -776,6 +776,7 @@ const CONTRACT_ADDRESS = 'soon'
 const MONSTER_HP_TIER_TARGET = 30000
 const MONSTER_HP_TIER_EXCESS = 0.2
 const MONSTER_HP_BASE_MULTIPLIER = 5
+const ITEM_TIER_SCORE_MULTIPLIER = 0.5
 const PERSIST_VERSION = 1
 
 const getMonsterHpMultiplier = (tierScore: number) => {
@@ -1476,7 +1477,10 @@ const getEquipmentBonuses = (equipment: Record<EquipmentSlot, EquipmentItem | nu
 }
 
 const getTierScore = (equipment: Record<EquipmentSlot, EquipmentItem | null>) => {
-  return EQUIPMENT_SLOTS.reduce((sum, slot) => sum + (equipment[slot.id]?.tierScore ?? 0), 0)
+  return EQUIPMENT_SLOTS.reduce((sum, slot) => {
+    const raw = equipment[slot.id]?.tierScore ?? 0
+    return sum + Math.max(0, Math.round(raw * ITEM_TIER_SCORE_MULTIPLIER))
+  }, 0)
 }
 
 const getRarityId = (rarityName: string) => {
@@ -1491,6 +1495,8 @@ const computeItemTierScore = (level: number, rarity: EquipmentRarity) => {
   const levelLinear = baseScore + perLevel * (level - 1)
   return Math.round(levelLinear * levelMultiplier * rarityMultiplier)
 }
+
+const getDisplayItemTierScore = (rawTierScore: number) => Math.max(0, Math.round(rawTierScore * ITEM_TIER_SCORE_MULTIPLIER))
 
 const computeSellValue = (level: number, rarity: EquipmentRarity) => {
   const levelMultiplier = 1 + (level - 1) * 0.003
@@ -4540,7 +4546,7 @@ function App() {
               {(() => {
                 const current = hud.equipment[hud.pendingLoot!.slot]
                 if (!current) return <div className="loot-compare">No item equipped in this slot.</div>
-                const deltaScore = hud.pendingLoot!.tierScore - current.tierScore
+                const deltaScore = getDisplayItemTierScore(hud.pendingLoot!.tierScore) - getDisplayItemTierScore(current.tierScore)
                 const compareRows = [
                   ['ATK', hud.pendingLoot!.bonuses.attack - current.bonuses.attack],
                   ['SPD', hud.pendingLoot!.bonuses.speed - current.bonuses.speed],
@@ -4645,7 +4651,7 @@ function App() {
                                 {item.rarity} {item.name}
                               </div>
                               <div className="slot-score">Lv. {item.level}</div>
-                              <div className="slot-score">Score {item.tierScore}</div>
+                              <div className="slot-score">Score {getDisplayItemTierScore(item.tierScore)}</div>
                             </>
                           ) : (
                             <div className="slot-empty">Empty</div>
@@ -4674,7 +4680,7 @@ function App() {
                                 {item.rarity} {item.name}
                               </div>
                               <div className="inventory-slot">
-                                Lv. {item.level} - {EQUIPMENT_SLOTS.find((slot) => slot.id === item.slot)?.label ?? item.slot} - Score {item.tierScore}
+                                Lv. {item.level} - {EQUIPMENT_SLOTS.find((slot) => slot.id === item.slot)?.label ?? item.slot} - Score {getDisplayItemTierScore(item.tierScore)}
                               </div>
                             </div>
                             <div className="inventory-actions">

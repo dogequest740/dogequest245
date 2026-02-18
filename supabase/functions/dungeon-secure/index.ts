@@ -8,6 +8,7 @@ const TICKETS_MAX = 10;
 const SHOP_TICKET_CAP = 30;
 const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const CHALLENGE_TTL_SECONDS = 5 * 60;
+const ITEM_TIER_SCORE_MULTIPLIER = 0.5;
 
 const DUNGEON_BASE_REQUIREMENTS = [
   450, 1673, 3002, 4447, 6133, 7818, 9619, 11536, 13569, 15718,
@@ -66,7 +67,7 @@ const getTierScoreFromState = (state: unknown) => {
   let score = 0;
   for (const slot of slots) {
     const tierScore = Number(equipment[slot]?.tierScore ?? 0);
-    if (Number.isFinite(tierScore)) score += Math.max(0, Math.round(tierScore));
+    if (Number.isFinite(tierScore)) score += Math.max(0, Math.round(tierScore * ITEM_TIER_SCORE_MULTIPLIER));
   }
   return score;
 };
