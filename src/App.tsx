@@ -227,6 +227,11 @@ type PersistedState = {
   stakeId: number
 }
 
+type LoadedProfile = {
+  state: PersistedState
+  updatedAt?: string
+}
+
 type AdminPlayerRow = {
   wallet: string
   name: string
@@ -922,7 +927,7 @@ const buildPersistedState = (state: GameState): PersistedState => ({
   stakeId: state.stakeId,
 })
 
-const applyPersistedState = (state: GameState, saved: PersistedState) => {
+const applyPersistedState = (state: GameState, saved: PersistedState, savedUpdatedAt?: string) => {
   if (!saved || saved.version !== PERSIST_VERSION) return
 
   const classMatch = CHARACTER_CLASSES.find((entry) => entry.id === saved.classId)
@@ -949,7 +954,45 @@ const applyPersistedState = (state: GameState, saved: PersistedState) => {
 
   state.energyMax = Math.max(1, saved.energyMax ?? state.energyMax)
   state.energy = clamp(saved.energy ?? state.energy, 0, state.energyMax)
-  state.energyTimer = Math.max(0, saved.energyTimer ?? state.energyTimer)
+  state.energyTimer = clamp(saved.energyTimer ?? state.energyTimer, 1, ENERGY_REGEN_SECONDS)
+
+  const savedAtMs = savedUpdatedAt ? new Date(savedUpdatedAt).getTime() : Number.NaN
+  const offlineSeconds = Number.isFinite(savedAtMs) ? Math.max(0, Math.floor((Date.now() - savedAtMs) / 1000)) : 0
+  if (offlineSeconds > 0 && state.energy < state.energyMax) {
+    let remaining = offlineSeconds
+    let energy = state.energy
+    let timer = clamp(state.energyTimer, 1, ENERGY_REGEN_SECONDS)
+
+    if (remaining < timer) {
+      timer -= remaining
+      remaining = 0
+    } else {
+      remaining -= timer
+      energy += 1
+      timer = ENERGY_REGEN_SECONDS
+    }
+
+    if (energy >= state.energyMax) {
+      energy = state.energyMax
+      timer = ENERGY_REGEN_SECONDS
+      remaining = 0
+    }
+
+    if (remaining > 0 && energy < state.energyMax) {
+      const passiveTicks = Math.floor(remaining / ENERGY_REGEN_SECONDS)
+      if (passiveTicks > 0) {
+        energy = Math.min(state.energyMax, energy + passiveTicks)
+        remaining -= passiveTicks * ENERGY_REGEN_SECONDS
+      }
+      timer = energy >= state.energyMax ? ENERGY_REGEN_SECONDS : Math.max(1, ENERGY_REGEN_SECONDS - remaining)
+    }
+
+    state.energy = clamp(energy, 0, state.energyMax)
+    state.energyTimer = clamp(timer, 1, ENERGY_REGEN_SECONDS)
+  } else if (state.energy >= state.energyMax) {
+    state.energyTimer = ENERGY_REGEN_SECONDS
+  }
+
   state.gold = Math.max(0, saved.gold ?? state.gold)
   state.crystals = Math.max(0, saved.crystals ?? state.crystals)
   state.crystalsEarned = Math.max(0, saved.crystalsEarned ?? saved.crystals ?? state.crystalsEarned)
@@ -1010,12 +1053,20 @@ const applyPersistedState = (state: GameState, saved: PersistedState) => {
 
 const loadProfileState = async (wallet: string) => {
   if (!supabase) return null
-  const { data, error } = await supabase.from('profiles').select('state').eq('wallet', wallet).maybeSingle()
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('state, updated_at')
+    .eq('wallet', wallet)
+    .maybeSingle()
   if (error) {
     console.warn('Supabase load failed', error)
     return null
   }
-  return (data?.state as PersistedState | null) ?? null
+  if (!data?.state) return null
+  return {
+    state: data.state as PersistedState,
+    updatedAt: typeof data.updated_at === 'string' ? data.updated_at : undefined,
+  } as LoadedProfile
 }
 
 const MONSTER_TYPES = [
@@ -2507,7 +2558,7 @@ function App() {
   const secureSessionInitRef = useRef(false)
   const isNewProfileRef = useRef(false)
   const referralProcessedRef = useRef(false)
-  const pendingProfileRef = useRef<PersistedState | null>(null)
+  const pendingProfileRef = useRef<LoadedProfile | null>(null)
   const spriteCacheRef = useRef<PlayerSpriteMap>({
     knight: null,
     mage: null,
@@ -3029,8 +3080,8 @@ function App() {
         isNewProfileRef.current = false
         referralProcessedRef.current = true
         pendingProfileRef.current = saved
-        setSelectedId(saved.classId || CHARACTER_CLASSES[0].id)
-        setPlayerName(sanitizePlayerName(saved.name || ''))
+        setSelectedId(saved.state.classId || CHARACTER_CLASSES[0].id)
+        setPlayerName(sanitizePlayerName(saved.state.name || ''))
         setStage('game')
       } else {
         isNewProfileRef.current = true
@@ -3081,9 +3132,9 @@ function App() {
 
     const pendingProfile = pendingProfileRef.current
     const classForInit = pendingProfile
-      ? CHARACTER_CLASSES.find((entry) => entry.id === pendingProfile.classId) || selectedClass
+      ? CHARACTER_CLASSES.find((entry) => entry.id === pendingProfile.state.classId) || selectedClass
       : selectedClass
-    const nameForInit = sanitizePlayerName(pendingProfile?.name || playerName.trim()) || 'Nameless'
+    const nameForInit = sanitizePlayerName(pendingProfile?.state.name || playerName.trim()) || 'Nameless'
     const state = initGameState(classForInit, nameForInit)
     gameStateRef.current = state
     setHud(buildHud(state))
@@ -3094,7 +3145,7 @@ function App() {
     if (pendingProfile) {
       isNewProfileRef.current = false
       referralProcessedRef.current = true
-      applyPersistedState(state, pendingProfile)
+      applyPersistedState(state, pendingProfile.state, pendingProfile.updatedAt)
       pendingProfileRef.current = null
       serverLoadedRef.current = true
       syncHud()
@@ -3105,7 +3156,7 @@ function App() {
         if (saved) {
           isNewProfileRef.current = false
           referralProcessedRef.current = true
-          applyPersistedState(gameStateRef.current, saved)
+          applyPersistedState(gameStateRef.current, saved.state, saved.updatedAt)
         } else {
           isNewProfileRef.current = true
           referralProcessedRef.current = false
