@@ -287,9 +287,17 @@ type GameSecureResponse = {
   savedAt?: string
   remainingCrystals?: number
   tickets?: number
+  gold?: number
   crystals?: number
+  crystalsEarned?: number
   claimedKeys?: number
   claimedCrystals?: number
+  premiumClaimDay?: string
+  consumables?: Array<{ id?: number; type?: string }>
+  stakeId?: number
+  stakeEntries?: Array<{ id?: number; amount?: number; endsAt?: number }>
+  startedStake?: { id?: number; amount?: number; endsAt?: number }
+  stakePayout?: number
   referralApplied?: boolean
   referralEntries?: ReferralEntry[]
   referralPendingKeys?: number
@@ -685,6 +693,22 @@ const createConsumable = (id: number, type: ConsumableType): ConsumableItem => {
   }
 }
 
+const normalizeLoadedConsumables = (value: unknown): ConsumableItem[] => {
+  if (!Array.isArray(value)) return []
+  const normalized: ConsumableItem[] = []
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue
+    const row = entry as Partial<ConsumableItem>
+    const id = Math.max(1, Math.floor(Number(row.id ?? 0)))
+    const typeRaw = String(row.type ?? '')
+    if (!Number.isFinite(id) || id <= 0) continue
+    if (!(typeRaw in CONSUMABLE_DEFS)) continue
+    const type = typeRaw as ConsumableType
+    normalized.push(createConsumable(id, type))
+  }
+  return normalized
+}
+
 const scaleRewardGold = (index: number, total: number, min: number, max: number) => {
   if (total <= 1) return max
   const ratio = index / (total - 1)
@@ -793,7 +817,6 @@ const WORLD_BOSS_DURATION = 12 * 60 * 60
 const WORLD_BOSS_REWARD = 500
 const WITHDRAW_RATE = 15000
 const WITHDRAW_MIN = 2000
-const STAKE_DURATION = 12 * 60 * 60
 const STAKE_BONUS = 0.1
 const STAKE_MIN = 50
 const GOLD_STORE_WALLET = new PublicKey('9a5GXRjX6HKh9Yjc9d7gp9RFmuRvMQAcV1VJ9WV7LU8c')
@@ -935,7 +958,7 @@ const applyPersistedState = (state: GameState, saved: PersistedState) => {
 
   state.inventory = saved.inventory ?? []
   state.equipment = { ...state.equipment, ...(saved.equipment ?? {}) }
-  state.consumables = saved.consumables ?? []
+  state.consumables = normalizeLoadedConsumables(saved.consumables)
   state.questStates = { ...state.questStates, ...(saved.questStates ?? {}) }
   state.monsterKills = Math.max(0, saved.monsterKills ?? state.monsterKills)
   state.dungeonRuns = Math.max(0, saved.dungeonRuns ?? state.dungeonRuns)
@@ -3724,38 +3747,54 @@ function App() {
     }
   }
 
+  const applyServerConsumables = (state: GameState, rows: unknown) => {
+    if (!Array.isArray(rows)) return
+    const normalized = normalizeLoadedConsumables(rows)
+    if (!normalized.length && rows.length > 0) return
+    state.consumables = normalized
+    state.consumableId = normalized.reduce((max, item) => Math.max(max, item.id), 0)
+  }
+
+  const parseServerStakeEntries = (rows: unknown): StakeEntry[] => {
+    if (!Array.isArray(rows)) return []
+    return rows
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') return null
+        const row = entry as { id?: number; amount?: number; endsAt?: number }
+        const id = Math.max(1, Math.floor(Number(row.id ?? 0)))
+        const amount = Math.max(0, Math.floor(Number(row.amount ?? 0)))
+        const endsAt = Math.max(0, Math.floor(Number(row.endsAt ?? 0)))
+        if (!id || amount <= 0 || endsAt <= 0) return null
+        return { id, amount, endsAt }
+      })
+      .filter((entry): entry is StakeEntry => Boolean(entry))
+  }
+
   const claimPremiumDailyRewards = async () => {
     const state = gameStateRef.current
     if (!state) return
     if (premiumClaimLoading) return
-    if (!isPremiumActiveAt(state.premiumEndsAt)) {
-      setPremiumError('Premium subscription is inactive.')
-      return
-    }
-    const dayKey = getDayKey()
-    if (state.premiumClaimDay === dayKey) {
-      setPremiumError('Daily Premium rewards already claimed today.')
-      return
-    }
 
     setPremiumClaimLoading(true)
     setPremiumError('')
     try {
-      state.tickets = Math.min(SHOP_TICKET_CAP, Math.max(0, Math.floor(state.tickets)) + PREMIUM_DAILY_KEYS)
-      state.gold = Math.max(0, Math.floor(state.gold)) + PREMIUM_DAILY_GOLD
-      for (let i = 0; i < PREMIUM_DAILY_SMALL_POTIONS; i += 1) {
-        addConsumable(state, 'energy-small')
+      const result = await callGameSecureAuthed('premium_claim_daily', {}, true)
+      if (!result.ok) {
+        setPremiumError(result.error || 'Claim failed.')
+        return
       }
-      for (let i = 0; i < PREMIUM_DAILY_BIG_POTIONS; i += 1) {
-        addConsumable(state, 'energy-full')
+
+      state.tickets = Math.max(0, Math.floor(Number(result.tickets ?? state.tickets)))
+      state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
+      if (result.premiumClaimDay) {
+        state.premiumClaimDay = result.premiumClaimDay
       }
-      state.premiumClaimDay = dayKey
+      applyServerConsumables(state, result.consumables)
       pushLog(
         state.eventLog,
         `Premium claim: +${PREMIUM_DAILY_KEYS} keys, +${formatNumber(PREMIUM_DAILY_GOLD)} gold, +${PREMIUM_DAILY_SMALL_POTIONS} Energy Tonic, +${PREMIUM_DAILY_BIG_POTIONS} Grand Energy Elixir.`,
       )
       syncHud()
-      await saveGameState()
     } catch (error) {
       console.warn('Premium claim failed', error)
       const message = error instanceof Error ? error.message : String(error)
@@ -3765,7 +3804,7 @@ function App() {
     }
   }
 
-  const startStake = () => {
+  const startStake = async () => {
     const state = gameStateRef.current
     if (!state) return
     const amount = Math.floor(Number(stakeAmount))
@@ -3781,41 +3820,49 @@ function App() {
       setStakeError('Not enough crystals.')
       return
     }
-    state.crystals -= amount
-    const nextId = state.stakeId + 1
-    state.stakeId = nextId
-    state.stake = [
-      {
-        id: nextId,
-        amount,
-        endsAt: Date.now() + STAKE_DURATION * 1000,
-      },
-      ...state.stake,
-    ]
+
+    setStakeError('')
+    const result = await callGameSecureAuthed('stake_start', { amount }, true)
+    if (!result.ok) {
+      setStakeError(result.error || 'Stake failed.')
+      return
+    }
+
+    state.crystals = Math.max(0, Math.floor(Number(result.crystals ?? state.crystals)))
+    const nextStake = parseServerStakeEntries(result.stakeEntries)
+    if (nextStake.length > 0 || Array.isArray(result.stakeEntries)) {
+      state.stake = nextStake
+    }
+    state.stakeId = Math.max(0, Math.floor(Number(result.stakeId ?? state.stakeId)))
     setStakeAmount('')
     setStakeError('')
     pushLog(state.eventLog, `Staked ${amount} crystals.`)
     syncHud()
-    void saveGameState()
   }
 
-  const claimStake = (stakeId: number) => {
+  const claimStake = async (stakeId: number) => {
     const state = gameStateRef.current
     if (!state) return
-    const entry = state.stake.find((item) => item.id === stakeId)
-    if (!entry) return
-    if (Date.now() < entry.endsAt) {
-      setStakeError('Stake is still locked.')
+
+    const result = await callGameSecureAuthed('stake_claim', { stakeId }, true)
+    if (!result.ok) {
+      setStakeError(result.error || 'Stake claim failed.')
       return
     }
-    const bonus = Math.floor(entry.amount * STAKE_BONUS)
-    const total = entry.amount + bonus
-    grantCrystals(state, total)
-    state.stake = state.stake.filter((item) => item.id !== stakeId)
-    pushLog(state.eventLog, `Stake completed: +${total} crystals.`)
+
+    const payout = Math.max(0, Math.floor(Number(result.stakePayout ?? 0)))
+    state.crystals = Math.max(0, Math.floor(Number(result.crystals ?? state.crystals)))
+    state.crystalsEarned = Math.max(0, Math.floor(Number(result.crystalsEarned ?? state.crystalsEarned)))
+    const nextStake = parseServerStakeEntries(result.stakeEntries)
+    if (nextStake.length > 0 || Array.isArray(result.stakeEntries)) {
+      state.stake = nextStake
+    } else {
+      state.stake = state.stake.filter((item) => item.id !== stakeId)
+    }
+    state.stakeId = Math.max(0, Math.floor(Number(result.stakeId ?? state.stakeId)))
+    pushLog(state.eventLog, `Stake completed: +${payout} crystals.`)
     setStakeError('')
     syncHud()
-    void saveGameState()
   }
 
   const addConsumable = (state: GameState, type: ConsumableType) => {

@@ -17,6 +17,11 @@ const STAKE_MIN_AMOUNT = 50;
 const STAKE_MAX_AMOUNT = 1_000_000;
 const STAKE_BONUS_RATE = 0.1;
 const STAKE_MAX_COUNT = 128;
+const STAKE_DURATION_SECONDS = 12 * 60 * 60;
+const PREMIUM_DAILY_KEYS = 5;
+const PREMIUM_DAILY_GOLD = 50000;
+const PREMIUM_DAILY_SMALL_POTIONS = 5;
+const PREMIUM_DAILY_BIG_POTIONS = 3;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -38,6 +43,15 @@ type StakeEntryState = {
   id: number;
   amount: number;
   endsAt: number;
+};
+
+type ConsumableType = "energy-small" | "energy-full" | "speed" | "attack" | "key";
+type ConsumableRow = {
+  id: number;
+  type: ConsumableType;
+  name: string;
+  description: string;
+  icon: string;
 };
 
 type WorldBossRow = {
@@ -75,6 +89,14 @@ type ReferralRow = {
   updated_at?: string;
 };
 
+const CONSUMABLE_DEFS: Record<ConsumableType, { name: string; description: string }> = {
+  "energy-small": { name: "Energy Tonic", description: "Restore 10 energy." },
+  "energy-full": { name: "Grand Energy Elixir", description: "Restore energy to full." },
+  speed: { name: "Swift Draught", description: "+50% speed for 5 minutes." },
+  attack: { name: "Battle Tonic", description: "+50% attack speed for 5 minutes." },
+  key: { name: "Dungeon Key", description: "+1 dungeon entry." },
+};
+
 const json = (payload: Record<string, unknown>) =>
   new Response(JSON.stringify(payload), {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -98,6 +120,53 @@ const sanitizeName = (value: unknown) =>
     .slice(0, 18) || "Hero";
 
 const isWalletLike = (value: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
+const todayKeyUtc = (now: Date) => now.toISOString().slice(0, 10);
+const isConsumableType = (value: string): value is ConsumableType =>
+  Object.prototype.hasOwnProperty.call(CONSUMABLE_DEFS, value);
+
+const normalizeConsumables = (raw: unknown) => {
+  if (!Array.isArray(raw)) return { rows: [] as ConsumableRow[], maxId: 0 };
+
+  const rows: ConsumableRow[] = [];
+  let maxId = 0;
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const row = entry as Record<string, unknown>;
+    const id = Math.max(1, asInt(row.id, 0));
+    const typeRaw = String(row.type ?? "");
+    if (!id || !isConsumableType(typeRaw)) continue;
+    const def = CONSUMABLE_DEFS[typeRaw];
+    maxId = Math.max(maxId, id);
+    rows.push({
+      id,
+      type: typeRaw,
+      name: def.name,
+      description: def.description,
+      icon: "",
+    });
+  }
+
+  return { rows, maxId };
+};
+
+const addConsumableToState = (state: Record<string, unknown>, type: ConsumableType) => {
+  const normalized = normalizeConsumables(state.consumables);
+  const currentId = Math.max(asInt(state.consumableId, 0), normalized.maxId);
+  const nextId = currentId + 1;
+  const def = CONSUMABLE_DEFS[type];
+  const nextRows = [
+    {
+      id: nextId,
+      type,
+      name: def.name,
+      description: def.description,
+      icon: "",
+    },
+    ...normalized.rows,
+  ];
+  state.consumableId = nextId;
+  state.consumables = nextRows;
+};
 
 const normalizeStakes = (raw: unknown, fallbackId = 1): StakeEntryState[] => {
   if (Array.isArray(raw)) {
@@ -138,6 +207,9 @@ const stakeStats = (state: Record<string, unknown>) => {
   }
   return { stakes, byId, total: Math.max(0, total) };
 };
+
+const serializeStakeEntries = (state: Record<string, unknown>) =>
+  normalizeStakes(state.stake, Math.max(1, asInt(state.stakeId, 1)));
 
 const getMetrics = (state: Record<string, unknown>): Metrics => {
   const player = (state.player as Record<string, unknown> | undefined) ?? {};
@@ -182,6 +254,9 @@ const normalizeState = (raw: unknown) => {
   state.starterPackPurchased = Boolean(state.starterPackPurchased);
   state.premiumEndsAt = Math.max(0, asInt(state.premiumEndsAt, 0));
   state.premiumClaimDay = String(state.premiumClaimDay ?? "").slice(0, 10);
+  const normalizedConsumables = normalizeConsumables(state.consumables);
+  state.consumables = normalizedConsumables.rows;
+  state.consumableId = Math.max(asInt(state.consumableId, 0), normalizedConsumables.maxId);
   const stakeId = Math.max(0, asInt(state.stakeId, 0));
   const stakes = normalizeStakes(state.stake, stakeId || 1);
   const maxStakeId = stakes.reduce((max, entry) => Math.max(max, entry.id), stakeId);
@@ -935,6 +1010,208 @@ serve(async (req) => {
       tickets: Math.max(0, asInt(creditResult.state.tickets, 0)),
       crystals: Math.max(0, asInt(creditResult.state.crystals, 0)),
     });
+  }
+
+  if (action === "premium_claim_daily") {
+    const dayKey = todayKeyUtc(now);
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const { data: profileRow, error: profileError } = await supabase
+        .from("profiles")
+        .select("state, updated_at")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+
+      if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+        return json({ ok: false, error: "Profile not found." });
+      }
+
+      const state = normalizeState(profileRow.state as unknown);
+      if (!state) return json({ ok: false, error: "Invalid profile state." });
+
+      const premiumEndsAt = Math.max(0, asInt(state.premiumEndsAt, 0));
+      if (premiumEndsAt <= now.getTime()) {
+        return json({ ok: false, error: "Premium subscription is inactive." });
+      }
+      if (String(state.premiumClaimDay ?? "") === dayKey) {
+        return json({ ok: false, error: "Daily Premium rewards already claimed today." });
+      }
+
+      state.tickets = Math.min(MAX_TICKETS, Math.max(0, asInt(state.tickets, 0)) + PREMIUM_DAILY_KEYS);
+      state.gold = Math.max(0, asInt(state.gold, 0)) + PREMIUM_DAILY_GOLD;
+      for (let i = 0; i < PREMIUM_DAILY_SMALL_POTIONS; i += 1) {
+        addConsumableToState(state, "energy-small");
+      }
+      for (let i = 0; i < PREMIUM_DAILY_BIG_POTIONS; i += 1) {
+        addConsumableToState(state, "energy-full");
+      }
+      state.premiumClaimDay = dayKey;
+
+      const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+      const { data: updated, error: updateError } = await supabase
+        .from("profiles")
+        .update({
+          state,
+          updated_at: now.toISOString(),
+        })
+        .eq("wallet", auth.wallet)
+        .eq("updated_at", expectedUpdatedAt)
+        .select("wallet")
+        .maybeSingle();
+
+      if (!updateError && updated) {
+        return json({
+          ok: true,
+          tickets: Math.max(0, asInt(state.tickets, 0)),
+          gold: Math.max(0, asInt(state.gold, 0)),
+          premiumClaimDay: dayKey,
+          consumables: state.consumables,
+        });
+      }
+    }
+
+    return json({ ok: false, error: "Profile changed concurrently, retry premium claim." });
+  }
+
+  if (action === "stake_start") {
+    const amount = asInt(body.amount, 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return json({ ok: false, error: "Enter a valid amount." });
+    }
+    if (amount < STAKE_MIN_AMOUNT) {
+      return json({ ok: false, error: `Minimum stake is ${STAKE_MIN_AMOUNT} crystals.` });
+    }
+    if (amount > STAKE_MAX_AMOUNT) {
+      return json({ ok: false, error: "Stake amount is too high." });
+    }
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const { data: profileRow, error: profileError } = await supabase
+        .from("profiles")
+        .select("state, updated_at")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+
+      if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+        return json({ ok: false, error: "Profile not found." });
+      }
+
+      const state = normalizeState(profileRow.state as unknown);
+      if (!state) return json({ ok: false, error: "Invalid profile state." });
+
+      const crystals = Math.max(0, asInt(state.crystals, 0));
+      if (amount > crystals) {
+        return json({ ok: false, error: "Not enough crystals." });
+      }
+
+      const stakeEntries = serializeStakeEntries(state);
+      if (stakeEntries.length >= STAKE_MAX_COUNT) {
+        return json({ ok: false, error: "Too many active stakes." });
+      }
+
+      const currentStakeId = Math.max(
+        asInt(state.stakeId, 0),
+        ...stakeEntries.map((entry) => entry.id),
+        0,
+      );
+      const nextStakeId = currentStakeId + 1;
+      const endsAt = now.getTime() + STAKE_DURATION_SECONDS * 1000;
+      const nextEntries = [
+        { id: nextStakeId, amount, endsAt },
+        ...stakeEntries,
+      ];
+
+      state.crystals = crystals - amount;
+      state.stakeId = nextStakeId;
+      state.stake = nextEntries;
+
+      const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+      const { data: updated, error: updateError } = await supabase
+        .from("profiles")
+        .update({
+          state,
+          updated_at: now.toISOString(),
+        })
+        .eq("wallet", auth.wallet)
+        .eq("updated_at", expectedUpdatedAt)
+        .select("wallet")
+        .maybeSingle();
+
+      if (!updateError && updated) {
+        return json({
+          ok: true,
+          crystals: Math.max(0, asInt(state.crystals, 0)),
+          stakeId: nextStakeId,
+          stakeEntries: nextEntries,
+          startedStake: { id: nextStakeId, amount, endsAt },
+        });
+      }
+    }
+
+    return json({ ok: false, error: "Profile changed concurrently, retry stake." });
+  }
+
+  if (action === "stake_claim") {
+    const stakeId = asInt(body.stakeId, 0);
+    if (!Number.isFinite(stakeId) || stakeId <= 0) {
+      return json({ ok: false, error: "Invalid stake id." });
+    }
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const { data: profileRow, error: profileError } = await supabase
+        .from("profiles")
+        .select("state, updated_at")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+
+      if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+        return json({ ok: false, error: "Profile not found." });
+      }
+
+      const state = normalizeState(profileRow.state as unknown);
+      if (!state) return json({ ok: false, error: "Invalid profile state." });
+
+      const stakeEntries = serializeStakeEntries(state);
+      const stakeEntry = stakeEntries.find((entry) => entry.id === stakeId);
+      if (!stakeEntry) {
+        return json({ ok: false, error: "Stake not found." });
+      }
+      if (now.getTime() < stakeEntry.endsAt) {
+        return json({ ok: false, error: "Stake is still locked." });
+      }
+
+      const payout = stakeEntry.amount + Math.floor(stakeEntry.amount * STAKE_BONUS_RATE);
+      const nextEntries = stakeEntries.filter((entry) => entry.id !== stakeId);
+      state.stake = nextEntries;
+      state.crystals = Math.max(0, asInt(state.crystals, 0)) + payout;
+      state.crystalsEarned = Math.max(0, asInt(state.crystalsEarned, 0)) + payout;
+      state.stakeId = Math.max(asInt(state.stakeId, 0), ...nextEntries.map((entry) => entry.id), 0);
+
+      const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+      const { data: updated, error: updateError } = await supabase
+        .from("profiles")
+        .update({
+          state,
+          updated_at: now.toISOString(),
+        })
+        .eq("wallet", auth.wallet)
+        .eq("updated_at", expectedUpdatedAt)
+        .select("wallet")
+        .maybeSingle();
+
+      if (!updateError && updated) {
+        return json({
+          ok: true,
+          crystals: Math.max(0, asInt(state.crystals, 0)),
+          crystalsEarned: Math.max(0, asInt(state.crystalsEarned, 0)),
+          stakeId: Math.max(0, asInt(state.stakeId, 0)),
+          stakeEntries: nextEntries,
+          stakePayout: payout,
+        });
+      }
+    }
+
+    return json({ ok: false, error: "Profile changed concurrently, retry claim." });
   }
 
   if (action === "worldboss_sync") {
