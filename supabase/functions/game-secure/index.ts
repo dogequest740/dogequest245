@@ -97,6 +97,14 @@ const CONSUMABLE_DEFS: Record<ConsumableType, { name: string; description: strin
   key: { name: "Dungeon Key", description: "+1 dungeon entry." },
 };
 
+type SecurityEventRow = {
+  id: string;
+  wallet: string;
+  kind: string;
+  details: Record<string, unknown>;
+  created_at: string;
+};
+
 const json = (payload: Record<string, unknown>) =>
   new Response(JSON.stringify(payload), {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -399,6 +407,30 @@ const toWalletList = (raw: string | undefined) =>
     .map((entry) => entry.trim())
     .filter(Boolean);
 
+const toLimitedDetails = (value: Record<string, unknown>) => {
+  try {
+    const raw = JSON.stringify(value);
+    if (raw.length <= 2000) return value;
+    const cut = raw.slice(0, 2000);
+    return { truncated: true, raw: cut };
+  } catch {
+    return { truncated: true, raw: "unserializable_details" };
+  }
+};
+
+const auditEvent = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  kind: string,
+  details: Record<string, unknown> = {},
+) => {
+  await supabase.from("security_events").insert({
+    wallet,
+    kind,
+    details: toLimitedDetails(details),
+  });
+};
+
 const ensureWorldBossCycle = async (
   supabase: ReturnType<typeof createClient>,
   now: Date,
@@ -606,10 +638,9 @@ const claimWorldBossReward = async (
   });
 
   if (!creditResult.ok) {
-    await supabase.from("security_events").insert({
-      wallet,
-      kind: "worldboss_reward_credit_failed",
-      details: { share, cycleStart: boss.last_cycle_start },
+    await auditEvent(supabase, wallet, "worldboss_reward_credit_failed", {
+      share,
+      cycleStart: boss.last_cycle_start,
     });
     return 0;
   }
@@ -776,15 +807,11 @@ serve(async (req) => {
 
     const validationError = validateStateTransition(prevState, normalizedState, prevMetrics, nextMetrics, elapsedSec, now.getTime());
     if (validationError) {
-      await supabase.from("security_events").insert({
-        wallet: auth.wallet,
-        kind: "profile_save_rejected",
-        details: {
-          reason: validationError,
-          elapsedSec,
-          prev: prevMetrics,
-          next: nextMetrics,
-        },
+      await auditEvent(supabase, auth.wallet, "profile_save_rejected", {
+        reason: validationError,
+        elapsedSec,
+        prev: prevMetrics,
+        next: nextMetrics,
       });
       return json({ ok: false, error: validationError });
     }
@@ -798,6 +825,19 @@ serve(async (req) => {
       { onConflict: "wallet" },
     );
     if (error) return json({ ok: false, error: "Failed to save profile." });
+    const hasMeaningfulDelta = !prevMetrics ||
+      nextMetrics.level !== prevMetrics.level ||
+      nextMetrics.monsterKills !== prevMetrics.monsterKills ||
+      nextMetrics.dungeonRuns !== prevMetrics.dungeonRuns ||
+      nextMetrics.gold !== prevMetrics.gold ||
+      nextMetrics.crystals !== prevMetrics.crystals;
+    if (hasMeaningfulDelta) {
+      await auditEvent(supabase, auth.wallet, "profile_save", {
+        elapsedSec,
+        prev: prevMetrics,
+        next: nextMetrics,
+      });
+    }
     return json({ ok: true, savedAt: now.toISOString() });
   }
 
@@ -868,6 +908,13 @@ serve(async (req) => {
       return json({ ok: false, error: "Failed to submit withdrawal request." });
     }
 
+    await auditEvent(supabase, auth.wallet, "withdraw_submit", {
+      amount,
+      solAmount,
+      remainingCrystals: nextCrystals,
+      withdrawalId: String(withdrawalRow.id ?? ""),
+    });
+
     return json({
       ok: true,
       withdrawal: withdrawalRow,
@@ -919,7 +966,10 @@ serve(async (req) => {
             created_at: nowIso,
             updated_at: nowIso,
           });
-        if (!insertError) referralApplied = true;
+        if (!insertError) {
+          referralApplied = true;
+          await auditEvent(supabase, auth.wallet, "referral_applied", { referrerWallet: applyReferrer });
+        }
       }
     }
 
@@ -982,6 +1032,7 @@ serve(async (req) => {
     }
 
     if (claimedKeys <= 0 && claimedCrystals <= 0) {
+      await auditEvent(supabase, auth.wallet, "referral_claim_empty");
       return json({
         ok: true,
         claimedKeys: 0,
@@ -995,13 +1046,17 @@ serve(async (req) => {
     });
 
     if (!creditResult.ok || !creditResult.state) {
-      await supabase.from("security_events").insert({
-        wallet: auth.wallet,
-        kind: "referral_claim_credit_failed",
-        details: { claimedKeys, claimedCrystals },
+      await auditEvent(supabase, auth.wallet, "referral_claim_credit_failed", {
+        claimedKeys,
+        claimedCrystals,
       });
       return json({ ok: false, error: "Failed to credit referral rewards." });
     }
+
+    await auditEvent(supabase, auth.wallet, "referral_claim", {
+      claimedKeys,
+      claimedCrystals,
+    });
 
     return json({
       ok: true,
@@ -1060,6 +1115,11 @@ serve(async (req) => {
         .maybeSingle();
 
       if (!updateError && updated) {
+        await auditEvent(supabase, auth.wallet, "premium_claim_daily", {
+          dayKey,
+          tickets: Math.max(0, asInt(state.tickets, 0)),
+          gold: Math.max(0, asInt(state.gold, 0)),
+        });
         return json({
           ok: true,
           tickets: Math.max(0, asInt(state.tickets, 0)),
@@ -1138,6 +1198,12 @@ serve(async (req) => {
         .maybeSingle();
 
       if (!updateError && updated) {
+        await auditEvent(supabase, auth.wallet, "stake_start", {
+          amount,
+          stakeId: nextStakeId,
+          endsAt,
+          crystals: Math.max(0, asInt(state.crystals, 0)),
+        });
         return json({
           ok: true,
           crystals: Math.max(0, asInt(state.crystals, 0)),
@@ -1200,6 +1266,11 @@ serve(async (req) => {
         .maybeSingle();
 
       if (!updateError && updated) {
+        await auditEvent(supabase, auth.wallet, "stake_claim", {
+          stakeId,
+          payout,
+          crystals: Math.max(0, asInt(state.crystals, 0)),
+        });
         return json({
           ok: true,
           crystals: Math.max(0, asInt(state.crystals, 0)),
@@ -1247,6 +1318,7 @@ serve(async (req) => {
     const appliedDamage = Math.min(safePendingDamage, maxDamageGain);
     const nextDamage = existingDamage + appliedDamage;
     const nextJoined = Boolean(existingRow?.joined) || safeJoined;
+    const joinedNow = !Boolean(existingRow?.joined) && nextJoined;
     const nextName = playerName || existingRow?.name || "Hero";
 
     const shouldWrite =
@@ -1283,12 +1355,55 @@ serve(async (req) => {
 
     const participants = await loadWorldBossParticipants(supabase, boss.cycle_start);
 
+    if (joinedNow || rewardShare > 0 || appliedDamage >= 100) {
+      await auditEvent(supabase, auth.wallet, "worldboss_sync", {
+        cycleStart: boss.cycle_start,
+        joinedNow,
+        appliedDamage,
+        totalDamage: nextDamage,
+        rewardShare,
+      });
+    }
+
     return json({
       ok: true,
       worldBoss: boss,
       worldBossParticipants: participants,
       worldBossAppliedDamage: appliedDamage,
       worldBossRewardShare: rewardShare,
+    });
+  }
+
+  if (action === "admin_events") {
+    const adminWallets = toWalletList(Deno.env.get("ADMIN_WALLETS"));
+    if (!adminWallets.includes(auth.wallet)) {
+      return json({ ok: false, error: "Admin access required." });
+    }
+
+    const walletFilterRaw = String(body.walletFilter ?? "").trim();
+    const walletFilter = isWalletLike(walletFilterRaw) ? walletFilterRaw : "";
+    const kindFilter = String(body.kindFilter ?? "").trim().slice(0, 120);
+    const limit = clampInt(body.limit, 20, 1000);
+
+    let query = supabase
+      .from("security_events")
+      .select("id, wallet, kind, details, created_at")
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (walletFilter) {
+      query = query.eq("wallet", walletFilter);
+    }
+    if (kindFilter) {
+      query = query.eq("kind", kindFilter);
+    }
+
+    const { data, error } = await query;
+    if (error) return json({ ok: false, error: "Failed to load security events." });
+
+    return json({
+      ok: true,
+      events: (data as SecurityEventRow[] | null) ?? [],
     });
   }
 
@@ -1307,6 +1422,7 @@ serve(async (req) => {
       .eq("id", withdrawalId);
 
     if (error) return json({ ok: false, error: "Failed to update withdrawal." });
+    await auditEvent(supabase, auth.wallet, "admin_mark_paid", { withdrawalId });
     return json({ ok: true });
   }
 

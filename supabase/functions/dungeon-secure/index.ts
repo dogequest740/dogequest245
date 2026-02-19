@@ -61,6 +61,19 @@ const decodeBase64 = (value: string) => {
   }
 };
 
+const auditEvent = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  kind: string,
+  details: Record<string, unknown> = {},
+) => {
+  await supabase.from("security_events").insert({
+    wallet,
+    kind,
+    details,
+  });
+};
+
 const getTierScoreFromState = (state: unknown) => {
   if (!state || typeof state !== "object") return 0;
   const equipment = (state as { equipment?: Record<string, { tierScore?: number } | null> }).equipment ?? {};
@@ -199,6 +212,7 @@ serve(async (req) => {
       const recentlyIssued = Number.isFinite(updatedAtMs) &&
         now.getTime() - updatedAtMs <= CHALLENGE_REUSE_WINDOW_SECONDS * 1000;
       if (stillValid && recentlyIssued) {
+        await auditEvent(supabase, wallet, "wallet_challenge_reused");
         return json({
           ok: true,
           wallet,
@@ -228,6 +242,10 @@ serve(async (req) => {
       { onConflict: "wallet" },
     );
     if (error) return json({ ok: false, error: "Failed to create signature challenge." });
+
+    await auditEvent(supabase, wallet, "wallet_challenge_issued", {
+      expiresAt,
+    });
 
     return json({
       ok: true,
@@ -260,6 +278,7 @@ serve(async (req) => {
     const signature = decodeBase64(signatureBase64);
     if (!signature || signature.length !== 64) {
       await supabase.from("wallet_auth_nonces").delete().eq("wallet", wallet);
+      await auditEvent(supabase, wallet, "wallet_login_failed", { reason: "invalid_signature_format" });
       return json({ ok: false, error: "Invalid signature format. Request a new challenge." });
     }
 
@@ -293,6 +312,7 @@ serve(async (req) => {
     });
 
     if (sessionError) return json({ ok: false, error: "Failed to create session." });
+    await auditEvent(supabase, wallet, "wallet_login_success");
     return json({ ok: true, token, expiresAt });
   }
 
@@ -328,6 +348,10 @@ serve(async (req) => {
       .eq("wallet", auth.wallet);
 
     if (error) return json({ ok: false, error: "Failed to apply key." });
+    await auditEvent(supabase, auth.wallet, "dungeon_key_used", {
+      tickets: nextTickets,
+      ticketDay: stateResult.state.ticket_day,
+    });
     return json({
       ok: true,
       tickets: nextTickets,
@@ -380,6 +404,14 @@ serve(async (req) => {
       .eq("wallet", auth.wallet);
 
     if (updateError) return json({ ok: false, error: "Failed to save dungeon result." });
+
+    await auditEvent(supabase, auth.wallet, "dungeon_run", {
+      dungeonId,
+      dungeonIndex: dungeonIndex + 1,
+      reward,
+      tickets: nextTickets,
+      dungeonRuns: nextDungeonRuns,
+    });
 
     return json({
       ok: true,

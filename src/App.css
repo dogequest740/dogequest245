@@ -4076,6 +4076,40 @@ button.ghost {
   gap: 14px;
 }
 
+.admin-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.admin-filter {
+  display: grid;
+  gap: 4px;
+  min-width: 220px;
+}
+
+.admin-filter.small {
+  min-width: 90px;
+}
+
+.admin-filter span {
+  font-size: 10px;
+  color: rgba(231, 240, 245, 0.72);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.admin-filter input {
+  border: 1px solid rgba(160, 120, 255, 0.28);
+  background: rgba(12, 16, 24, 0.9);
+  color: #e9ebff;
+  border-radius: 10px;
+  padding: 7px 9px;
+  font-size: 12px;
+  font-family: 'Manrope', system-ui, sans-serif;
+}
+
 .admin-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
@@ -4140,9 +4174,18 @@ button.ghost {
   max-height: 40vh;
 }
 
+.admin-table.events {
+  max-height: 45vh;
+}
+
 .admin-row.withdrawals {
   grid-template-columns: 0.7fr 1.1fr 0.9fr 0.8fr 0.8fr 1.1fr 0.9fr 0.9fr;
   min-width: 720px;
+}
+
+.admin-row.events {
+  grid-template-columns: 1fr 1fr 0.9fr 2.7fr;
+  min-width: 820px;
 }
 
 .admin-row.empty {
@@ -4187,6 +4230,25 @@ button.ghost {
 
 .admin-action:hover {
   box-shadow: 0 0 10px rgba(123, 216, 143, 0.3);
+}
+
+.event-kind {
+  width: fit-content;
+  border-radius: 999px;
+  border: 1px solid rgba(120, 188, 255, 0.38);
+  background: rgba(18, 28, 42, 0.72);
+  color: #8ec7ff;
+  padding: 2px 8px;
+  font-size: 10px;
+  letter-spacing: 0.2px;
+}
+
+.event-details {
+  font-family: 'Manrope', system-ui, sans-serif;
+  color: rgba(231, 240, 245, 0.86);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .admin-row.header {

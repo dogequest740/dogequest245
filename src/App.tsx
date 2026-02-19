@@ -272,6 +272,15 @@ type AdminData = {
   summary: AdminSummary
   players: AdminPlayerRow[]
   withdrawals: WithdrawalRow[]
+  events: AdminEventRow[]
+}
+
+type AdminEventRow = {
+  id: string
+  wallet: string
+  kind: string
+  details: Record<string, unknown>
+  created_at: string
 }
 
 type DungeonSecureResponse = {
@@ -309,6 +318,7 @@ type GameSecureResponse = {
   referralPendingCrystals?: number
   withdrawal?: WithdrawalRow
   withdrawals?: WithdrawalRow[]
+  events?: AdminEventRow[]
   worldBoss?: WorldBossRow
   worldBossParticipants?: WorldBossParticipantRow[]
   worldBossAppliedDamage?: number
@@ -1380,6 +1390,19 @@ const formatDateTime = (value: string) => {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString('en-US')
+}
+const normalizeEventDetails = (value: unknown): Record<string, unknown> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return value as Record<string, unknown>
+}
+const formatEventDetails = (value: Record<string, unknown>) => {
+  try {
+    const raw = JSON.stringify(value)
+    if (raw.length <= 240) return raw
+    return `${raw.slice(0, 237)}...`
+  } catch {
+    return '[unserializable details]'
+  }
 }
 
 const sanitizePlayerName = (value: string) => value.replace(/[^A-Za-z]/g, '').slice(0, 10)
@@ -2521,6 +2544,9 @@ function App() {
   const [adminData, setAdminData] = useState<AdminData | null>(null)
   const [adminLoading, setAdminLoading] = useState(false)
   const [adminError, setAdminError] = useState('')
+  const [adminEventWalletFilter, setAdminEventWalletFilter] = useState('')
+  const [adminEventKindFilter, setAdminEventKindFilter] = useState('')
+  const [adminEventLimit, setAdminEventLimit] = useState('300')
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [withdrawError, setWithdrawError] = useState('')
   const [playerWithdrawals, setPlayerWithdrawals] = useState<WithdrawalRow[]>([])
@@ -3516,6 +3542,32 @@ function App() {
       setAdminLoading(false)
       return
     }
+
+    const eventLimitRaw = Math.floor(Number(adminEventLimit))
+    const eventLimit = Number.isFinite(eventLimitRaw) ? Math.min(1000, Math.max(20, eventLimitRaw)) : 300
+    const eventsResult = await callGameSecureAuthed(
+      'admin_events',
+      {
+        walletFilter: adminEventWalletFilter.trim(),
+        kindFilter: adminEventKindFilter.trim(),
+        limit: eventLimit,
+      },
+      true,
+    )
+    if (!eventsResult.ok) {
+      setAdminError(eventsResult.error || 'Failed to load security events.')
+      setAdminLoading(false)
+      return
+    }
+
+    const events: AdminEventRow[] = (eventsResult.events ?? []).map((row, index) => ({
+      id: String(row.id ?? `event-${index}`),
+      wallet: String(row.wallet ?? ''),
+      kind: String(row.kind ?? 'unknown'),
+      details: normalizeEventDetails(row.details),
+      created_at: String(row.created_at ?? new Date(0).toISOString()),
+    }))
+
     const now = Date.now()
     const players: AdminPlayerRow[] = (data ?? []).map((row) => {
       const saved = (row.state as PersistedState | null) ?? null
@@ -3586,7 +3638,8 @@ function App() {
       pendingCrystals,
     }
 
-    setAdminData({ summary, players, withdrawals })
+    setAdminData({ summary, players, withdrawals, events })
+    setAdminEventLimit(String(eventLimit))
     setAdminLoading(false)
   }
 
@@ -5934,6 +5987,40 @@ function App() {
                         <div className="admin-sub">Runs total</div>
                       </div>
                     </div>
+                    <div className="admin-filters">
+                      <label className="admin-filter">
+                        <span>Wallet filter</span>
+                        <input
+                          type="text"
+                          value={adminEventWalletFilter}
+                          onChange={(event) => setAdminEventWalletFilter(event.target.value)}
+                          placeholder="Wallet address"
+                        />
+                      </label>
+                      <label className="admin-filter">
+                        <span>Event type</span>
+                        <input
+                          type="text"
+                          value={adminEventKindFilter}
+                          onChange={(event) => setAdminEventKindFilter(event.target.value)}
+                          placeholder="withdraw_submit"
+                        />
+                      </label>
+                      <label className="admin-filter small">
+                        <span>Rows</span>
+                        <input
+                          type="number"
+                          min={20}
+                          max={1000}
+                          step={10}
+                          value={adminEventLimit}
+                          onChange={(event) => setAdminEventLimit(event.target.value)}
+                        />
+                      </label>
+                      <button type="button" className="admin-action" onClick={loadAdminData} disabled={adminLoading}>
+                        Apply filters
+                      </button>
+                    </div>
                     <div className="admin-table">
                       <div className="admin-row header">
                         <span>Player</span>
@@ -5959,6 +6046,39 @@ function App() {
                           <span className="wallet-chip">{formatShortWallet(player.wallet)}</span>
                         </div>
                       ))}
+                    </div>
+                    <div className="admin-table events">
+                      <div className="admin-row header events">
+                        <span>Time</span>
+                        <span>Type</span>
+                        <span>Wallet</span>
+                        <span>Details</span>
+                      </div>
+                      {adminData.events.length === 0 && (
+                        <div className="admin-row empty">
+                          <span>No security events found for current filters.</span>
+                        </div>
+                      )}
+                      {adminData.events.map((event) => {
+                        const detailsText = formatEventDetails(event.details)
+                        return (
+                          <div key={event.id} className="admin-row events">
+                            <span>{formatDateTime(event.created_at)}</span>
+                            <span className="event-kind">{event.kind}</span>
+                            <button
+                              type="button"
+                              className="wallet-chip copy-chip"
+                              onClick={() => copyToClipboard(event.wallet)}
+                              title="Copy wallet"
+                            >
+                              {formatShortWallet(event.wallet)}
+                            </button>
+                            <span className="event-details" title={detailsText}>
+                              {detailsText}
+                            </span>
+                          </div>
+                        )
+                      })}
                     </div>
                     <div className="admin-table withdrawals">
                       <div className="admin-row header withdrawals">
