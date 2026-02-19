@@ -4008,7 +4008,7 @@ button.ghost {
 
 .fortune-wheel-segment-content {
   position: absolute;
-  width: 44px;
+  width: 32px;
   display: grid;
   justify-items: center;
   gap: 2px;
@@ -4018,17 +4018,21 @@ button.ghost {
 }
 
 .fortune-segment-icon {
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
   object-fit: contain;
   filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.55));
 }
 
 .fortune-segment-qty {
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 900;
   line-height: 1;
   color: #fff5d2;
+  background: rgba(12, 10, 8, 0.45);
+  border: 1px solid rgba(255, 226, 153, 0.28);
+  border-radius: 8px;
+  padding: 1px 4px;
   text-shadow:
     0 0 8px rgba(0, 0, 0, 0.65),
     0 1px 0 rgba(0, 0, 0, 0.7);
@@ -4197,16 +4201,17 @@ button.ghost {
 }
 
 .app.mobile .fortune-wheel-segment-content {
-  width: 38px;
+  width: 28px;
 }
 
 .app.mobile .fortune-segment-icon {
-  width: 15px;
-  height: 15px;
+  width: 13px;
+  height: 13px;
 }
 
 .app.mobile .fortune-segment-qty {
-  font-size: 8px;
+  font-size: 7px;
+  padding: 1px 3px;
 }
 
 .app.mobile .fortune-wheel-center {
