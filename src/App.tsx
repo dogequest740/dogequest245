@@ -903,8 +903,8 @@ const FORTUNE_SPIN_PRICES = {
 } as const
 type FortunePackId = keyof typeof FORTUNE_SPIN_PRICES
 const FORTUNE_REWARDS: FortuneReward[] = [
-  { id: 'speed_draught', label: 'Swift Draught', kind: 'consumable', consumableType: 'speed', amount: 1, chance: 25 },
-  { id: 'battle_tonic', label: 'Battle Tonic', kind: 'consumable', consumableType: 'attack', amount: 1, chance: 25 },
+  { id: 'speed_draught', label: 'Swift Draught', kind: 'consumable', consumableType: 'speed', amount: 1, chance: 24.915 },
+  { id: 'battle_tonic', label: 'Battle Tonic', kind: 'consumable', consumableType: 'attack', amount: 1, chance: 24.915 },
   { id: 'energy_tonic', label: 'Energy Tonic', kind: 'consumable', consumableType: 'energy-small', amount: 1, chance: 25 },
   { id: 'grand_energy_elixir', label: 'Grand Energy Elixir', kind: 'consumable', consumableType: 'energy-full', amount: 1, chance: 10 },
   { id: 'crystals_100', label: '100 Crystals', kind: 'crystals', amount: 100, chance: 2 },
@@ -916,6 +916,8 @@ const FORTUNE_REWARDS: FortuneReward[] = [
   { id: 'crystals_300', label: '300 Crystals', kind: 'crystals', amount: 300, chance: 0.3 },
   { id: 'gold_500000', label: '500000 Gold', kind: 'gold', amount: 500000, chance: 0.01 },
   { id: 'crystals_1000', label: '1000 Crystals', kind: 'crystals', amount: 1000, chance: 0.01 },
+  { id: 'keys_10', label: '10 Keys', kind: 'keys', amount: 10, chance: 0.15 },
+  { id: 'keys_30', label: '30 Keys', kind: 'keys', amount: 30, chance: 0.02 },
   { id: 'keys_5', label: '5 Keys', kind: 'keys', amount: 5, chance: 0.38 },
 ]
 const FORTUNE_WHEEL_SEGMENT_ANGLE = 360 / FORTUNE_REWARDS.length
