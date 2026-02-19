@@ -10,7 +10,7 @@ const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const CHALLENGE_TTL_SECONDS = 5 * 60;
 const CHALLENGE_REUSE_WINDOW_SECONDS = 10;
 const ITEM_TIER_SCORE_MULTIPLIER = 0.5;
-const BLOCKED_ERROR_MESSAGE = "Вы заблокированы за читерство.";
+const BLOCKED_ERROR_MESSAGE = "You have been banned for cheating.";
 
 const DUNGEON_BASE_REQUIREMENTS = [
   450, 1673, 3002, 4447, 6133, 7818, 9619, 11536, 13569, 15718,

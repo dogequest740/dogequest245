@@ -22,7 +22,7 @@ const PREMIUM_DAILY_KEYS = 5;
 const PREMIUM_DAILY_GOLD = 50000;
 const PREMIUM_DAILY_SMALL_POTIONS = 5;
 const PREMIUM_DAILY_BIG_POTIONS = 3;
-const BLOCKED_ERROR_MESSAGE = "Вы заблокированы за читерство.";
+const BLOCKED_ERROR_MESSAGE = "You have been banned for cheating.";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
