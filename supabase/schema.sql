@@ -151,6 +151,14 @@ create table if not exists public.dungeon_state (
 
 alter table public.dungeon_state alter column tickets set default 3;
 
+create table if not exists public.fortune_state (
+  wallet text primary key,
+  free_spin_day text not null default '',
+  paid_spins int not null default 0,
+  updated_at timestamptz default now()
+);
+
 alter table public.wallet_auth_nonces enable row level security;
 alter table public.wallet_sessions enable row level security;
 alter table public.dungeon_state enable row level security;
+alter table public.fortune_state enable row level security;

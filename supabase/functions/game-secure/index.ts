@@ -23,6 +23,7 @@ const PREMIUM_DAILY_GOLD = 50000;
 const PREMIUM_DAILY_SMALL_POTIONS = 5;
 const PREMIUM_DAILY_BIG_POTIONS = 3;
 const BLOCKED_ERROR_MESSAGE = "You have been banned for cheating.";
+const FORTUNE_SPIN_PACKS = [1, 10] as const;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -113,6 +114,40 @@ type BlockedWalletRow = {
   created_at: string;
   updated_at?: string;
 };
+
+type FortuneStateRow = {
+  wallet: string;
+  free_spin_day: string;
+  paid_spins: number;
+  updated_at?: string;
+};
+
+type FortuneRewardKind = "consumable" | "gold" | "crystals" | "keys";
+type FortuneRewardDef = {
+  id: string;
+  label: string;
+  kind: FortuneRewardKind;
+  consumableType?: ConsumableType;
+  amount: number;
+  chance: number;
+};
+
+const FORTUNE_REWARDS: FortuneRewardDef[] = [
+  { id: "speed_draught", label: "Swift Draught", kind: "consumable", consumableType: "speed", amount: 1, chance: 25 },
+  { id: "battle_tonic", label: "Battle Tonic", kind: "consumable", consumableType: "attack", amount: 1, chance: 25 },
+  { id: "energy_tonic", label: "Energy Tonic", kind: "consumable", consumableType: "energy-small", amount: 1, chance: 25 },
+  { id: "grand_energy_elixir", label: "Grand Energy Elixir", kind: "consumable", consumableType: "energy-full", amount: 1, chance: 10 },
+  { id: "crystals_100", label: "100 Crystals", kind: "crystals", amount: 100, chance: 2 },
+  { id: "crystals_50", label: "50 Crystals", kind: "crystals", amount: 50, chance: 3 },
+  { id: "crystals_10", label: "10 Crystals", kind: "crystals", amount: 10, chance: 5 },
+  { id: "gold_5000", label: "5000 Gold", kind: "gold", amount: 5000, chance: 3 },
+  { id: "gold_10000", label: "10000 Gold", kind: "gold", amount: 10000, chance: 1 },
+  { id: "gold_50000", label: "50000 Gold", kind: "gold", amount: 50000, chance: 0.3 },
+  { id: "crystals_300", label: "300 Crystals", kind: "crystals", amount: 300, chance: 0.3 },
+  { id: "gold_500000", label: "500000 Gold", kind: "gold", amount: 500000, chance: 0.01 },
+  { id: "crystals_1000", label: "1000 Crystals", kind: "crystals", amount: 1000, chance: 0.01 },
+  { id: "keys_5", label: "5 Keys", kind: "keys", amount: 5, chance: 0.38 },
+];
 
 const json = (payload: Record<string, unknown>) =>
   new Response(JSON.stringify(payload), {
@@ -466,6 +501,114 @@ const auditEvent = async (
     wallet,
     kind,
     details: toLimitedDetails(details),
+  });
+};
+
+const randomUnit = () => {
+  const buffer = new Uint32Array(1);
+  crypto.getRandomValues(buffer);
+  return buffer[0] / 4294967296;
+};
+
+const pickFortuneReward = () => {
+  const totalWeight = FORTUNE_REWARDS.reduce((sum, reward) => sum + reward.chance, 0);
+  let roll = randomUnit() * totalWeight;
+  for (const reward of FORTUNE_REWARDS) {
+    roll -= reward.chance;
+    if (roll <= 0) return reward;
+  }
+  return FORTUNE_REWARDS[FORTUNE_REWARDS.length - 1];
+};
+
+const ensureFortuneState = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  now: Date,
+) => {
+  const { data, error } = await supabase
+    .from("fortune_state")
+    .select("wallet, free_spin_day, paid_spins, updated_at")
+    .eq("wallet", wallet)
+    .maybeSingle();
+  if (error) return { ok: false as const, error: "Failed to load fortune state." };
+
+  if (data) {
+    return {
+      ok: true as const,
+      state: {
+        wallet,
+        free_spin_day: String(data.free_spin_day ?? ""),
+        paid_spins: Math.max(0, asInt(data.paid_spins, 0)),
+        updated_at: String(data.updated_at ?? now.toISOString()),
+      } as FortuneStateRow,
+    };
+  }
+
+  const initial: FortuneStateRow = {
+    wallet,
+    free_spin_day: "",
+    paid_spins: 0,
+    updated_at: now.toISOString(),
+  };
+  const { error: insertError } = await supabase
+    .from("fortune_state")
+    .insert(initial);
+  if (insertError) return { ok: false as const, error: "Failed to create fortune state." };
+  return { ok: true as const, state: initial };
+};
+
+const updateFortuneState = async (
+  supabase: ReturnType<typeof createClient>,
+  state: FortuneStateRow,
+  next: Partial<FortuneStateRow>,
+) => {
+  const payload = {
+    free_spin_day: "free_spin_day" in next ? String(next.free_spin_day ?? "") : state.free_spin_day,
+    paid_spins: "paid_spins" in next ? Math.max(0, asInt(next.paid_spins, state.paid_spins)) : state.paid_spins,
+    updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await supabase
+    .from("fortune_state")
+    .update(payload)
+    .eq("wallet", state.wallet)
+    .eq("free_spin_day", state.free_spin_day)
+    .eq("paid_spins", state.paid_spins)
+    .select("wallet, free_spin_day, paid_spins, updated_at")
+    .maybeSingle();
+  if (error || !data) return { ok: false as const };
+  return {
+    ok: true as const,
+    state: {
+      wallet: String(data.wallet),
+      free_spin_day: String(data.free_spin_day ?? ""),
+      paid_spins: Math.max(0, asInt(data.paid_spins, 0)),
+      updated_at: String(data.updated_at ?? payload.updated_at),
+    } as FortuneStateRow,
+  };
+};
+
+const applyFortuneReward = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  reward: FortuneRewardDef,
+) => {
+  return updateProfileWithRetry(supabase, wallet, (state) => {
+    if (reward.kind === "gold") {
+      state.gold = Math.max(0, asInt(state.gold, 0)) + reward.amount;
+      return;
+    }
+    if (reward.kind === "crystals") {
+      state.crystals = Math.max(0, asInt(state.crystals, 0)) + reward.amount;
+      state.crystalsEarned = Math.max(0, asInt(state.crystalsEarned ?? state.crystals, 0)) + reward.amount;
+      return;
+    }
+    if (reward.kind === "keys") {
+      state.tickets = Math.min(MAX_TICKETS, Math.max(0, asInt(state.tickets, 0)) + reward.amount);
+      return;
+    }
+    if (reward.kind === "consumable" && reward.consumableType) {
+      addConsumableToState(state, reward.consumableType);
+    }
   });
 };
 
@@ -970,6 +1113,146 @@ serve(async (req) => {
 
     if (error) return json({ ok: false, error: "Failed to load withdrawals." });
     return json({ ok: true, withdrawals: data ?? [] });
+  }
+
+  if (action === "fortune_status") {
+    const dayKey = todayKeyUtc(now);
+    const fortuneState = await ensureFortuneState(supabase, auth.wallet, now);
+    if (!fortuneState.ok) {
+      return json({ ok: false, error: fortuneState.error });
+    }
+
+    return json({
+      ok: true,
+      fortuneFreeSpinAvailable: fortuneState.state.free_spin_day !== dayKey,
+      fortunePaidSpins: Math.max(0, asInt(fortuneState.state.paid_spins, 0)),
+    });
+  }
+
+  if (action === "fortune_buy") {
+    const spins = asInt(body.spins, 0);
+    if (!(FORTUNE_SPIN_PACKS as readonly number[]).includes(spins)) {
+      return json({ ok: false, error: "Invalid fortune spin pack." });
+    }
+
+    const txSignature = String(body.txSignature ?? "").trim().slice(0, 120);
+    const dayKey = todayKeyUtc(now);
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const fortuneState = await ensureFortuneState(supabase, auth.wallet, now);
+      if (!fortuneState.ok) {
+        return json({ ok: false, error: fortuneState.error });
+      }
+
+      const nextPaidSpins = Math.max(0, asInt(fortuneState.state.paid_spins, 0)) + spins;
+      const updated = await updateFortuneState(supabase, fortuneState.state, {
+        paid_spins: nextPaidSpins,
+      });
+      if (!updated.ok) continue;
+
+      await auditEvent(supabase, auth.wallet, "fortune_buy", {
+        spins,
+        txSignature,
+        paidSpins: updated.state.paid_spins,
+      });
+
+      return json({
+        ok: true,
+        fortuneFreeSpinAvailable: updated.state.free_spin_day !== dayKey,
+        fortunePaidSpins: Math.max(0, asInt(updated.state.paid_spins, 0)),
+      });
+    }
+
+    return json({ ok: false, error: "Failed to register fortune spin purchase, retry." });
+  }
+
+  if (action === "fortune_spin") {
+    const dayKey = todayKeyUtc(now);
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const fortuneState = await ensureFortuneState(supabase, auth.wallet, now);
+      if (!fortuneState.ok) {
+        return json({ ok: false, error: fortuneState.error });
+      }
+
+      const hasFreeSpin = fortuneState.state.free_spin_day !== dayKey;
+      const hasPaidSpin = Math.max(0, asInt(fortuneState.state.paid_spins, 0)) > 0;
+      if (!hasFreeSpin && !hasPaidSpin) {
+        return json({ ok: false, error: "No fortune spins available." });
+      }
+
+      const useFreeSpin = hasFreeSpin;
+      const nextPatch = useFreeSpin
+        ? { free_spin_day: dayKey }
+        : { paid_spins: Math.max(0, asInt(fortuneState.state.paid_spins, 0) - 1) };
+
+      const updatedState = await updateFortuneState(supabase, fortuneState.state, nextPatch);
+      if (!updatedState.ok) continue;
+
+      const reward = pickFortuneReward();
+      const creditResult = await applyFortuneReward(supabase, auth.wallet, reward);
+
+      if (!creditResult.ok || !creditResult.state) {
+        if (useFreeSpin) {
+          await supabase
+            .from("fortune_state")
+            .update({
+              free_spin_day: fortuneState.state.free_spin_day,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("wallet", auth.wallet)
+            .eq("free_spin_day", updatedState.state.free_spin_day)
+            .eq("paid_spins", updatedState.state.paid_spins);
+        } else {
+          await supabase
+            .from("fortune_state")
+            .update({
+              paid_spins: updatedState.state.paid_spins + 1,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("wallet", auth.wallet)
+            .eq("free_spin_day", updatedState.state.free_spin_day)
+            .eq("paid_spins", updatedState.state.paid_spins);
+        }
+
+        await auditEvent(supabase, auth.wallet, "fortune_spin_credit_failed", {
+          rewardId: reward.id,
+          used: useFreeSpin ? "free" : "paid",
+        });
+        return json({ ok: false, error: "Failed to apply fortune reward." });
+      }
+
+      await auditEvent(supabase, auth.wallet, "fortune_spin", {
+        rewardId: reward.id,
+        rewardLabel: reward.label,
+        rewardKind: reward.kind,
+        rewardAmount: reward.amount,
+        used: useFreeSpin ? "free" : "paid",
+        paidSpinsLeft: updatedState.state.paid_spins,
+      });
+
+      return json({
+        ok: true,
+        fortuneUsed: useFreeSpin ? "free" : "paid",
+        fortuneReward: {
+          id: reward.id,
+          label: reward.label,
+          kind: reward.kind,
+          amount: reward.amount,
+          chance: reward.chance,
+          consumableType: reward.consumableType ?? null,
+        },
+        fortuneFreeSpinAvailable: updatedState.state.free_spin_day !== dayKey,
+        fortunePaidSpins: Math.max(0, asInt(updatedState.state.paid_spins, 0)),
+        tickets: Math.max(0, asInt(creditResult.state.tickets, 0)),
+        gold: Math.max(0, asInt(creditResult.state.gold, 0)),
+        crystals: Math.max(0, asInt(creditResult.state.crystals, 0)),
+        crystalsEarned: Math.max(0, asInt(creditResult.state.crystalsEarned, 0)),
+        consumables: normalizeConsumables(creditResult.state.consumables).rows,
+      });
+    }
+
+    return json({ ok: false, error: "Fortune spin conflict, please retry." });
   }
 
   if (action === "referrals_status") {

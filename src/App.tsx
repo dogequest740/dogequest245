@@ -44,6 +44,7 @@ import iconBuyGold from './assets/icons/buy-gold.png'
 import iconStarterPack from './assets/icons/starter-pack.png'
 import iconPremium from './assets/icons/premium.png'
 import iconReferrals from './assets/icons/referrals.png'
+import iconFortuneWheel from './assets/icons/fortune-wheel.png'
 import iconWeapon from './assets/icons/armory-weapon.png'
 import iconArmor from './assets/icons/armory-armor.png'
 import iconHead from './assets/icons/armory-head.png'
@@ -327,6 +328,10 @@ type GameSecureResponse = {
   referralEntries?: ReferralEntry[]
   referralPendingKeys?: number
   referralPendingCrystals?: number
+  fortuneFreeSpinAvailable?: boolean
+  fortunePaidSpins?: number
+  fortuneReward?: FortuneReward
+  fortuneUsed?: 'free' | 'paid'
   withdrawal?: WithdrawalRow
   withdrawals?: WithdrawalRow[]
   events?: AdminEventRow[]
@@ -343,6 +348,17 @@ type ReferralEntry = {
   crystalsFromRef: number
   pendingCrystals: number
   pendingKeys: number
+}
+
+type FortuneRewardKind = 'consumable' | 'gold' | 'crystals' | 'keys'
+
+type FortuneReward = {
+  id: string
+  label: string
+  kind: FortuneRewardKind
+  amount: number
+  chance: number
+  consumableType?: ConsumableType | null
 }
 
 type StakeEntry = {
@@ -881,6 +897,28 @@ const PREMIUM_DUNGEON_CRYSTAL_MULTIPLIER = 1.5
 const REFERRAL_LEVEL_TARGET = 15
 const REFERRAL_KEY_BONUS = 3
 const REFERRAL_CRYSTAL_RATE = 0.05
+const FORTUNE_SPIN_PRICES = {
+  1: 0.007,
+  10: 0.06,
+} as const
+type FortunePackId = keyof typeof FORTUNE_SPIN_PRICES
+const FORTUNE_REWARDS: FortuneReward[] = [
+  { id: 'speed_draught', label: 'Swift Draught', kind: 'consumable', consumableType: 'speed', amount: 1, chance: 25 },
+  { id: 'battle_tonic', label: 'Battle Tonic', kind: 'consumable', consumableType: 'attack', amount: 1, chance: 25 },
+  { id: 'energy_tonic', label: 'Energy Tonic', kind: 'consumable', consumableType: 'energy-small', amount: 1, chance: 25 },
+  { id: 'grand_energy_elixir', label: 'Grand Energy Elixir', kind: 'consumable', consumableType: 'energy-full', amount: 1, chance: 10 },
+  { id: 'crystals_100', label: '100 Crystals', kind: 'crystals', amount: 100, chance: 2 },
+  { id: 'crystals_50', label: '50 Crystals', kind: 'crystals', amount: 50, chance: 3 },
+  { id: 'crystals_10', label: '10 Crystals', kind: 'crystals', amount: 10, chance: 5 },
+  { id: 'gold_5000', label: '5000 Gold', kind: 'gold', amount: 5000, chance: 3 },
+  { id: 'gold_10000', label: '10000 Gold', kind: 'gold', amount: 10000, chance: 1 },
+  { id: 'gold_50000', label: '50000 Gold', kind: 'gold', amount: 50000, chance: 0.3 },
+  { id: 'crystals_300', label: '300 Crystals', kind: 'crystals', amount: 300, chance: 0.3 },
+  { id: 'gold_500000', label: '500000 Gold', kind: 'gold', amount: 500000, chance: 0.01 },
+  { id: 'crystals_1000', label: '1000 Crystals', kind: 'crystals', amount: 1000, chance: 0.01 },
+  { id: 'keys_5', label: '5 Keys', kind: 'keys', amount: 5, chance: 0.38 },
+]
+const FORTUNE_WHEEL_SEGMENT_ANGLE = 360 / FORTUNE_REWARDS.length
 
 const MONSTER_HP_TIER_TARGET = 30000
 const MONSTER_HP_TIER_EXCESS = 0.2
@@ -1468,6 +1506,17 @@ const getPremiumDaysLeft = (premiumEndsAt: number, nowMs = Date.now()) => {
   if (!isPremiumActiveAt(premiumEndsAt, nowMs)) return 0
   return Math.max(1, Math.ceil((premiumEndsAt - nowMs) / (24 * 60 * 60 * 1000)))
 }
+const getFortuneRewardById = (id: string) => FORTUNE_REWARDS.find((reward) => reward.id === id) ?? null
+const getFortuneRewardIcon = (reward: FortuneReward) => {
+  if (reward.kind === 'gold') return iconGold
+  if (reward.kind === 'crystals') return iconCrystals
+  if (reward.kind === 'keys') return iconKey
+  if (reward.consumableType === 'speed') return iconSwiftDraught
+  if (reward.consumableType === 'attack') return iconAttackSpeed
+  if (reward.consumableType === 'energy-full') return iconGrandEnergy
+  return iconEnergyTonic
+}
+const formatPercent = (value: number) => `${Number(value.toFixed(value < 1 ? 2 : 1)).toString()}%`
 
 const getXpForLevel = (level: number) =>
   Math.round((XP_BASE + XP_SCALE * Math.pow(level, XP_POWER)) * XP_LEVEL_REQUIREMENT_MULTIPLIER)
@@ -2565,6 +2614,7 @@ function App() {
     | 'starterpack'
     | 'premium'
     | 'referrals'
+    | 'fortune'
     | null
   >(null)
   const [inventoryTab, setInventoryTab] = useState<'equipment' | 'consumables'>('equipment')
@@ -2602,6 +2652,16 @@ function App() {
   const [referralEntries, setReferralEntries] = useState<ReferralEntry[]>([])
   const [referralPendingKeys, setReferralPendingKeys] = useState(0)
   const [referralPendingCrystals, setReferralPendingCrystals] = useState(0)
+  const [fortuneStatusLoading, setFortuneStatusLoading] = useState(false)
+  const [fortuneSpinLoading, setFortuneSpinLoading] = useState(false)
+  const [fortuneBuyLoading, setFortuneBuyLoading] = useState<FortunePackId | null>(null)
+  const [fortuneError, setFortuneError] = useState('')
+  const [fortuneFreeSpinAvailable, setFortuneFreeSpinAvailable] = useState(false)
+  const [fortunePaidSpins, setFortunePaidSpins] = useState(0)
+  const [fortuneWheelRotation, setFortuneWheelRotation] = useState(0)
+  const [fortuneWheelSpinning, setFortuneWheelSpinning] = useState(false)
+  const [fortuneSpinResult, setFortuneSpinResult] = useState<FortuneReward | null>(null)
+  const [fortuneSpinUsed, setFortuneSpinUsed] = useState<'free' | 'paid' | null>(null)
   const [isMobile, setIsMobile] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const gameStateRef = useRef<GameState | null>(null)
@@ -2613,6 +2673,8 @@ function App() {
   const secureSessionInitRef = useRef(false)
   const isNewProfileRef = useRef(false)
   const referralProcessedRef = useRef(false)
+  const fortuneAutoOpenRef = useRef(false)
+  const fortuneSpinTimeoutRef = useRef<number | null>(null)
   const pendingProfileRef = useRef<LoadedProfile | null>(null)
   const spriteCacheRef = useRef<PlayerSpriteMap>({
     knight: null,
@@ -2920,6 +2982,169 @@ function App() {
     applyReferralSummary(result)
   }
 
+  const applyFortuneStatus = (result: GameSecureResponse) => {
+    if (typeof result.fortuneFreeSpinAvailable === 'boolean') {
+      setFortuneFreeSpinAvailable(result.fortuneFreeSpinAvailable)
+    }
+    if (typeof result.fortunePaidSpins === 'number') {
+      setFortunePaidSpins(Math.max(0, Math.floor(result.fortunePaidSpins)))
+    }
+  }
+
+  const loadFortuneStatus = async (interactive = true, silent = false) => {
+    const wallet = publicKey?.toBase58()
+    if (!wallet) {
+      setFortuneFreeSpinAvailable(false)
+      setFortunePaidSpins(0)
+      return
+    }
+    if (!silent) setFortuneStatusLoading(true)
+    if (interactive) setFortuneError('')
+    const result = await callGameSecureAuthed('fortune_status', {}, interactive)
+    if (!result.ok) {
+      if (interactive) {
+        setFortuneError(result.error || 'Failed to load wheel status.')
+      }
+      if (!silent) setFortuneStatusLoading(false)
+      return
+    }
+    applyFortuneStatus(result)
+    if (!silent) setFortuneStatusLoading(false)
+  }
+
+  const buyFortuneSpins = async (spins: FortunePackId) => {
+    if (!publicKey) {
+      setFortuneError('Connect your wallet to buy spins.')
+      return
+    }
+    const price = FORTUNE_SPIN_PRICES[spins]
+    setFortuneBuyLoading(spins)
+    setFortuneError('')
+    try {
+      const lamports = Math.round(price * LAMPORTS_PER_SOL)
+      const balance = await connection.getBalance(publicKey)
+      const feeBuffer = 5000
+      if (balance < lamports + feeBuffer) {
+        setFortuneError(`Not enough SOL. Need ${price} SOL + network fee.`)
+        setFortuneBuyLoading(null)
+        return
+      }
+
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash()
+      const tx = new Transaction({
+        feePayer: publicKey,
+        recentBlockhash: blockhash,
+      }).add(
+        SystemProgram.transfer({
+          fromPubkey: publicKey,
+          toPubkey: GOLD_STORE_WALLET,
+          lamports,
+        }),
+      )
+      const signature = await sendTransaction(tx, connection)
+      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
+
+      const result = await callGameSecureAuthed(
+        'fortune_buy',
+        { spins, txSignature: signature },
+        true,
+      )
+      if (!result.ok) {
+        setFortuneError(`Payment sent (${signature.slice(0, 8)}...), but spin credit failed. Contact support.`)
+        setFortuneBuyLoading(null)
+        return
+      }
+
+      applyFortuneStatus(result)
+      const state = gameStateRef.current
+      if (state) {
+        pushLog(state.eventLog, `Fortune spins purchased: +${spins}.`)
+        syncHud()
+      }
+      void loadFortuneStatus(false, true)
+    } catch (error) {
+      console.warn('Fortune purchase failed', error)
+      const message = error instanceof Error ? error.message : String(error)
+      setFortuneError(`Transaction failed: ${message}`)
+    } finally {
+      setFortuneBuyLoading(null)
+    }
+  }
+
+  const spinFortuneWheel = async () => {
+    if (fortuneWheelSpinning || fortuneSpinLoading) return
+    const state = gameStateRef.current
+    const wallet = publicKey?.toBase58()
+    if (!state || !wallet) {
+      setFortuneError('Connect your wallet to spin.')
+      return
+    }
+
+    setFortuneSpinLoading(true)
+    setFortuneError('')
+    try {
+      const result = await callGameSecureAuthed('fortune_spin', {}, true)
+      if (!result.ok || !result.fortuneReward) {
+        setFortuneError(result.error || 'Failed to spin wheel.')
+        return
+      }
+
+      applyFortuneStatus(result)
+      state.tickets = Math.max(0, Math.floor(Number(result.tickets ?? state.tickets)))
+      state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
+      state.crystals = Math.max(0, Math.floor(Number(result.crystals ?? state.crystals)))
+      state.crystalsEarned = Math.max(0, Math.floor(Number(result.crystalsEarned ?? state.crystalsEarned)))
+      applyServerConsumables(state, result.consumables)
+
+      const rewardFromServer = result.fortuneReward
+      const rewardDef = getFortuneRewardById(String(rewardFromServer.id))
+      const reward: FortuneReward = rewardDef
+        ? { ...rewardDef }
+        : {
+            id: String(rewardFromServer.id ?? 'unknown'),
+            label: String(rewardFromServer.label ?? 'Reward'),
+            kind: (rewardFromServer.kind as FortuneRewardKind) ?? 'gold',
+            amount: Math.max(0, Math.floor(Number(rewardFromServer.amount ?? 0))),
+            chance: Number(rewardFromServer.chance ?? 0),
+            consumableType: rewardFromServer.consumableType ?? null,
+          }
+
+      setFortuneSpinResult(null)
+      setFortuneSpinUsed(result.fortuneUsed ?? null)
+
+      const rewardIndex = Math.max(0, FORTUNE_REWARDS.findIndex((entry) => entry.id === reward.id))
+      const targetBase = -((rewardIndex + 0.5) * FORTUNE_WHEEL_SEGMENT_ANGLE)
+      const jitter = (Math.random() - 0.5) * FORTUNE_WHEEL_SEGMENT_ANGLE * 0.54
+      const targetAngle = targetBase + jitter
+      const currentNorm = ((fortuneWheelRotation % 360) + 360) % 360
+      const targetNorm = ((targetAngle % 360) + 360) % 360
+      let delta = targetNorm - currentNorm
+      if (delta < 0) delta += 360
+      const nextRotation = fortuneWheelRotation + 360 * 6 + delta
+
+      if (fortuneSpinTimeoutRef.current) {
+        window.clearTimeout(fortuneSpinTimeoutRef.current)
+        fortuneSpinTimeoutRef.current = null
+      }
+
+      setFortuneWheelSpinning(true)
+      setFortuneWheelRotation(nextRotation)
+      fortuneSpinTimeoutRef.current = window.setTimeout(() => {
+        setFortuneWheelSpinning(false)
+        setFortuneSpinResult(reward)
+        pushLog(state.eventLog, `Fortune reward: ${reward.label}.`)
+        syncHud()
+        fortuneSpinTimeoutRef.current = null
+      }, 5200)
+    } catch (error) {
+      console.warn('Fortune spin failed', error)
+      const message = error instanceof Error ? error.message : String(error)
+      setFortuneError(`Spin failed: ${message}`)
+    } finally {
+      setFortuneSpinLoading(false)
+    }
+  }
+
   useEffect(() => {
     const detectMobile = () => {
       const ua = navigator.userAgent || ''
@@ -3133,11 +3358,22 @@ function App() {
       secureSessionInitRef.current = false
       isNewProfileRef.current = false
       referralProcessedRef.current = false
+      fortuneAutoOpenRef.current = false
+      if (fortuneSpinTimeoutRef.current) {
+        window.clearTimeout(fortuneSpinTimeoutRef.current)
+        fortuneSpinTimeoutRef.current = null
+      }
       pendingProfileRef.current = null
       setReferralEntries([])
       setReferralPendingKeys(0)
       setReferralPendingCrystals(0)
       setReferralError('')
+      setFortuneError('')
+      setFortuneFreeSpinAvailable(false)
+      setFortunePaidSpins(0)
+      setFortuneSpinResult(null)
+      setFortuneSpinUsed(null)
+      setFortuneWheelSpinning(false)
       setSecurityAuthError('')
       setStage('auth')
       return () => {
@@ -3152,6 +3388,7 @@ function App() {
     if (!wallet || !supabase) {
       isNewProfileRef.current = false
       referralProcessedRef.current = false
+      fortuneAutoOpenRef.current = false
       setSecurityAuthError('')
       setStage('select')
       return () => {
@@ -3322,6 +3559,23 @@ function App() {
     return () => window.clearInterval(interval)
   }, [stage, publicKey, connected])
 
+  useEffect(() => {
+    if (stage !== 'game') return
+    void loadFortuneStatus(false, true)
+    if (fortuneAutoOpenRef.current) return
+    fortuneAutoOpenRef.current = true
+    setActivePanel('fortune')
+  }, [stage, publicKey])
+
+  useEffect(() => {
+    return () => {
+      if (fortuneSpinTimeoutRef.current) {
+        window.clearTimeout(fortuneSpinTimeoutRef.current)
+        fortuneSpinTimeoutRef.current = null
+      }
+    }
+  }, [])
+
   const syncHud = () => {
     const state = gameStateRef.current
     if (!state) return
@@ -3357,6 +3611,12 @@ function App() {
       setReferralError('')
       setReferralCopied(false)
       setReferralClaimLoading(false)
+    }
+    if (activePanel !== 'fortune') {
+      setFortuneError('')
+      setFortuneStatusLoading(false)
+      setFortuneSpinLoading(false)
+      setFortuneBuyLoading(null)
     }
   }, [activePanel])
 
@@ -3417,13 +3677,24 @@ function App() {
   }, [activePanel, publicKey, hud?.level])
 
   useEffect(() => {
+    if (activePanel !== 'fortune') return
+    const wallet = publicKey?.toBase58()
+    if (!wallet) {
+      setFortuneFreeSpinAvailable(false)
+      setFortunePaidSpins(0)
+      return
+    }
+    void loadFortuneStatus(true)
+  }, [activePanel, publicKey])
+
+  useEffect(() => {
     if (activePanel !== 'admin') return
     if (!isAdmin) return
     void loadAdminData()
   }, [activePanel, isAdmin])
 
   useEffect(() => {
-    if (activePanel !== 'buygold' && activePanel !== 'premium' && activePanel !== 'starterpack') return
+    if (activePanel !== 'buygold' && activePanel !== 'premium' && activePanel !== 'starterpack' && activePanel !== 'fortune') return
     if (!publicKey) {
       setSolBalance(0)
       return
@@ -4340,6 +4611,15 @@ function App() {
   const premiumActive = Boolean(hud && isPremiumActiveAt(hud.premiumEndsAt))
   const premiumDaysLeft = hud ? getPremiumDaysLeft(hud.premiumEndsAt) : 0
   const premiumClaimReady = Boolean(hud && premiumActive && hud.premiumClaimDay !== currentDayKey)
+  const fortuneCanSpin = fortuneFreeSpinAvailable || fortunePaidSpins > 0
+  const fortuneWheelGradient = useMemo(() => {
+    return FORTUNE_REWARDS.map((_, index) => {
+      const start = (index / FORTUNE_REWARDS.length) * 100
+      const end = ((index + 1) / FORTUNE_REWARDS.length) * 100
+      const color = index % 2 === 0 ? '#f0b44f' : '#c67a27'
+      return `${color} ${start}% ${end}%`
+    }).join(', ')
+  }, [])
 
   const getQuestProgressValue = (quest: QuestDefinition) => {
     if (!hud) return 0
@@ -4957,6 +5237,10 @@ function App() {
                       <img className="icon-img" src={iconShop} alt="" />
                       Shop
                     </button>
+                    <button type="button" className="menu-big" onClick={() => setActivePanel('fortune')}>
+                      <img className="icon-img" src={iconFortuneWheel} alt="" />
+                      Fortune Wheel
+                    </button>
                     <button type="button" className="menu-big" onClick={() => setActivePanel('quests')}>
                       <img className="icon-img" src={iconQuests} alt="" />
                       Quests
@@ -5053,6 +5337,10 @@ function App() {
                   <button type="button" onClick={() => setActivePanel('shop')}>
                     <img className="icon-img" src={iconShop} alt="" />
                     <span>Shop</span>
+                  </button>
+                  <button type="button" onClick={() => setActivePanel('fortune')}>
+                    <img className="icon-img" src={iconFortuneWheel} alt="" />
+                    <span>Fortune</span>
                   </button>
                   <button type="button" onClick={() => setActivePanel('quests')}>
                     <img className="icon-img" src={iconQuests} alt="" />
@@ -5697,6 +5985,119 @@ function App() {
                 ))}
               </div>
               {referralError && <div className="withdraw-error">{referralError}</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activePanel === 'fortune' && hud && (
+        <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Wheel of Fortune</h3>
+              <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
+                Close
+              </button>
+            </div>
+            <div className="withdraw-body fortune-body">
+              <div className="starterpack-hero fortune-hero">
+                <img className="starterpack-image fortune-image" src={iconFortuneWheel} alt="" />
+                <div className="starterpack-meta">
+                  <div className="starterpack-title">Wheel of Fortune</div>
+                  <div className="withdraw-note">1 free spin daily at 00:00 UTC. Extra spins are bought with SOL.</div>
+                </div>
+              </div>
+
+              <div className="withdraw-info fortune-summary">
+                <span>
+                  Free spin:{' '}
+                  <strong className={fortuneFreeSpinAvailable ? 'fortune-state-ok' : 'fortune-state-off'}>
+                    {fortuneFreeSpinAvailable ? 'Available' : 'Used today'}
+                  </strong>
+                </span>
+                <span>
+                  Paid spins: <strong>{formatNumber(fortunePaidSpins)}</strong>
+                </span>
+                <span>
+                  Wallet: <strong>{solBalanceLoading ? 'Loading...' : `${solBalance.toFixed(4)} SOL`}</strong>
+                </span>
+              </div>
+
+              <div className="fortune-wheel-stage">
+                <div className="fortune-wheel-pointer" />
+                <div
+                  className={`fortune-wheel ${fortuneWheelSpinning ? 'spinning' : ''}`}
+                  style={{ transform: `rotate(${fortuneWheelRotation}deg)` }}
+                >
+                  <div
+                    className="fortune-wheel-face"
+                    style={{ backgroundImage: `conic-gradient(from -90deg, ${fortuneWheelGradient})` }}
+                  />
+                  <div
+                    className="fortune-wheel-lines"
+                    style={{
+                      backgroundImage:
+                        `repeating-conic-gradient(from -90deg, transparent 0deg ${FORTUNE_WHEEL_SEGMENT_ANGLE - 1}deg, rgba(44, 20, 0, 0.9) ${FORTUNE_WHEEL_SEGMENT_ANGLE - 1}deg ${FORTUNE_WHEEL_SEGMENT_ANGLE}deg)`,
+                    }}
+                  />
+                  {FORTUNE_REWARDS.map((reward, index) => {
+                    const angle = index * FORTUNE_WHEEL_SEGMENT_ANGLE + FORTUNE_WHEEL_SEGMENT_ANGLE / 2
+                    return (
+                      <div key={reward.id} className="fortune-wheel-icon" style={{ transform: `rotate(${angle}deg)` }}>
+                        <img
+                          src={getFortuneRewardIcon(reward)}
+                          alt=""
+                          style={{ transform: `rotate(${-angle}deg)` }}
+                        />
+                      </div>
+                    )
+                  })}
+                  <div className="fortune-wheel-center">Spin</div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="withdraw-submit fortune-spin-submit"
+                disabled={fortuneSpinLoading || fortuneWheelSpinning || fortuneStatusLoading || !fortuneCanSpin}
+                onClick={spinFortuneWheel}
+              >
+                {fortuneSpinLoading || fortuneWheelSpinning
+                  ? 'Spinning...'
+                  : fortuneCanSpin
+                    ? 'Spin the wheel'
+                    : 'No spins available'}
+              </button>
+
+              <div className="fortune-buy-row">
+                <button type="button" disabled={fortuneBuyLoading !== null} onClick={() => buyFortuneSpins(1)}>
+                  {fortuneBuyLoading === 1 ? 'Processing...' : `Buy 1 spin (${FORTUNE_SPIN_PRICES[1]} SOL)`}
+                </button>
+                <button type="button" disabled={fortuneBuyLoading !== null} onClick={() => buyFortuneSpins(10)}>
+                  {fortuneBuyLoading === 10 ? 'Processing...' : `Buy 10 spins (${FORTUNE_SPIN_PRICES[10]} SOL)`}
+                </button>
+              </div>
+
+              {fortuneSpinResult && (
+                <div className="withdraw-info fortune-result">
+                  <img className="icon-img" src={getFortuneRewardIcon(fortuneSpinResult)} alt="" />
+                  <span>{fortuneSpinUsed === 'free' ? 'Free spin reward:' : 'Spin reward:'}</span>
+                  <strong>{fortuneSpinResult.label}</strong>
+                </div>
+              )}
+
+              <div className="fortune-rewards">
+                {FORTUNE_REWARDS.map((reward) => (
+                  <div key={reward.id} className="fortune-reward-row">
+                    <span className="fortune-reward-main">
+                      <img className="icon-img small" src={getFortuneRewardIcon(reward)} alt="" />
+                      {reward.label}
+                    </span>
+                    <strong>{formatPercent(reward.chance)}</strong>
+                  </div>
+                ))}
+              </div>
+              {fortuneError && <div className="withdraw-error">{fortuneError}</div>}
             </div>
           </div>
         </div>
