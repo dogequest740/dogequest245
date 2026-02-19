@@ -3351,6 +3351,23 @@ button.ghost {
   box-shadow: inset 0 0 12px rgba(120, 155, 255, 0.08);
 }
 
+.dungeon-meta .dungeon-meta-keys {
+  display: grid;
+  gap: 3px;
+  align-items: flex-start;
+}
+
+.dungeon-meta .dungeon-keys-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dungeon-meta .dungeon-reset-timer {
+  font-size: 11px;
+  color: rgba(231, 240, 245, 0.72);
+}
+
 .dungeon-meta .meta-value {
   font-size: 16px;
   font-weight: 700;

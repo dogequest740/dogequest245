@@ -1488,6 +1488,19 @@ const shadeColor = (hex: string, amount: number) => {
 }
 
 const getDayKey = () => new Date().toISOString().slice(0, 10)
+const getSecondsToNextUtcDay = (nowMs = Date.now()) => {
+  const now = new Date(nowMs)
+  const nextUtcMidnightMs = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() + 1,
+    0,
+    0,
+    0,
+    0,
+  )
+  return Math.max(0, Math.ceil((nextUtcMidnightMs - nowMs) / 1000))
+}
 const bytesToBase64 = (bytes: Uint8Array) => {
   let binary = ''
   for (const value of bytes) {
@@ -4619,6 +4632,7 @@ function App() {
 
   const levelUpNotice = hud?.levelUpNotice ?? null
   const currentDayKey = getDayKey()
+  const dailyResetSeconds = getSecondsToNextUtcDay()
   const premiumActive = Boolean(hud && isPremiumActiveAt(hud.premiumEndsAt))
   const premiumDaysLeft = hud ? getPremiumDaysLeft(hud.premiumEndsAt) : 0
   const premiumClaimReady = Boolean(hud && premiumActive && hud.premiumClaimDay !== currentDayKey)
@@ -5633,10 +5647,13 @@ function App() {
                 <span className="icon icon-tier" aria-hidden />
                 Tier Score: <span className="meta-value">{hud.tierScore}</span>
               </div>
-              <div>
-                <img className="icon-img" src={iconKey} alt="" />
-                Keys: <span className="meta-value">{hud.tickets}</span>
-                <span className="meta-muted">/{SHOP_TICKET_CAP}</span>
+              <div className="dungeon-meta-keys">
+                <div className="dungeon-keys-row">
+                  <img className="icon-img" src={iconKey} alt="" />
+                  Keys: <span className="meta-value">{hud.tickets}</span>
+                  <span className="meta-muted">/{SHOP_TICKET_CAP}</span>
+                </div>
+                <span className="meta-muted dungeon-reset-timer">Next +3 keys in {formatLongTimer(dailyResetSeconds)}</span>
               </div>
             </div>
             <div className="dungeon-list">
@@ -6025,6 +6042,10 @@ function App() {
                   <strong className={fortuneFreeSpinAvailable ? 'fortune-state-ok' : 'fortune-state-off'}>
                     {fortuneFreeSpinAvailable ? 'Available' : 'Used today'}
                   </strong>
+                </span>
+                <span>
+                  {fortuneFreeSpinAvailable ? 'Next reset in' : 'Restores in'}{' '}
+                  <strong>{formatLongTimer(dailyResetSeconds)}</strong>
                 </span>
                 <span>
                   Paid spins: <strong>{formatNumber(fortunePaidSpins)}</strong>
