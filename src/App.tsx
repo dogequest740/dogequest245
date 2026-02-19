@@ -1516,7 +1516,16 @@ const getFortuneRewardIcon = (reward: FortuneReward) => {
   if (reward.consumableType === 'energy-full') return iconGrandEnergy
   return iconEnergyTonic
 }
-const formatPercent = (value: number) => `${Number(value.toFixed(value < 1 ? 2 : 1)).toString()}%`
+const formatFortuneAmountCompact = (value: number) => {
+  const amount = Math.max(0, Math.floor(value))
+  if (amount >= 1000) {
+    const compact = amount / 1000
+    const rounded = Number(compact.toFixed(compact >= 100 ? 0 : compact >= 10 ? 1 : 2))
+    return `${rounded}k`
+  }
+  return String(amount)
+}
+const getFortuneRewardAmountLabel = (reward: FortuneReward) => `x${formatFortuneAmountCompact(reward.amount)}`
 
 const getXpForLevel = (level: number) =>
   Math.round((XP_BASE + XP_SCALE * Math.pow(level, XP_POWER)) * XP_LEVEL_REQUIREMENT_MULTIPLIER)
@@ -6041,14 +6050,20 @@ function App() {
                     }}
                   />
                   {FORTUNE_REWARDS.map((reward, index) => {
-                    const angle = index * FORTUNE_WHEEL_SEGMENT_ANGLE + FORTUNE_WHEEL_SEGMENT_ANGLE / 2
+                    const angle = index * FORTUNE_WHEEL_SEGMENT_ANGLE + FORTUNE_WHEEL_SEGMENT_ANGLE / 2 - 90
                     return (
-                      <div key={reward.id} className="fortune-wheel-icon" style={{ transform: `rotate(${angle}deg)` }}>
-                        <img
-                          src={getFortuneRewardIcon(reward)}
-                          alt=""
-                          style={{ transform: `rotate(${-angle}deg)` }}
-                        />
+                      <div
+                        key={reward.id}
+                        className="fortune-wheel-segment-content"
+                        style={
+                          {
+                            ['--fortune-angle' as never]: `${angle}deg`,
+                            ['--fortune-angle-neg' as never]: `${-angle}deg`,
+                          } as Record<string, string>
+                        }
+                      >
+                        <img className="fortune-segment-icon" src={getFortuneRewardIcon(reward)} alt="" />
+                        <span className="fortune-segment-qty">{getFortuneRewardAmountLabel(reward)}</span>
                       </div>
                     )
                   })}
@@ -6070,11 +6085,31 @@ function App() {
               </button>
 
               <div className="fortune-buy-row">
-                <button type="button" disabled={fortuneBuyLoading !== null} onClick={() => buyFortuneSpins(1)}>
-                  {fortuneBuyLoading === 1 ? 'Processing...' : `Buy 1 spin (${FORTUNE_SPIN_PRICES[1]} SOL)`}
+                <button type="button" className="fortune-buy-btn" disabled={fortuneBuyLoading !== null} onClick={() => buyFortuneSpins(1)}>
+                  {fortuneBuyLoading === 1 ? (
+                    'Processing...'
+                  ) : (
+                    <>
+                      <span className="fortune-buy-title">Buy 1 Spin</span>
+                      <span className="fortune-buy-price">
+                        <img className="icon-img tiny" src={iconSolana} alt="" />
+                        {FORTUNE_SPIN_PRICES[1]} SOL
+                      </span>
+                    </>
+                  )}
                 </button>
-                <button type="button" disabled={fortuneBuyLoading !== null} onClick={() => buyFortuneSpins(10)}>
-                  {fortuneBuyLoading === 10 ? 'Processing...' : `Buy 10 spins (${FORTUNE_SPIN_PRICES[10]} SOL)`}
+                <button type="button" className="fortune-buy-btn" disabled={fortuneBuyLoading !== null} onClick={() => buyFortuneSpins(10)}>
+                  {fortuneBuyLoading === 10 ? (
+                    'Processing...'
+                  ) : (
+                    <>
+                      <span className="fortune-buy-title">Buy 10 Spins</span>
+                      <span className="fortune-buy-price">
+                        <img className="icon-img tiny" src={iconSolana} alt="" />
+                        {FORTUNE_SPIN_PRICES[10]} SOL
+                      </span>
+                    </>
+                  )}
                 </button>
               </div>
 
@@ -6085,18 +6120,6 @@ function App() {
                   <strong>{fortuneSpinResult.label}</strong>
                 </div>
               )}
-
-              <div className="fortune-rewards">
-                {FORTUNE_REWARDS.map((reward) => (
-                  <div key={reward.id} className="fortune-reward-row">
-                    <span className="fortune-reward-main">
-                      <img className="icon-img small" src={getFortuneRewardIcon(reward)} alt="" />
-                      {reward.label}
-                    </span>
-                    <strong>{formatPercent(reward.chance)}</strong>
-                  </div>
-                ))}
-              </div>
               {fortuneError && <div className="withdraw-error">{fortuneError}</div>}
             </div>
           </div>
