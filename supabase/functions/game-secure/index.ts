@@ -24,7 +24,7 @@ const PREMIUM_DAILY_SMALL_POTIONS = 5;
 const PREMIUM_DAILY_BIG_POTIONS = 3;
 const BLOCKED_ERROR_MESSAGE = "You have been banned for cheating.";
 const FORTUNE_SPIN_PACKS = [1, 10] as const;
-const ENERGY_REGEN_SECONDS = 240;
+const ENERGY_REGEN_SECONDS = 420;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",

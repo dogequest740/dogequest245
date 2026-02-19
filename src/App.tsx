@@ -627,7 +627,7 @@ const CHARACTER_CLASSES: CharacterClass[] = [
 ]
 
 const ENERGY_MAX = 50
-const ENERGY_REGEN_SECONDS = 240
+const ENERGY_REGEN_SECONDS = 420
 const TICKETS_MAX = 3
 const SHOP_TICKET_CAP = 30
 const MAX_LEVEL = 255
