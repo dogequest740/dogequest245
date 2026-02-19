@@ -4,7 +4,7 @@ import nacl from "npm:tweetnacl@1.0.3";
 import bs58 from "npm:bs58@6.0.0";
 import { PublicKey } from "npm:@solana/web3.js@1.98.4";
 
-const TICKETS_MAX = 10;
+const TICKETS_MAX = 3;
 const SHOP_TICKET_CAP = 30;
 const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const CHALLENGE_TTL_SECONDS = 5 * 60;

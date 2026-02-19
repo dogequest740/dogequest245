@@ -610,12 +610,16 @@ const CHARACTER_CLASSES: CharacterClass[] = [
 
 const ENERGY_MAX = 50
 const ENERGY_REGEN_SECONDS = 240
-const TICKETS_MAX = 10
+const TICKETS_MAX = 3
 const SHOP_TICKET_CAP = 30
 const MAX_LEVEL = 255
 const XP_BASE = 200
 const XP_SCALE = 3
 const XP_POWER = 1.2
+const XP_LEVEL_REQUIREMENT_MULTIPLIER = 1.4
+const XP_MOB_MULTIPLIER = 1.4
+const ITEM_DROP_CHANCE = 0.5
+const LOOT_SELL_PRICE_MULTIPLIER = 0.6
 
 const EQUIPMENT_SLOTS: { id: EquipmentSlot; label: string }[] = [
   { id: 'weapon', label: 'Weapon' },
@@ -844,8 +848,9 @@ const WORLD_BOSS_DURATION = 12 * 60 * 60
 const WORLD_BOSS_REWARD = 500
 const WITHDRAW_RATE = 15000
 const WITHDRAW_MIN = 2000
-const STAKE_BONUS = 0.1
+const STAKE_BONUS = 0.05
 const STAKE_MIN = 50
+const STAKE_LOCK_HOURS = 24
 const GOLD_STORE_WALLET = new PublicKey('9a5GXRjX6HKh9Yjc9d7gp9RFmuRvMQAcV1VJ9WV7LU8c')
 const GOLD_PACKAGES = [
   { id: 'gold-50k', gold: 50000, sol: 0.05, image: goldSmallImage },
@@ -967,7 +972,7 @@ const applyPersistedState = (state: GameState, saved: PersistedState, savedUpdat
   if (savedPlayer) {
     player.level = clamp(savedPlayer.level ?? player.level, 1, MAX_LEVEL)
     player.xp = Math.max(0, savedPlayer.xp ?? player.xp)
-    player.xpNext = Math.max(1, savedPlayer.xpNext ?? getXpForLevel(player.level))
+    player.xpNext = Math.max(1, getXpForLevel(player.level), savedPlayer.xpNext ?? 0)
     player.baseAttack = savedPlayer.baseAttack ?? player.baseAttack
     player.baseAttackSpeed = savedPlayer.baseAttackSpeed ?? player.baseAttackSpeed
     player.baseSpeed = savedPlayer.baseSpeed ?? player.baseSpeed
@@ -1464,7 +1469,8 @@ const getPremiumDaysLeft = (premiumEndsAt: number, nowMs = Date.now()) => {
   return Math.max(1, Math.ceil((premiumEndsAt - nowMs) / (24 * 60 * 60 * 1000)))
 }
 
-const getXpForLevel = (level: number) => Math.round(XP_BASE + XP_SCALE * Math.pow(level, XP_POWER))
+const getXpForLevel = (level: number) =>
+  Math.round((XP_BASE + XP_SCALE * Math.pow(level, XP_POWER)) * XP_LEVEL_REQUIREMENT_MULTIPLIER)
 
 const getRarityWeights = (level: number) => {
   const t = clamp((level - 1) / (MAX_LEVEL - 1), 0, 1)
@@ -1540,6 +1546,9 @@ const computeSellValue = (level: number, rarity: EquipmentRarity) => {
   const levelBonus = (level - 1) * 0.25
   return Math.round((rarity.sellValue * levelMultiplier + levelBonus) * 0.6)
 }
+
+const getLootSellPrice = (baseSellValue: number) =>
+  Math.max(1, Math.round(Math.max(0, baseSellValue) * LOOT_SELL_PRICE_MULTIPLIER))
 
 const rollRarity = (level: number) => {
   const adjusted = getRarityWeights(level)
@@ -2219,7 +2228,8 @@ const updateGame = (state: GameState, dt: number) => {
       if (target.hp <= 0) {
         state.monsterKills += 1
         if (player.level < MAX_LEVEL) {
-          const baseXpGain = Math.max(1, Math.round((target.xp + randomInt(2, 8)) / 3))
+          const rawXpGain = Math.max(1, Math.round((target.xp + randomInt(2, 8)) / 3))
+          const baseXpGain = Math.max(1, Math.round(rawXpGain * XP_MOB_MULTIPLIER))
           const xpGain = isPremiumActiveAt(state.premiumEndsAt)
             ? Math.max(1, Math.round(baseXpGain * PREMIUM_XP_MULTIPLIER))
             : baseXpGain
@@ -2232,16 +2242,18 @@ const updateGame = (state: GameState, dt: number) => {
         if (state.energy === 0) {
           pushLog(state.eventLog, 'Energy depleted. Rest to recharge.')
         }
-        const newItem = createEquipmentItem(++state.itemId, player.level)
-        state.pendingLoot = newItem
-        const loot: LootEntry = {
-          id: ++state.lootId,
-          name: `${newItem.name} (${EQUIPMENT_SLOTS.find((slot) => slot.id === newItem.slot)?.label ?? newItem.slot})`,
-          quality: newItem.rarity,
-          color: newItem.color,
+        if (Math.random() <= ITEM_DROP_CHANCE) {
+          const newItem = createEquipmentItem(++state.itemId, player.level)
+          state.pendingLoot = newItem
+          const loot: LootEntry = {
+            id: ++state.lootId,
+            name: `${newItem.name} (${EQUIPMENT_SLOTS.find((slot) => slot.id === newItem.slot)?.label ?? newItem.slot})`,
+            quality: newItem.rarity,
+            color: newItem.color,
+          }
+          pushLoot(state.lootLog, loot)
+          addEffect(state, { kind: 'text', x: target.x, y: target.y - 18, t: 0, text: `${newItem.rarity}!`, color: newItem.color })
         }
-        pushLoot(state.lootLog, loot)
-        addEffect(state, { kind: 'text', x: target.x, y: target.y - 18, t: 0, text: `${newItem.rarity}!`, color: newItem.color })
 
         const levelUps: number[] = []
         while (player.level < MAX_LEVEL && player.xp >= player.xpNext) {
@@ -4272,13 +4284,14 @@ function App() {
   const sellItem = (item: EquipmentItem, source: 'loot' | 'inventory') => {
     const state = gameStateRef.current
     if (!state) return
-    state.gold += item.sellValue
+    const sellValue = getLootSellPrice(item.sellValue)
+    state.gold += sellValue
     if (source === 'loot') {
       state.pendingLoot = null
     } else {
       state.inventory = state.inventory.filter((entry) => entry.id !== item.id)
     }
-    pushLog(state.eventLog, `Sold ${item.rarity} ${item.name} for ${item.sellValue} gold.`)
+    pushLog(state.eventLog, `Sold ${item.rarity} ${item.name} for ${sellValue} gold.`)
     syncHud()
     void saveGameState()
   }
@@ -5161,7 +5174,7 @@ function App() {
               </button>
               <button type="button" className="ghost" onClick={() => sellItem(hud.pendingLoot!, 'loot')}>
                 <img className="icon-img small" src={iconGold} alt="" />
-                Sell for {hud.pendingLoot.sellValue}
+                Sell for {getLootSellPrice(hud.pendingLoot.sellValue)}
               </button>
             </div>
           </div>
@@ -5268,7 +5281,7 @@ function App() {
                               </button>
                               <button type="button" className="ghost" onClick={() => sellItem(item, 'inventory')}>
                                 <img className="icon-img small" src={iconGold} alt="" />
-                                Sell {item.sellValue}
+                                Sell {getLootSellPrice(item.sellValue)}
                               </button>
                             </div>
                           </div>
@@ -5824,7 +5837,7 @@ function App() {
                       <img className="icon-img small" src={iconCrystals} alt="" />
                       Reward
                     </span>
-                    <strong>+{Math.round(STAKE_BONUS * 100)}% in 12 hours</strong>
+                    <strong>+{Math.round(STAKE_BONUS * 100)}% in {STAKE_LOCK_HOURS} hours</strong>
                   </div>
                   <div className="withdraw-info">
                     <span className="withdraw-info-label">
@@ -5871,7 +5884,7 @@ function App() {
                   <button type="button" className="withdraw-submit" onClick={startStake}>
                     Start staking
                   </button>
-                  <div className="withdraw-note">Staked crystals are locked for 12 hours.</div>
+                  <div className="withdraw-note">Staked crystals are locked for {STAKE_LOCK_HOURS} hours.</div>
                 </>
               )}
 
