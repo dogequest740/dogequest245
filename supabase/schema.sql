@@ -143,13 +143,13 @@ create index if not exists wallet_sessions_expires_at_idx on public.wallet_sessi
 
 create table if not exists public.dungeon_state (
   wallet text primary key,
-  tickets int not null default 3,
+  tickets int not null default 5,
   ticket_day text not null,
   dungeon_runs bigint not null default 0,
   updated_at timestamptz default now()
 );
 
-alter table public.dungeon_state alter column tickets set default 3;
+alter table public.dungeon_state alter column tickets set default 5;
 
 create table if not exists public.fortune_state (
   wallet text primary key,

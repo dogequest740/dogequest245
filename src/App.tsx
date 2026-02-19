@@ -628,7 +628,7 @@ const CHARACTER_CLASSES: CharacterClass[] = [
 
 const ENERGY_MAX = 50
 const ENERGY_REGEN_SECONDS = 420
-const TICKETS_MAX = 3
+const TICKETS_MAX = 5
 const SHOP_TICKET_CAP = 30
 const MAX_LEVEL = 255
 const XP_BASE = 200
@@ -5681,7 +5681,7 @@ function App() {
                   Keys: <span className="meta-value">{hud.tickets}</span>
                   <span className="meta-muted">/{SHOP_TICKET_CAP}</span>
                 </div>
-                <span className="meta-muted dungeon-reset-timer">Next +3 keys in {formatLongTimer(dailyResetSeconds)}</span>
+                <span className="meta-muted dungeon-reset-timer">Next +5 keys in {formatLongTimer(dailyResetSeconds)}</span>
               </div>
             </div>
             <div className="dungeon-list">
