@@ -311,6 +311,8 @@ type GameSecureResponse = {
   ok: boolean
   error?: string
   savedAt?: string
+  energy?: number
+  energyTimer?: number
   remainingCrystals?: number
   tickets?: number
   gold?: number
@@ -2930,6 +2932,28 @@ function App() {
     return result
   }
 
+  const refreshOfflineEnergyFromServer = async (interactive = false) => {
+    const state = gameStateRef.current
+    const wallet = publicKey?.toBase58()
+    if (!state || !wallet) return
+
+    const result = await callGameSecureAuthed('profile_refresh_energy', {}, interactive)
+    if (!result.ok) {
+      if (result.error && result.error !== 'Wallet signature required for secure actions.') {
+        console.warn('Server energy refresh skipped:', result.error)
+      }
+      return
+    }
+
+    if (typeof result.energy === 'number') {
+      state.energy = clamp(Math.floor(result.energy), 0, state.energyMax)
+    }
+    if (typeof result.energyTimer === 'number') {
+      state.energyTimer = clamp(Math.floor(result.energyTimer), 1, ENERGY_REGEN_SECONDS)
+    }
+    syncHud()
+  }
+
   const syncDungeonStateFromServer = async () => {
     const state = gameStateRef.current
     if (!state || !connected || !publicKey || !supabase) return
@@ -3447,7 +3471,11 @@ function App() {
     if (!connected || !publicKey || !signMessage) return
     if (secureSessionInitRef.current) return
     secureSessionInitRef.current = true
-    void ensureDungeonSession(true)
+    void (async () => {
+      const token = await ensureDungeonSession(true)
+      if (!token) return
+      await refreshOfflineEnergyFromServer(false)
+    })()
   }, [stage, connected, publicKey, signMessage])
 
   useEffect(() => {

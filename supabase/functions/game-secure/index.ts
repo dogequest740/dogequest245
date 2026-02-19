@@ -24,6 +24,7 @@ const PREMIUM_DAILY_SMALL_POTIONS = 5;
 const PREMIUM_DAILY_BIG_POTIONS = 3;
 const BLOCKED_ERROR_MESSAGE = "You have been banned for cheating.";
 const FORTUNE_SPIN_PACKS = [1, 10] as const;
+const ENERGY_REGEN_SECONDS = 240;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -304,6 +305,11 @@ const normalizeState = (raw: unknown) => {
   state.dungeonRuns = Math.max(0, asInt(state.dungeonRuns, 0));
   state.energy = Math.max(0, asInt(state.energy, 0));
   state.energyMax = Math.max(1, asInt(state.energyMax, 50));
+  state.energyTimer = clampInt(state.energyTimer, 1, ENERGY_REGEN_SECONDS);
+  if (state.energy >= state.energyMax) {
+    state.energy = state.energyMax;
+    state.energyTimer = ENERGY_REGEN_SECONDS;
+  }
   state.tickets = clampInt(state.tickets, 0, 30);
   state.starterPackPurchased = Boolean(state.starterPackPurchased);
   state.premiumEndsAt = Math.max(0, asInt(state.premiumEndsAt, 0));
@@ -419,6 +425,59 @@ const validateStateTransition = (
   }
 
   return null;
+};
+
+const applyOfflineEnergyRegen = (
+  state: Record<string, unknown>,
+  elapsedSecRaw: number,
+) => {
+  const energyMax = Math.max(1, asInt(state.energyMax, 50));
+  let energy = clampInt(state.energy, 0, energyMax);
+  let timer = clampInt(state.energyTimer, 1, ENERGY_REGEN_SECONDS);
+  const elapsedSec = Math.max(0, Math.floor(elapsedSecRaw));
+
+  const prevEnergy = energy;
+  const prevTimer = timer;
+
+  if (energy >= energyMax) {
+    state.energy = energyMax;
+    state.energyTimer = ENERGY_REGEN_SECONDS;
+    return prevEnergy !== energyMax || prevTimer !== ENERGY_REGEN_SECONDS;
+  }
+  if (elapsedSec <= 0) {
+    state.energy = energy;
+    state.energyTimer = timer;
+    return false;
+  }
+
+  let remaining = elapsedSec;
+  if (remaining < timer) {
+    timer -= remaining;
+    remaining = 0;
+  } else {
+    remaining -= timer;
+    energy += 1;
+    timer = ENERGY_REGEN_SECONDS;
+  }
+
+  if (energy >= energyMax) {
+    energy = energyMax;
+    timer = ENERGY_REGEN_SECONDS;
+    remaining = 0;
+  }
+
+  if (remaining > 0 && energy < energyMax) {
+    const passiveTicks = Math.floor(remaining / ENERGY_REGEN_SECONDS);
+    if (passiveTicks > 0) {
+      energy = Math.min(energyMax, energy + passiveTicks);
+      remaining -= passiveTicks * ENERGY_REGEN_SECONDS;
+    }
+    timer = energy >= energyMax ? ENERGY_REGEN_SECONDS : Math.max(1, ENERGY_REGEN_SECONDS - remaining);
+  }
+
+  state.energy = clampInt(energy, 0, energyMax);
+  state.energyTimer = clampInt(timer, 1, ENERGY_REGEN_SECONDS);
+  return prevEnergy !== asInt(state.energy, 0) || prevTimer !== asInt(state.energyTimer, ENERGY_REGEN_SECONDS);
 };
 
 const getSessionWallet = async (
@@ -960,6 +1019,65 @@ serve(async (req) => {
   const action = String(body.action ?? "");
   const auth = await getSessionWallet(supabase, req, now);
   if (!auth.ok) return json({ ok: false, error: auth.error });
+
+  if (action === "profile_refresh_energy") {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const attemptNow = new Date();
+      const { data: profileRow, error: profileError } = await supabase
+        .from("profiles")
+        .select("state, updated_at")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+
+      if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+        return json({ ok: false, error: "Profile not found." });
+      }
+
+      const state = normalizeState(profileRow.state as unknown);
+      if (!state) return json({ ok: false, error: "Invalid profile state." });
+
+      const updatedAtMs = profileRow.updated_at ? new Date(String(profileRow.updated_at)).getTime() : Number.NaN;
+      const elapsedSec = Number.isFinite(updatedAtMs)
+        ? Math.max(0, Math.floor((attemptNow.getTime() - updatedAtMs) / 1000))
+        : 0;
+
+      const changed = applyOfflineEnergyRegen(state, elapsedSec);
+      if (!changed) {
+        return json({
+          ok: true,
+          energy: Math.max(0, asInt(state.energy, 0)),
+          energyTimer: clampInt(state.energyTimer, 1, ENERGY_REGEN_SECONDS),
+        });
+      }
+
+      const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+      const { data: updated, error: updateError } = await supabase
+        .from("profiles")
+        .update({
+          state,
+          updated_at: attemptNow.toISOString(),
+        })
+        .eq("wallet", auth.wallet)
+        .eq("updated_at", expectedUpdatedAt)
+        .select("wallet")
+        .maybeSingle();
+
+      if (!updateError && updated) {
+        await auditEvent(supabase, auth.wallet, "energy_offline_regen", {
+          elapsedSec,
+          energy: Math.max(0, asInt(state.energy, 0)),
+          energyTimer: clampInt(state.energyTimer, 1, ENERGY_REGEN_SECONDS),
+        });
+        return json({
+          ok: true,
+          energy: Math.max(0, asInt(state.energy, 0)),
+          energyTimer: clampInt(state.energyTimer, 1, ENERGY_REGEN_SECONDS),
+        });
+      }
+    }
+
+    return json({ ok: false, error: "Profile changed concurrently, retry energy sync." });
+  }
 
   if (action === "profile_save") {
     const normalizedState = normalizeState(body.state);
