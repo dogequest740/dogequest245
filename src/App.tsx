@@ -924,7 +924,7 @@ const FORTUNE_WHEEL_SEGMENT_ANGLE = 360 / FORTUNE_REWARDS.length
 
 const MONSTER_HP_TIER_TARGET = 30000
 const MONSTER_HP_TIER_EXCESS = 0.2
-const MONSTER_HP_BASE_MULTIPLIER = 5
+const MONSTER_HP_BASE_MULTIPLIER = 2.5
 const ITEM_TIER_SCORE_MULTIPLIER = 0.5
 const PERSIST_VERSION = 1
 
@@ -932,7 +932,7 @@ const getMonsterHpMultiplier = (tierScore: number) => {
   if (tierScore <= 0) return 1
   const ratio = tierScore / MONSTER_HP_TIER_TARGET
   const baseRatio = Math.min(1, ratio)
-  const base = 1 + baseRatio * 1.6 + baseRatio * baseRatio * 0.6
+  const base = 1 + baseRatio * 1.9 + baseRatio * baseRatio * 0.9
   const excess = Math.max(0, ratio - 1)
   const extra = 1 + excess * MONSTER_HP_TIER_EXCESS
   return base * extra
