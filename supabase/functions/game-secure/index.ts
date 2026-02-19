@@ -8,6 +8,9 @@ const MAX_TICKETS = 30;
 const WORLD_BOSS_DURATION_SECONDS = 12 * 60 * 60;
 const WORLD_BOSS_PRIZE_POOL = 500;
 const WORLD_BOSS_DAMAGE_PER_SEC_CAP = 5000;
+const WORLD_BOSS_TICKET_COST_GOLD = 7000;
+const WORLD_BOSS_PREMIUM_DAILY_TICKETS = 2;
+const WORLD_BOSS_STARTER_TICKETS = 5;
 const REFERRAL_LEVEL_TARGET = 15;
 const REFERRAL_KEY_BONUS = 3;
 const REFERRAL_CRYSTAL_RATE = 0.05;
@@ -75,6 +78,14 @@ type WorldBossParticipantRow = {
   damage: number;
   joined: boolean;
   reward_claimed: boolean;
+  updated_at?: string;
+};
+
+type WorldBossTicketRow = {
+  wallet: string;
+  tickets: number;
+  premium_ticket_day: string;
+  starter_ticket_granted: boolean;
   updated_at?: string;
 };
 
@@ -311,6 +322,7 @@ const normalizeState = (raw: unknown) => {
     state.energyTimer = ENERGY_REGEN_SECONDS;
   }
   state.tickets = clampInt(state.tickets, 0, 30);
+  state.worldBossTickets = Math.max(0, asInt(state.worldBossTickets, 0));
   state.starterPackPurchased = Boolean(state.starterPackPurchased);
   state.premiumEndsAt = Math.max(0, asInt(state.premiumEndsAt, 0));
   state.premiumClaimDay = String(state.premiumClaimDay ?? "").slice(0, 10);
@@ -646,6 +658,179 @@ const updateFortuneState = async (
       updated_at: String(data.updated_at ?? payload.updated_at),
     } as FortuneStateRow,
   };
+};
+
+const toWorldBossTicketState = (
+  wallet: string,
+  row: Record<string, unknown>,
+  fallbackIso: string,
+): WorldBossTicketRow => ({
+  wallet,
+  tickets: Math.max(0, asInt(row.tickets, 0)),
+  premium_ticket_day: String(row.premium_ticket_day ?? ""),
+  starter_ticket_granted: Boolean(row.starter_ticket_granted),
+  updated_at: String(row.updated_at ?? fallbackIso),
+});
+
+const getWorldBossTicketProfileFlags = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  now: Date,
+) => {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("state")
+    .eq("wallet", wallet)
+    .maybeSingle();
+
+  if (error || !data || !data.state || typeof data.state !== "object") {
+    return {
+      ok: true as const,
+      starterPackPurchased: false,
+      premiumActive: false,
+    };
+  }
+
+  const profile = normalizeState(data.state as unknown);
+  if (!profile) {
+    return {
+      ok: true as const,
+      starterPackPurchased: false,
+      premiumActive: false,
+    };
+  }
+
+  return {
+    ok: true as const,
+    starterPackPurchased: Boolean(profile.starterPackPurchased),
+    premiumActive: Math.max(0, asInt(profile.premiumEndsAt, 0)) > now.getTime(),
+  };
+};
+
+const ensureWorldBossTicketState = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  now: Date,
+) => {
+  const dayKey = todayKeyUtc(now);
+  const nowIso = now.toISOString();
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const { data, error } = await supabase
+      .from("world_boss_tickets")
+      .select("wallet, tickets, premium_ticket_day, starter_ticket_granted, updated_at")
+      .eq("wallet", wallet)
+      .maybeSingle();
+    if (error) return { ok: false as const, error: "Failed to load world boss tickets." };
+
+    let current: WorldBossTicketRow;
+    if (data) {
+      current = toWorldBossTicketState(wallet, data as Record<string, unknown>, nowIso);
+    } else {
+      const initial: WorldBossTicketRow = {
+        wallet,
+        tickets: 0,
+        premium_ticket_day: "",
+        starter_ticket_granted: false,
+        updated_at: nowIso,
+      };
+      const { error: insertError } = await supabase
+        .from("world_boss_tickets")
+        .insert(initial);
+      if (insertError) continue;
+      current = initial;
+    }
+
+    const flags = await getWorldBossTicketProfileFlags(supabase, wallet, now);
+    if (!flags.ok) return { ok: false as const, error: flags.error };
+
+    let nextTickets = current.tickets;
+    let nextPremiumDay = current.premium_ticket_day;
+    let nextStarterGranted = current.starter_ticket_granted;
+    let changed = false;
+
+    if (flags.premiumActive && nextPremiumDay !== dayKey) {
+      nextTickets += WORLD_BOSS_PREMIUM_DAILY_TICKETS;
+      nextPremiumDay = dayKey;
+      changed = true;
+    }
+    if (flags.starterPackPurchased && !nextStarterGranted) {
+      nextTickets += WORLD_BOSS_STARTER_TICKETS;
+      nextStarterGranted = true;
+      changed = true;
+    }
+
+    if (!changed) return { ok: true as const, state: current };
+
+    const { data: updated, error: updateError } = await supabase
+      .from("world_boss_tickets")
+      .update({
+        tickets: nextTickets,
+        premium_ticket_day: nextPremiumDay,
+        starter_ticket_granted: nextStarterGranted,
+        updated_at: nowIso,
+      })
+      .eq("wallet", wallet)
+      .eq("tickets", current.tickets)
+      .eq("premium_ticket_day", current.premium_ticket_day)
+      .eq("starter_ticket_granted", current.starter_ticket_granted)
+      .select("wallet, tickets, premium_ticket_day, starter_ticket_granted, updated_at")
+      .maybeSingle();
+
+    if (!updateError && updated) {
+      return {
+        ok: true as const,
+        state: toWorldBossTicketState(wallet, updated as Record<string, unknown>, nowIso),
+      };
+    }
+  }
+
+  return { ok: false as const, error: "Failed to sync world boss tickets." };
+};
+
+const adjustWorldBossTickets = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  delta: number,
+  now: Date,
+) => {
+  const nowIso = now.toISOString();
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const ensured = await ensureWorldBossTicketState(supabase, wallet, now);
+    if (!ensured.ok) return ensured;
+
+    const current = ensured.state;
+    const nextTickets = current.tickets + delta;
+    if (nextTickets < 0) {
+      return { ok: false as const, error: "No World Boss tickets left.", state: current };
+    }
+    if (delta === 0) {
+      return { ok: true as const, state: current };
+    }
+
+    const { data: updated, error } = await supabase
+      .from("world_boss_tickets")
+      .update({
+        tickets: nextTickets,
+        updated_at: nowIso,
+      })
+      .eq("wallet", wallet)
+      .eq("tickets", current.tickets)
+      .eq("premium_ticket_day", current.premium_ticket_day)
+      .eq("starter_ticket_granted", current.starter_ticket_granted)
+      .select("wallet, tickets, premium_ticket_day, starter_ticket_granted, updated_at")
+      .maybeSingle();
+
+    if (!error && updated) {
+      return {
+        ok: true as const,
+        state: toWorldBossTicketState(wallet, updated as Record<string, unknown>, nowIso),
+      };
+    }
+  }
+
+  return { ok: false as const, error: "World Boss ticket conflict, retry." };
 };
 
 const applyFortuneReward = async (
@@ -1726,6 +1911,79 @@ serve(async (req) => {
     return json({ ok: false, error: "Profile changed concurrently, retry claim." });
   }
 
+  if (action === "worldboss_ticket_status") {
+    const ticketState = await ensureWorldBossTicketState(supabase, auth.wallet, now);
+    if (!ticketState.ok) {
+      return json({ ok: false, error: ticketState.error });
+    }
+    return json({
+      ok: true,
+      worldBossTickets: Math.max(0, asInt(ticketState.state.tickets, 0)),
+    });
+  }
+
+  if (action === "worldboss_ticket_buy") {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const { data: profileRow, error: profileError } = await supabase
+        .from("profiles")
+        .select("state, updated_at")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+
+      if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+        return json({ ok: false, error: "Profile not found." });
+      }
+
+      const state = normalizeState(profileRow.state as unknown);
+      if (!state) return json({ ok: false, error: "Invalid profile state." });
+
+      const gold = Math.max(0, asInt(state.gold, 0));
+      if (gold < WORLD_BOSS_TICKET_COST_GOLD) {
+        return json({ ok: false, error: `Not enough gold. Need ${WORLD_BOSS_TICKET_COST_GOLD}.` });
+      }
+
+      state.gold = gold - WORLD_BOSS_TICKET_COST_GOLD;
+      const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+      const { data: updatedProfile, error: updateError } = await supabase
+        .from("profiles")
+        .update({
+          state,
+          updated_at: now.toISOString(),
+        })
+        .eq("wallet", auth.wallet)
+        .eq("updated_at", expectedUpdatedAt)
+        .select("wallet")
+        .maybeSingle();
+
+      if (updateError || !updatedProfile) continue;
+
+      const ticketUpdate = await adjustWorldBossTickets(supabase, auth.wallet, 1, now);
+      if (!ticketUpdate.ok || !ticketUpdate.state) {
+        await updateProfileWithRetry(supabase, auth.wallet, (rollbackState) => {
+          rollbackState.gold = Math.max(0, asInt(rollbackState.gold, 0)) + WORLD_BOSS_TICKET_COST_GOLD;
+        });
+        await auditEvent(supabase, auth.wallet, "worldboss_ticket_buy_credit_failed", {
+          cost: WORLD_BOSS_TICKET_COST_GOLD,
+        });
+        return json({ ok: false, error: "Failed to issue World Boss ticket." });
+      }
+
+      await auditEvent(supabase, auth.wallet, "worldboss_ticket_buy", {
+        cost: WORLD_BOSS_TICKET_COST_GOLD,
+        worldBossTickets: Math.max(0, asInt(ticketUpdate.state.tickets, 0)),
+        gold: Math.max(0, asInt(state.gold, 0)),
+      });
+
+      return json({
+        ok: true,
+        gold: Math.max(0, asInt(state.gold, 0)),
+        worldBossTickets: Math.max(0, asInt(ticketUpdate.state.tickets, 0)),
+      });
+    }
+
+    return json({ ok: false, error: "Profile changed concurrently, retry ticket purchase." });
+  }
+
   if (action === "worldboss_sync") {
     const boss = await ensureWorldBossCycle(supabase, now);
     if (!boss) return json({ ok: false, error: "Failed to load world boss." });
@@ -1750,6 +2008,22 @@ serve(async (req) => {
     if (existingError) return json({ ok: false, error: "Failed to sync world boss." });
 
     const existingRow = (existing as WorldBossParticipantRow | null) ?? null;
+    const wantJoinNow = safeJoined && !Boolean(existingRow?.joined);
+    const ticketState = await ensureWorldBossTicketState(supabase, auth.wallet, now);
+    if (!ticketState.ok) return json({ ok: false, error: ticketState.error });
+    let worldBossTickets = Math.max(0, asInt(ticketState.state.tickets, 0));
+    if (wantJoinNow) {
+      const ticketSpend = await adjustWorldBossTickets(supabase, auth.wallet, -1, now);
+      if (!ticketSpend.ok || !ticketSpend.state) {
+        return json({
+          ok: false,
+          error: ticketSpend.error || "No World Boss tickets left.",
+          worldBossTickets,
+        });
+      }
+      worldBossTickets = Math.max(0, asInt(ticketSpend.state.tickets, 0));
+    }
+
     const existingDamage = Math.max(0, asInt(existingRow?.damage ?? 0, 0));
     const updatedAtMs = existingRow?.updated_at ? new Date(existingRow.updated_at).getTime() : Number.NaN;
     const elapsedSec = Number.isFinite(updatedAtMs)
@@ -1808,6 +2082,7 @@ serve(async (req) => {
 
     return json({
       ok: true,
+      worldBossTickets,
       worldBoss: boss,
       worldBossParticipants: participants,
       worldBossAppliedDamage: appliedDamage,

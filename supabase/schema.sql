@@ -37,11 +37,21 @@ create table if not exists public.world_boss_participants (
   primary key (wallet, cycle_start)
 );
 
+create table if not exists public.world_boss_tickets (
+  wallet text primary key,
+  tickets int not null default 0,
+  premium_ticket_day text not null default '',
+  starter_ticket_granted boolean not null default false,
+  updated_at timestamptz default now()
+);
+
 alter table public.world_boss enable row level security;
 alter table public.world_boss_participants enable row level security;
+alter table public.world_boss_tickets enable row level security;
 
 drop policy if exists "public world boss read/write" on public.world_boss;
 drop policy if exists "public world boss participants read/write" on public.world_boss_participants;
+drop policy if exists "public world boss tickets read/write" on public.world_boss_tickets;
 
 create policy "world boss read only"
 on public.world_boss
@@ -50,6 +60,11 @@ using (true);
 
 create policy "world boss participants read only"
 on public.world_boss_participants
+for select
+using (true);
+
+create policy "world boss tickets read only"
+on public.world_boss_tickets
 for select
 using (true);
 

@@ -45,6 +45,7 @@ import iconStarterPack from './assets/icons/starter-pack.png'
 import iconPremium from './assets/icons/premium.png'
 import iconReferrals from './assets/icons/referrals.png'
 import iconFortuneWheel from './assets/icons/fortune-wheel.png'
+import iconWorldBossTicket from './assets/icons/worldboss-ticket.png'
 import iconWeapon from './assets/icons/armory-weapon.png'
 import iconArmor from './assets/icons/armory-armor.png'
 import iconHead from './assets/icons/armory-head.png'
@@ -224,6 +225,7 @@ type PersistedState = {
   starterPackPurchased: boolean
   premiumEndsAt: number
   premiumClaimDay: string
+  worldBossTickets: number
   stake: StakeEntry[] | { active: boolean; amount: number; endsAt: number }
   stakeId: number
 }
@@ -338,6 +340,7 @@ type GameSecureResponse = {
   withdrawals?: WithdrawalRow[]
   events?: AdminEventRow[]
   blockedWallets?: BlockedWalletRow[]
+  worldBossTickets?: number
   worldBoss?: WorldBossRow
   worldBossParticipants?: WorldBossParticipantRow[]
   worldBossAppliedDamage?: number
@@ -540,6 +543,7 @@ type GameState = {
   starterPackPurchased: boolean
   premiumEndsAt: number
   premiumClaimDay: string
+  worldBossTickets: number
   stake: StakeEntry[]
   stakeId: number
 }
@@ -580,6 +584,7 @@ type HudState = {
   starterPackPurchased: boolean
   premiumEndsAt: number
   premiumClaimDay: string
+  worldBossTickets: number
   stake: StakeEntry[]
 }
 
@@ -877,6 +882,8 @@ const GOLD_PACKAGES = [
 ]
 const STARTER_PACK_PRICE = 0.35
 const STARTER_PACK_GOLD = 300000
+const STARTER_PACK_WORLD_BOSS_TICKETS = 5
+const WORLD_BOSS_TICKET_COST = 7000
 const STARTER_PACK_ITEMS: { type: ConsumableType; qty: number }[] = [
   { type: 'energy-small', qty: 20 },
   { type: 'energy-full', qty: 5 },
@@ -992,6 +999,7 @@ const buildPersistedState = (state: GameState): PersistedState => ({
   starterPackPurchased: state.starterPackPurchased,
   premiumEndsAt: state.premiumEndsAt,
   premiumClaimDay: state.premiumClaimDay,
+  worldBossTickets: state.worldBossTickets,
   stake: state.stake,
   stakeId: state.stakeId,
 })
@@ -1077,6 +1085,7 @@ const applyPersistedState = (state: GameState, saved: PersistedState, savedUpdat
   state.starterPackPurchased = Boolean(saved.starterPackPurchased)
   state.premiumEndsAt = Math.max(0, Number(saved.premiumEndsAt ?? state.premiumEndsAt))
   state.premiumClaimDay = saved.premiumClaimDay || state.premiumClaimDay
+  state.worldBossTickets = Math.max(0, saved.worldBossTickets ?? state.worldBossTickets)
   if (saved.stake) {
     if (Array.isArray(saved.stake)) {
       state.stake = saved.stake
@@ -2024,6 +2033,7 @@ const buildHud = (state: GameState): HudState => ({
   starterPackPurchased: state.starterPackPurchased,
   premiumEndsAt: state.premiumEndsAt,
   premiumClaimDay: state.premiumClaimDay,
+  worldBossTickets: state.worldBossTickets,
   stake: state.stake,
 })
 
@@ -2101,6 +2111,7 @@ const initGameState = (chosenClass: CharacterClass, name: string): GameState => 
     starterPackPurchased: false,
     premiumEndsAt: 0,
     premiumClaimDay: '',
+    worldBossTickets: 0,
     stake: [],
     stakeId: 0,
     questStates: QUESTS.reduce((acc, quest) => {
@@ -2974,6 +2985,20 @@ function App() {
     setHud(buildHud(state))
   }
 
+  const syncWorldBossTicketsFromServer = async (interactive = false) => {
+    const state = gameStateRef.current
+    const wallet = publicKey?.toBase58()
+    if (!state || !wallet) return
+
+    const result = await callGameSecureAuthed('worldboss_ticket_status', {}, interactive)
+    if (!result.ok) return
+
+    if (typeof result.worldBossTickets === 'number') {
+      state.worldBossTickets = Math.max(0, Math.floor(result.worldBossTickets))
+      syncHud()
+    }
+  }
+
   const applyReferralSummary = (result: GameSecureResponse) => {
     const entries = (result.referralEntries ?? []).map((entry) => ({
       wallet: String(entry.wallet),
@@ -3588,12 +3613,14 @@ function App() {
   useEffect(() => {
     if (stage !== 'game') return
     void syncWorldBossFromServer()
+    void syncWorldBossTicketsFromServer(false)
   }, [stage, publicKey])
 
   useEffect(() => {
     if (stage !== 'game') return
     const interval = window.setInterval(() => {
       void syncDungeonStateFromServer()
+      void syncWorldBossTicketsFromServer(false)
     }, 60000)
     return () => window.clearInterval(interval)
   }, [stage, publicKey, connected])
@@ -3806,7 +3833,7 @@ function App() {
     }
   }
 
-  const syncWorldBossFromServer = async (interactive = false) => {
+  const syncWorldBossFromServer = async (interactive = false, requestJoin = false) => {
     const state = gameStateRef.current
     const wallet = publicKey?.toBase58()
     if (!state || !wallet) return
@@ -3831,17 +3858,24 @@ function App() {
       'worldboss_sync',
       {
         playerName: playerEntry.name,
-        joined: playerEntry.joined,
+        joined: requestJoin || playerEntry.joined,
         pendingDamage: Math.max(0, Math.floor(state.worldBoss.pendingDamage)),
         clientCycleStart: state.worldBoss.cycleStart,
       },
       interactive,
     )
     if (!result.ok || !result.worldBoss) {
+      if (interactive && result.error) {
+        pushLog(state.eventLog, result.error)
+        syncHud()
+      }
       if (result.error && result.error !== 'Wallet signature required for secure actions.') {
         console.warn('World boss sync skipped:', result.error)
       }
       return
+    }
+    if (typeof result.worldBossTickets === 'number') {
+      state.worldBossTickets = Math.max(0, Math.floor(result.worldBossTickets))
     }
 
     const bossRow = result.worldBoss
@@ -4236,6 +4270,7 @@ function App() {
       pushLog(state.eventLog, 'Starter Pack purchased.')
       syncHud()
       void saveGameState()
+      void syncWorldBossFromServer(false)
       setActivePanel(null)
     } catch (error) {
       console.warn('Starter pack purchase failed', error)
@@ -4492,6 +4527,30 @@ function App() {
     void saveGameState()
   }
 
+  const buyWorldBossTicket = async () => {
+    const state = gameStateRef.current
+    if (!state) return
+    const wallet = publicKey?.toBase58()
+    if (!wallet) {
+      pushLog(state.eventLog, 'Connect wallet to buy World Boss tickets.')
+      syncHud()
+      return
+    }
+    const result = await callGameSecureAuthed('worldboss_ticket_buy', {}, true)
+    if (!result.ok) {
+      pushLog(state.eventLog, result.error || 'Failed to buy World Boss ticket.')
+      syncHud()
+      return
+    }
+    state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
+    if (typeof result.worldBossTickets === 'number') {
+      state.worldBossTickets = Math.max(0, Math.floor(result.worldBossTickets))
+    }
+    pushLog(state.eventLog, 'World Boss ticket purchased.')
+    syncHud()
+    void saveGameState()
+  }
+
   const grantQuestRewardItem = (state: GameState, item: QuestRewardItem) => {
     addConsumable(state, item)
     return { label: questRewardItemName(item), applied: true }
@@ -4552,13 +4611,12 @@ function App() {
   const joinWorldBoss = () => {
     const state = gameStateRef.current
     if (!state) return
-    const participant = state.worldBoss.participants.find((entry) => entry.isPlayer)
-    if (!participant) return
-    participant.joined = true
-    participant.name = state.name
-    syncHud()
-    void syncWorldBossFromServer(true)
-    void saveGameState()
+    if (state.worldBossTickets <= 0) {
+      pushLog(state.eventLog, 'No World Boss tickets left.')
+      syncHud()
+      return
+    }
+    void syncWorldBossFromServer(true, true)
   }
 
   const claimQuest = (quest: QuestDefinition) => {
@@ -5783,6 +5841,18 @@ function App() {
                   Buy
                 </button>
               </div>
+              <div className="shop-card">
+                <div className="shop-title">World Boss Ticket</div>
+                <div className="shop-desc">1 ticket = 1 world boss entry.</div>
+                <div className="shop-meta">
+                  <img className="icon-img small" src={iconGold} alt="" />
+                  Cost: {WORLD_BOSS_TICKET_COST}
+                </div>
+                <img className="shop-icon" src={iconWorldBossTicket} alt="World boss ticket" />
+                <button type="button" onClick={buyWorldBossTicket}>
+                  Buy
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -5877,6 +5947,10 @@ function App() {
                   <img className="icon-img" src={iconKey} alt="" />
                   <span>20 Dungeon Keys</span>
                 </div>
+                <div className="starterpack-item">
+                  <img className="icon-img" src={iconWorldBossTicket} alt="" />
+                  <span>{STARTER_PACK_WORLD_BOSS_TICKETS} World Boss Tickets</span>
+                </div>
               </div>
               {starterPackError && <div className="withdraw-error">{starterPackError}</div>}
               <button
@@ -5959,6 +6033,10 @@ function App() {
                 <div className="starterpack-item">
                   <img className="icon-img" src={iconCrystals} alt="" />
                   <span>+{Math.round((PREMIUM_DUNGEON_CRYSTAL_MULTIPLIER - 1) * 100)}% crystals from dungeons</span>
+                </div>
+                <div className="starterpack-item">
+                  <img className="icon-img" src={iconWorldBossTicket} alt="" />
+                  <span>+2 World Boss tickets daily</span>
                 </div>
               </div>
               <button
@@ -6474,6 +6552,7 @@ function App() {
               const rows = [...joinedParticipants].sort((a, b) => b.damage - a.damage)
               const playerEntry = boss.participants.find((entry) => entry.isPlayer)
               const playerJoined = !!playerEntry?.joined
+              const hasTicket = hud.worldBossTickets > 0
 
               return (
                 <>
@@ -6481,12 +6560,16 @@ function App() {
                     <img className="worldboss-image" src={worldBossImage} alt="World boss" />
                   <div className="worldboss-meta">
                     <div className="worldboss-timer">Resets in {formatLongTimer(boss.remaining)}</div>
+                    <div className="worldboss-ticket">
+                      <img className="icon-img" src={iconWorldBossTicket} alt="" />
+                      Tickets: <strong>{hud.worldBossTickets}</strong>
+                    </div>
                     <div className="worldboss-reward">
                       <img className="icon-img" src={iconCrystals} alt="" />
                       Prize Pool: <strong>{WORLD_BOSS_REWARD}</strong> crystals
                     </div>
-                    <button type="button" disabled={playerJoined} onClick={joinWorldBoss}>
-                      {playerJoined ? 'Joined' : 'Join Battle'}
+                    <button type="button" disabled={playerJoined || !hasTicket} onClick={joinWorldBoss}>
+                      {playerJoined ? 'Joined' : hasTicket ? 'Join Battle (1 Ticket)' : 'No Tickets'}
                     </button>
                   </div>
                   </div>

@@ -3711,6 +3711,14 @@ button.ghost {
   gap: 8px;
 }
 
+.worldboss-ticket {
+  font-size: 13px;
+  color: #9fe7ff;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .worldboss-meta button {
   border: none;
   border-radius: 12px;
