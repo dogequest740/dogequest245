@@ -22,6 +22,7 @@ const PREMIUM_DAILY_KEYS = 5;
 const PREMIUM_DAILY_GOLD = 50000;
 const PREMIUM_DAILY_SMALL_POTIONS = 5;
 const PREMIUM_DAILY_BIG_POTIONS = 3;
+const BLOCKED_ERROR_MESSAGE = "Вы заблокированы за читерство.";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -103,6 +104,14 @@ type SecurityEventRow = {
   kind: string;
   details: Record<string, unknown>;
   created_at: string;
+};
+
+type BlockedWalletRow = {
+  wallet: string;
+  reason: string;
+  blocked_by: string;
+  created_at: string;
+  updated_at?: string;
 };
 
 const json = (payload: Record<string, unknown>) =>
@@ -398,7 +407,20 @@ const getSessionWallet = async (
     await supabase.from("wallet_sessions").delete().eq("token", token);
     return { ok: false as const, error: "Session expired. Sign again." };
   }
-  return { ok: true as const, wallet: String(data.wallet) };
+  const wallet = String(data.wallet);
+  const blocked = await supabase
+    .from("blocked_wallets")
+    .select("wallet, reason")
+    .eq("wallet", wallet)
+    .maybeSingle();
+  if (!blocked.error && blocked.data) {
+    await supabase.from("wallet_sessions").delete().eq("token", token);
+    await auditEvent(supabase, wallet, "blocked_session_denied", {
+      reason: String(blocked.data.reason ?? "Cheating"),
+    });
+    return { ok: false as const, error: BLOCKED_ERROR_MESSAGE };
+  }
+  return { ok: true as const, wallet };
 };
 
 const toWalletList = (raw: string | undefined) =>
@@ -406,6 +428,22 @@ const toWalletList = (raw: string | undefined) =>
     .split(",")
     .map((entry) => entry.trim())
     .filter(Boolean);
+
+const getBlockedWallet = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+) => {
+  const { data, error } = await supabase
+    .from("blocked_wallets")
+    .select("wallet, reason")
+    .eq("wallet", wallet)
+    .maybeSingle();
+  if (error || !data) return null;
+  return {
+    wallet: String(data.wallet),
+    reason: String(data.reason ?? "Cheating"),
+  };
+};
 
 const toLimitedDetails = (value: Record<string, unknown>) => {
   try {
@@ -1372,6 +1410,87 @@ serve(async (req) => {
       worldBossAppliedDamage: appliedDamage,
       worldBossRewardShare: rewardShare,
     });
+  }
+
+  if (action === "admin_blocked_list") {
+    const adminWallets = toWalletList(Deno.env.get("ADMIN_WALLETS"));
+    if (!adminWallets.includes(auth.wallet)) {
+      return json({ ok: false, error: "Admin access required." });
+    }
+
+    const { data, error } = await supabase
+      .from("blocked_wallets")
+      .select("wallet, reason, blocked_by, created_at, updated_at")
+      .order("created_at", { ascending: false })
+      .limit(3000);
+    if (error) return json({ ok: false, error: "Failed to load blocked wallets." });
+
+    return json({
+      ok: true,
+      blockedWallets: (data as BlockedWalletRow[] | null) ?? [],
+    });
+  }
+
+  if (action === "admin_block_wallet") {
+    const adminWallets = toWalletList(Deno.env.get("ADMIN_WALLETS"));
+    if (!adminWallets.includes(auth.wallet)) {
+      return json({ ok: false, error: "Admin access required." });
+    }
+
+    const wallet = String(body.wallet ?? "").trim();
+    if (!isWalletLike(wallet)) {
+      return json({ ok: false, error: "Invalid wallet." });
+    }
+    if (wallet === auth.wallet) {
+      return json({ ok: false, error: "You cannot block your own wallet." });
+    }
+
+    const reason = String(body.reason ?? "Cheating").trim().slice(0, 180) || "Cheating";
+    const nowIso = now.toISOString();
+    const { error } = await supabase
+      .from("blocked_wallets")
+      .upsert(
+        {
+          wallet,
+          reason,
+          blocked_by: auth.wallet,
+          updated_at: nowIso,
+        },
+        { onConflict: "wallet" },
+      );
+    if (error) return json({ ok: false, error: "Failed to block wallet." });
+
+    await supabase.from("wallet_sessions").delete().eq("wallet", wallet);
+    await supabase.from("wallet_auth_nonces").delete().eq("wallet", wallet);
+    await auditEvent(supabase, auth.wallet, "admin_block_wallet", { wallet, reason });
+    await auditEvent(supabase, wallet, "wallet_blocked", { reason, blockedBy: auth.wallet });
+    return json({ ok: true });
+  }
+
+  if (action === "admin_unblock_wallet") {
+    const adminWallets = toWalletList(Deno.env.get("ADMIN_WALLETS"));
+    if (!adminWallets.includes(auth.wallet)) {
+      return json({ ok: false, error: "Admin access required." });
+    }
+
+    const wallet = String(body.wallet ?? "").trim();
+    if (!isWalletLike(wallet)) {
+      return json({ ok: false, error: "Invalid wallet." });
+    }
+
+    const blocked = await getBlockedWallet(supabase, wallet);
+    const { error } = await supabase
+      .from("blocked_wallets")
+      .delete()
+      .eq("wallet", wallet);
+    if (error) return json({ ok: false, error: "Failed to unblock wallet." });
+
+    await auditEvent(supabase, auth.wallet, "admin_unblock_wallet", {
+      wallet,
+      reason: blocked?.reason ?? "",
+    });
+    await auditEvent(supabase, wallet, "wallet_unblocked", { unblockedBy: auth.wallet });
+    return json({ ok: true });
   }
 
   if (action === "admin_events") {

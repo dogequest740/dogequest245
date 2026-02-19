@@ -10,6 +10,7 @@ const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const CHALLENGE_TTL_SECONDS = 5 * 60;
 const CHALLENGE_REUSE_WINDOW_SECONDS = 10;
 const ITEM_TIER_SCORE_MULTIPLIER = 0.5;
+const BLOCKED_ERROR_MESSAGE = "Вы заблокированы за читерство.";
 
 const DUNGEON_BASE_REQUIREMENTS = [
   450, 1673, 3002, 4447, 6133, 7818, 9619, 11536, 13569, 15718,
@@ -72,6 +73,22 @@ const auditEvent = async (
     kind,
     details,
   });
+};
+
+const getBlockedWallet = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+) => {
+  const { data, error } = await supabase
+    .from("blocked_wallets")
+    .select("wallet, reason")
+    .eq("wallet", wallet)
+    .maybeSingle();
+  if (error || !data) return null;
+  return {
+    wallet: String(data.wallet),
+    reason: String(data.reason ?? "Cheating"),
+  };
 };
 
 const getTierScoreFromState = (state: unknown) => {
@@ -163,7 +180,14 @@ const getSessionWallet = async (supabase: ReturnType<typeof createClient>, req: 
     await supabase.from("wallet_sessions").delete().eq("token", token);
     return { ok: false as const, error: "Session expired. Sign again." };
   }
-  return { ok: true as const, wallet: String(data.wallet), token };
+  const wallet = String(data.wallet);
+  const blocked = await getBlockedWallet(supabase, wallet);
+  if (blocked) {
+    await supabase.from("wallet_sessions").delete().eq("token", token);
+    await auditEvent(supabase, wallet, "blocked_session_denied", { reason: blocked.reason });
+    return { ok: false as const, error: BLOCKED_ERROR_MESSAGE };
+  }
+  return { ok: true as const, wallet, token };
 };
 
 serve(async (req) => {
@@ -192,6 +216,12 @@ serve(async (req) => {
   if (action === "challenge") {
     const wallet = String(body.wallet ?? "");
     if (!isValidWallet(wallet)) return json({ ok: false, error: "Invalid wallet address." });
+
+    const blocked = await getBlockedWallet(supabase, wallet);
+    if (blocked) {
+      await auditEvent(supabase, wallet, "blocked_login_attempt", { reason: blocked.reason, action: "challenge" });
+      return json({ ok: false, error: BLOCKED_ERROR_MESSAGE });
+    }
 
     await supabase.from("wallet_auth_nonces").delete().lt("expires_at", now.toISOString());
 
@@ -260,6 +290,14 @@ serve(async (req) => {
     const signatureBase64 = String(body.signature ?? "");
     if (!isValidWallet(wallet)) return json({ ok: false, error: "Invalid wallet address." });
     if (!signatureBase64) return json({ ok: false, error: "Missing signature." });
+
+    const blocked = await getBlockedWallet(supabase, wallet);
+    if (blocked) {
+      await supabase.from("wallet_auth_nonces").delete().eq("wallet", wallet);
+      await supabase.from("wallet_sessions").delete().eq("wallet", wallet);
+      await auditEvent(supabase, wallet, "blocked_login_attempt", { reason: blocked.reason, action: "login" });
+      return json({ ok: false, error: BLOCKED_ERROR_MESSAGE });
+    }
 
     const { data: challenge, error: challengeError } = await supabase
       .from("wallet_auth_nonces")

@@ -242,6 +242,9 @@ type AdminPlayerRow = {
   kills: number
   dungeons: number
   updatedAt: string
+  blocked: boolean
+  blockedReason: string
+  blockedAt: string
 }
 
 type AdminSummary = {
@@ -266,6 +269,14 @@ type WithdrawalRow = {
   sol_amount: number
   status: string
   created_at: string
+}
+
+type BlockedWalletRow = {
+  wallet: string
+  reason: string
+  blocked_by: string
+  created_at: string
+  updated_at?: string
 }
 
 type AdminData = {
@@ -319,6 +330,7 @@ type GameSecureResponse = {
   withdrawal?: WithdrawalRow
   withdrawals?: WithdrawalRow[]
   events?: AdminEventRow[]
+  blockedWallets?: BlockedWalletRow[]
   worldBoss?: WorldBossRow
   worldBossParticipants?: WorldBossParticipantRow[]
   worldBossAppliedDamage?: number
@@ -1403,6 +1415,10 @@ const formatEventDetails = (value: Record<string, unknown>) => {
   } catch {
     return '[unserializable details]'
   }
+}
+const isBlockedAuthError = (value: string) => {
+  const normalized = value.toLowerCase()
+  return normalized.includes('заблок') || normalized.includes('blocked')
 }
 
 const sanitizePlayerName = (value: string) => value.replace(/[^A-Za-z]/g, '').slice(0, 10)
@@ -2544,6 +2560,7 @@ function App() {
   const [adminData, setAdminData] = useState<AdminData | null>(null)
   const [adminLoading, setAdminLoading] = useState(false)
   const [adminError, setAdminError] = useState('')
+  const [securityAuthError, setSecurityAuthError] = useState('')
   const [adminEventWalletFilter, setAdminEventWalletFilter] = useState('')
   const [adminEventKindFilter, setAdminEventKindFilter] = useState('')
   const [adminEventLimit, setAdminEventLimit] = useState('300')
@@ -2679,6 +2696,20 @@ function App() {
     return (data as DungeonSecureResponse | null) ?? { ok: false, error: 'Empty dungeon service response.' }
   }
 
+  const handleSecurityAuthFailure = (message: string, interactive = false) => {
+    if (!message) return
+    if (interactive || isBlockedAuthError(message)) {
+      setSecurityAuthError(message)
+    }
+    if (isBlockedAuthError(message)) {
+      dungeonSessionRef.current = null
+      dungeonSessionRequestRef.current = null
+      secureSessionInitRef.current = false
+      setActivePanel(null)
+      setStage('auth')
+    }
+  }
+
   const ensureDungeonSession = async (interactive = true) => {
     const wallet = publicKey?.toBase58()
     if (!wallet) return null
@@ -2703,6 +2734,7 @@ function App() {
     const request = (async () => {
       const challenge = await callDungeonSecure({ action: 'challenge', wallet })
       if (!challenge.ok || !challenge.message) {
+        handleSecurityAuthFailure(challenge.error || 'Wallet login failed.', interactive)
         return null
       }
 
@@ -2710,6 +2742,9 @@ function App() {
       try {
         signature = await signMessage(new TextEncoder().encode(challenge.message))
       } catch {
+        if (interactive) {
+          setSecurityAuthError('Wallet signature was rejected.')
+        }
         return null
       }
 
@@ -2719,6 +2754,7 @@ function App() {
         signature: bytesToBase64(signature),
       })
       if (!login.ok || !login.token) {
+        handleSecurityAuthFailure(login.error || 'Wallet login failed.', interactive)
         return null
       }
 
@@ -2727,6 +2763,7 @@ function App() {
         token: login.token,
         expiresAt: Number.isFinite(expiresAtMs) ? expiresAtMs : Date.now() + 24 * 60 * 60 * 1000,
       }
+      setSecurityAuthError('')
 
       return login.token
     })()
@@ -2750,10 +2787,14 @@ function App() {
     if (!token) {
       return { ok: false, error: 'Wallet signature required for dungeon actions.' }
     }
-    return callDungeonSecure(
+    const result = await callDungeonSecure(
       { action, ...payload },
       { 'x-session-token': token },
     )
+    if (!result.ok && result.error) {
+      handleSecurityAuthFailure(result.error, interactive)
+    }
+    return result
   }
 
   const callGameSecure = async (
@@ -2781,10 +2822,14 @@ function App() {
     if (!token) {
       return { ok: false, error: 'Wallet signature required for secure actions.' }
     }
-    return callGameSecure(
+    const result = await callGameSecure(
       { action, ...payload },
       { 'x-session-token': token },
     )
+    if (!result.ok && result.error) {
+      handleSecurityAuthFailure(result.error, interactive)
+    }
+    return result
   }
 
   const syncDungeonStateFromServer = async () => {
@@ -3081,6 +3126,7 @@ function App() {
       setReferralPendingKeys(0)
       setReferralPendingCrystals(0)
       setReferralError('')
+      setSecurityAuthError('')
       setStage('auth')
       return () => {
         active = false
@@ -3094,6 +3140,7 @@ function App() {
     if (!wallet || !supabase) {
       isNewProfileRef.current = false
       referralProcessedRef.current = false
+      setSecurityAuthError('')
       setStage('select')
       return () => {
         active = false
@@ -3568,9 +3615,31 @@ function App() {
       created_at: String(row.created_at ?? new Date(0).toISOString()),
     }))
 
+    const blockedResult = await callGameSecureAuthed('admin_blocked_list', {}, true)
+    if (!blockedResult.ok) {
+      setAdminError(blockedResult.error || 'Failed to load blocked players.')
+      setAdminLoading(false)
+      return
+    }
+
+    const blockedMap = new Map<string, BlockedWalletRow>()
+    ;(blockedResult.blockedWallets ?? []).forEach((row) => {
+      const wallet = String(row.wallet ?? '')
+      if (!wallet) return
+      blockedMap.set(wallet, {
+        wallet,
+        reason: String(row.reason ?? 'Cheating'),
+        blocked_by: String(row.blocked_by ?? ''),
+        created_at: String(row.created_at ?? new Date(0).toISOString()),
+        updated_at: typeof row.updated_at === 'string' ? row.updated_at : undefined,
+      })
+    })
+
     const now = Date.now()
     const players: AdminPlayerRow[] = (data ?? []).map((row) => {
       const saved = (row.state as PersistedState | null) ?? null
+      const wallet = row.wallet as string
+      const blocked = blockedMap.get(wallet)
       const equipment = normalizeEquipment(saved?.equipment)
       const tierScore = getTierScore(equipment)
       const level = saved?.player?.level ?? 1
@@ -3580,7 +3649,7 @@ function App() {
       const dungeons = saved?.dungeonRuns ?? 0
       const name = saved?.name || 'Unknown'
       return {
-        wallet: row.wallet as string,
+        wallet,
         name,
         level,
         tierScore,
@@ -3589,6 +3658,9 @@ function App() {
         kills,
         dungeons,
         updatedAt: (row.updated_at as string) || new Date(0).toISOString(),
+        blocked: Boolean(blocked),
+        blockedReason: blocked?.reason || '',
+        blockedAt: blocked?.created_at || '',
       }
     })
 
@@ -3650,6 +3722,41 @@ function App() {
     const result = await callGameSecureAuthed('admin_mark_paid', { withdrawalId }, true)
     if (!result.ok) {
       setAdminError(result.error || 'Failed to update withdrawal.')
+      setAdminLoading(false)
+      return
+    }
+    await loadAdminData()
+  }
+
+  const togglePlayerBlock = async (player: AdminPlayerRow) => {
+    if (!isAdmin) return
+    setAdminLoading(true)
+    setAdminError('')
+
+    if (player.blocked) {
+      const result = await callGameSecureAuthed('admin_unblock_wallet', { wallet: player.wallet }, true)
+      if (!result.ok) {
+        setAdminError(result.error || 'Failed to unblock wallet.')
+        setAdminLoading(false)
+        return
+      }
+      await loadAdminData()
+      return
+    }
+
+    const reasonInput = window.prompt('Reason for block:', 'Cheating')
+    if (reasonInput === null) {
+      setAdminLoading(false)
+      return
+    }
+    const reason = reasonInput.trim() || 'Cheating'
+    const result = await callGameSecureAuthed(
+      'admin_block_wallet',
+      { wallet: player.wallet, reason },
+      true,
+    )
+    if (!result.ok) {
+      setAdminError(result.error || 'Failed to block wallet.')
       setAdminLoading(false)
       return
     }
@@ -4367,6 +4474,12 @@ function App() {
             )}
           </div>
         </header>
+      )}
+
+      {securityAuthError && (
+        <div className="security-auth-banner">
+          {securityAuthError}
+        </div>
       )}
 
       {stage === 'auth' && (
@@ -6032,6 +6145,8 @@ function App() {
                         <span>Dungeons</span>
                         <span>Last Seen</span>
                         <span>Wallet</span>
+                        <span>Status</span>
+                        <span>Action</span>
                       </div>
                       {adminData.players.map((player) => (
                         <div key={player.wallet} className="admin-row">
@@ -6044,6 +6159,25 @@ function App() {
                           <span>{formatNumber(player.dungeons)}</span>
                           <span>{formatDateTime(player.updatedAt)}</span>
                           <span className="wallet-chip">{formatShortWallet(player.wallet)}</span>
+                          <span>
+                            {player.blocked ? (
+                              <span className="status blocked" title={player.blockedReason || 'Cheating'}>
+                                blocked
+                              </span>
+                            ) : (
+                              <span className="status paid">active</span>
+                            )}
+                          </span>
+                          <span>
+                            <button
+                              type="button"
+                              className={`admin-action ${player.blocked ? 'neutral' : 'danger'}`}
+                              onClick={() => togglePlayerBlock(player)}
+                              disabled={adminLoading}
+                            >
+                              {player.blocked ? 'Unblock' : 'Block'}
+                            </button>
+                          </span>
                         </div>
                       ))}
                     </div>

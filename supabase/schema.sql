@@ -82,6 +82,16 @@ create table if not exists public.security_events (
 
 alter table public.security_events enable row level security;
 
+create table if not exists public.blocked_wallets (
+  wallet text primary key,
+  reason text not null default 'Cheating',
+  blocked_by text not null,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+alter table public.blocked_wallets enable row level security;
+
 create table if not exists public.referrals (
   referrer_wallet text not null,
   referee_wallet text primary key,
