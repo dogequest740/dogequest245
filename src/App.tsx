@@ -6050,17 +6050,16 @@ function App() {
                     }}
                   />
                   {FORTUNE_REWARDS.map((reward, index) => {
-                    const angle = index * FORTUNE_WHEEL_SEGMENT_ANGLE + FORTUNE_WHEEL_SEGMENT_ANGLE / 2 - 90
+                    const angleDeg = index * FORTUNE_WHEEL_SEGMENT_ANGLE + FORTUNE_WHEEL_SEGMENT_ANGLE / 2 - 90
+                    const angleRad = (angleDeg * Math.PI) / 180
+                    const radiusPercent = 36
+                    const x = 50 + Math.cos(angleRad) * radiusPercent
+                    const y = 50 + Math.sin(angleRad) * radiusPercent
                     return (
                       <div
                         key={reward.id}
                         className="fortune-wheel-segment-content"
-                        style={
-                          {
-                            ['--fortune-angle' as never]: `${angle}deg`,
-                            ['--fortune-angle-neg' as never]: `${-angle}deg`,
-                          } as Record<string, string>
-                        }
+                        style={{ left: `${x}%`, top: `${y}%` }}
                       >
                         <img className="fortune-segment-icon" src={getFortuneRewardIcon(reward)} alt="" />
                         <span className="fortune-segment-qty">{getFortuneRewardAmountLabel(reward)}</span>

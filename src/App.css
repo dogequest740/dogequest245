@@ -3984,7 +3984,6 @@ button.ghost {
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  --fortune-segment-radius: 128px;
   transition: transform 5.2s cubic-bezier(0.12, 0.88, 0.1, 1);
   transform-origin: 50% 50%;
 }
@@ -4009,26 +4008,24 @@ button.ghost {
 
 .fortune-wheel-segment-content {
   position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 56px;
+  width: 44px;
   display: grid;
   justify-items: center;
-  gap: 3px;
-  transform-origin: center center;
-  transform: rotate(var(--fortune-angle)) translateY(calc(var(--fortune-segment-radius) * -1)) rotate(var(--fortune-angle-neg));
+  gap: 2px;
+  transform: translate(-50%, -50%);
   z-index: 2;
+  pointer-events: none;
 }
 
 .fortune-segment-icon {
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   object-fit: contain;
   filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.55));
 }
 
 .fortune-segment-qty {
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 900;
   line-height: 1;
   color: #fff5d2;
@@ -4036,6 +4033,7 @@ button.ghost {
     0 0 8px rgba(0, 0, 0, 0.65),
     0 1px 0 rgba(0, 0, 0, 0.7);
   letter-spacing: 0.2px;
+  white-space: nowrap;
 }
 
 .fortune-wheel-center {
@@ -4198,21 +4196,17 @@ button.ghost {
   width: min(100%, 280px);
 }
 
-.app.mobile .fortune-wheel {
-  --fortune-segment-radius: 106px;
-}
-
 .app.mobile .fortune-wheel-segment-content {
-  width: 48px;
+  width: 38px;
 }
 
 .app.mobile .fortune-segment-icon {
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
 }
 
 .app.mobile .fortune-segment-qty {
-  font-size: 9px;
+  font-size: 8px;
 }
 
 .app.mobile .fortune-wheel-center {
