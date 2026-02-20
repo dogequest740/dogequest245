@@ -947,6 +947,46 @@ const loadWorldBossParticipants = async (
   return (data as WorldBossParticipantRow[] | null) ?? [];
 };
 
+const getWorldBossAttackFromState = (state: Record<string, unknown>) => {
+  const player = (state.player as Record<string, unknown> | undefined) ?? {};
+  const baseAttack = Math.max(1, asInt(player.baseAttack, 1));
+
+  const equipment = state.equipment as Record<string, unknown> | undefined;
+  let bonusAttack = 0;
+  if (equipment && typeof equipment === "object" && !Array.isArray(equipment)) {
+    for (const item of Object.values(equipment)) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const bonuses = (item as Record<string, unknown>).bonuses;
+      if (!bonuses || typeof bonuses !== "object" || Array.isArray(bonuses)) continue;
+      const attack = Number((bonuses as Record<string, unknown>).attack ?? 0);
+      if (Number.isFinite(attack) && attack > 0) {
+        bonusAttack += attack;
+      }
+    }
+  }
+
+  return Math.max(1, Math.round(baseAttack + bonusAttack));
+};
+
+const loadWorldBossAttack = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+) => {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("state")
+    .eq("wallet", wallet)
+    .maybeSingle();
+
+  if (error || !data || !data.state || typeof data.state !== "object") {
+    return 1;
+  }
+
+  const state = normalizeState(data.state as unknown);
+  if (!state) return 1;
+  return getWorldBossAttackFromState(state);
+};
+
 const updateProfileWithRetry = async (
   supabase: ReturnType<typeof createClient>,
   wallet: string,
@@ -2025,16 +2065,24 @@ serve(async (req) => {
     }
 
     const existingDamage = Math.max(0, asInt(existingRow?.damage ?? 0, 0));
+    const nextJoined = Boolean(existingRow?.joined) || safeJoined;
+    const joinedNow = !Boolean(existingRow?.joined) && nextJoined;
+    const nextName = playerName || existingRow?.name || "Hero";
     const updatedAtMs = existingRow?.updated_at ? new Date(existingRow.updated_at).getTime() : Number.NaN;
     const elapsedSec = Number.isFinite(updatedAtMs)
       ? Math.max(1, Math.floor((now.getTime() - updatedAtMs) / 1000))
       : 1;
     const maxDamageGain = Math.max(200, elapsedSec * WORLD_BOSS_DAMAGE_PER_SEC_CAP);
-    const appliedDamage = Math.min(safePendingDamage, maxDamageGain);
+    let passiveDamage = 0;
+    if (Boolean(existingRow?.joined) && nextJoined) {
+      const worldBossAttack = await loadWorldBossAttack(supabase, auth.wallet);
+      const passiveDamageRaw = Math.max(0, Math.floor(elapsedSec * worldBossAttack));
+      passiveDamage = Math.min(passiveDamageRaw, maxDamageGain);
+    }
+    // Keep client pending damage only for diagnostics; server-authoritative damage prevents offline loss and tampering.
+    const clientDamageIgnored = Math.min(safePendingDamage, maxDamageGain);
+    const appliedDamage = passiveDamage;
     const nextDamage = existingDamage + appliedDamage;
-    const nextJoined = Boolean(existingRow?.joined) || safeJoined;
-    const joinedNow = !Boolean(existingRow?.joined) && nextJoined;
-    const nextName = playerName || existingRow?.name || "Hero";
 
     const shouldWrite =
       !existingRow ||
@@ -2075,6 +2123,8 @@ serve(async (req) => {
         cycleStart: boss.cycle_start,
         joinedNow,
         appliedDamage,
+        passiveDamage,
+        clientDamageIgnored,
         totalDamage: nextDamage,
         rewardShare,
       });
