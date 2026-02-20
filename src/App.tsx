@@ -641,6 +641,7 @@ const XP_SCALE = 3
 const XP_POWER = 1.2
 const XP_LEVEL_REQUIREMENT_MULTIPLIER = 1.4
 const XP_MOB_MULTIPLIER = 0.6
+const XP_MOB_PER_LEVEL_BONUS = 0.007
 const ITEM_DROP_CHANCE = 0.5
 const LOOT_SELL_PRICE_MULTIPLIER = 0.6
 
@@ -2315,7 +2316,8 @@ const updateGame = (state: GameState, dt: number) => {
         state.monsterKills += 1
         if (player.level < MAX_LEVEL) {
           const rawXpGain = Math.max(1, Math.round((target.xp + randomInt(2, 8)) / 3))
-          const baseXpGain = Math.max(1, Math.round(rawXpGain * XP_MOB_MULTIPLIER))
+          const levelXpMultiplier = 1 + Math.max(0, player.level - 1) * XP_MOB_PER_LEVEL_BONUS
+          const baseXpGain = Math.max(1, Math.round(rawXpGain * XP_MOB_MULTIPLIER * levelXpMultiplier))
           const xpGain = isPremiumActiveAt(state.premiumEndsAt)
             ? Math.max(1, Math.round(baseXpGain * PREMIUM_XP_MULTIPLIER))
             : baseXpGain
