@@ -1963,6 +1963,22 @@ serve(async (req) => {
   }
 
   if (action === "worldboss_ticket_buy") {
+    const { data: lastBuyRow } = await supabase
+      .from("security_events")
+      .select("created_at")
+      .eq("wallet", auth.wallet)
+      .eq("kind", "worldboss_ticket_buy")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (lastBuyRow?.created_at) {
+      const lastBuyMs = new Date(String(lastBuyRow.created_at)).getTime();
+      if (Number.isFinite(lastBuyMs) && now.getTime() - lastBuyMs < 1000) {
+        return json({ ok: false, error: "Please wait 1 second before buying another ticket." });
+      }
+    }
+
     for (let attempt = 0; attempt < 6; attempt += 1) {
       const { data: profileRow, error: profileError } = await supabase
         .from("profiles")

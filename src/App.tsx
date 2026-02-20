@@ -933,7 +933,7 @@ const FORTUNE_WHEEL_SEGMENT_ANGLE = 360 / FORTUNE_REWARDS.length
 
 const MONSTER_HP_TIER_TARGET = 30000
 const MONSTER_HP_TIER_EXCESS = 0.2
-const MONSTER_HP_BASE_MULTIPLIER = 2.5
+const MONSTER_HP_BASE_MULTIPLIER = 1.75
 const ITEM_TIER_SCORE_MULTIPLIER = 0.5
 const PERSIST_VERSION = 1
 
@@ -2672,6 +2672,7 @@ function App() {
   const [buyGoldLoading, setBuyGoldLoading] = useState<string | null>(null)
   const [starterPackError, setStarterPackError] = useState('')
   const [starterPackLoading, setStarterPackLoading] = useState(false)
+  const [worldBossTicketBuyLoading, setWorldBossTicketBuyLoading] = useState(false)
   const [premiumError, setPremiumError] = useState('')
   const [premiumLoading, setPremiumLoading] = useState<string | null>(null)
   const [premiumClaimLoading, setPremiumClaimLoading] = useState(false)
@@ -3677,6 +3678,9 @@ function App() {
       setStarterPackError('')
       setStarterPackLoading(false)
     }
+    if (activePanel !== 'shop') {
+      setWorldBossTicketBuyLoading(false)
+    }
     if (activePanel !== 'premium') {
       setPremiumError('')
       setPremiumLoading(null)
@@ -4530,25 +4534,36 @@ function App() {
   const buyWorldBossTicket = async () => {
     const state = gameStateRef.current
     if (!state) return
+    if (worldBossTicketBuyLoading) return
     const wallet = publicKey?.toBase58()
     if (!wallet) {
       pushLog(state.eventLog, 'Connect wallet to buy World Boss tickets.')
       syncHud()
       return
     }
-    const result = await callGameSecureAuthed('worldboss_ticket_buy', {}, true)
-    if (!result.ok) {
-      pushLog(state.eventLog, result.error || 'Failed to buy World Boss ticket.')
+    if (state.gold < WORLD_BOSS_TICKET_COST) {
+      pushLog(state.eventLog, `Not enough gold. Need ${WORLD_BOSS_TICKET_COST}.`)
       syncHud()
       return
     }
-    state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
-    if (typeof result.worldBossTickets === 'number') {
-      state.worldBossTickets = Math.max(0, Math.floor(result.worldBossTickets))
+    setWorldBossTicketBuyLoading(true)
+    try {
+      const result = await callGameSecureAuthed('worldboss_ticket_buy', {}, true)
+      if (!result.ok) {
+        pushLog(state.eventLog, result.error || 'Failed to buy World Boss ticket.')
+        syncHud()
+        return
+      }
+      state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
+      if (typeof result.worldBossTickets === 'number') {
+        state.worldBossTickets = Math.max(0, Math.floor(result.worldBossTickets))
+      }
+      pushLog(state.eventLog, 'World Boss ticket purchased.')
+      syncHud()
+      void saveGameState()
+    } finally {
+      setWorldBossTicketBuyLoading(false)
     }
-    pushLog(state.eventLog, 'World Boss ticket purchased.')
-    syncHud()
-    void saveGameState()
   }
 
   const grantQuestRewardItem = (state: GameState, item: QuestRewardItem) => {
@@ -5849,8 +5864,12 @@ function App() {
                   Cost: {WORLD_BOSS_TICKET_COST}
                 </div>
                 <img className="shop-icon" src={iconWorldBossTicket} alt="World boss ticket" />
-                <button type="button" onClick={buyWorldBossTicket}>
-                  Buy
+                <button
+                  type="button"
+                  onClick={buyWorldBossTicket}
+                  disabled={worldBossTicketBuyLoading || hud.gold < WORLD_BOSS_TICKET_COST}
+                >
+                  {worldBossTicketBuyLoading ? 'Processing...' : 'Buy'}
                 </button>
               </div>
             </div>
