@@ -1265,6 +1265,52 @@ const buildPersistedState = (state: GameState): PersistedState => ({
   stakeId: state.stakeId,
 })
 
+const applyOfflineEnergyRegenLocal = (state: GameState, elapsedSecRaw: number) => {
+  const energyMax = Math.max(1, state.energyMax)
+  let energy = clamp(state.energy, 0, energyMax)
+  let timer = clamp(state.energyTimer, 1, ENERGY_REGEN_SECONDS)
+  const elapsedSec = Math.max(0, Math.floor(elapsedSecRaw))
+
+  const prevEnergy = energy
+  const prevTimer = timer
+
+  if (energy >= energyMax) {
+    state.energy = energyMax
+    state.energyTimer = ENERGY_REGEN_SECONDS
+    return prevEnergy !== state.energy || prevTimer !== state.energyTimer
+  }
+  if (elapsedSec <= 0) return false
+
+  let remaining = elapsedSec
+  if (remaining < timer) {
+    timer -= remaining
+    remaining = 0
+  } else {
+    remaining -= timer
+    energy += 1
+    timer = ENERGY_REGEN_SECONDS
+  }
+
+  if (energy >= energyMax) {
+    energy = energyMax
+    timer = ENERGY_REGEN_SECONDS
+    remaining = 0
+  }
+
+  if (remaining > 0 && energy < energyMax) {
+    const passiveTicks = Math.floor(remaining / ENERGY_REGEN_SECONDS)
+    if (passiveTicks > 0) {
+      energy = Math.min(energyMax, energy + passiveTicks)
+      remaining -= passiveTicks * ENERGY_REGEN_SECONDS
+    }
+    timer = energy >= energyMax ? ENERGY_REGEN_SECONDS : Math.max(1, ENERGY_REGEN_SECONDS - remaining)
+  }
+
+  state.energy = clamp(energy, 0, energyMax)
+  state.energyTimer = clamp(timer, 1, ENERGY_REGEN_SECONDS)
+  return prevEnergy !== state.energy || prevTimer !== state.energyTimer
+}
+
 const applyPersistedState = (state: GameState, saved: PersistedState, savedUpdatedAt?: string) => {
   if (!saved || saved.version !== PERSIST_VERSION) return
 
@@ -1296,37 +1342,8 @@ const applyPersistedState = (state: GameState, saved: PersistedState, savedUpdat
 
   const savedAtMs = savedUpdatedAt ? new Date(savedUpdatedAt).getTime() : Number.NaN
   const offlineSeconds = Number.isFinite(savedAtMs) ? Math.max(0, Math.floor((Date.now() - savedAtMs) / 1000)) : 0
-  if (offlineSeconds > 0 && state.energy < state.energyMax) {
-    let remaining = offlineSeconds
-    let energy = state.energy
-    let timer = clamp(state.energyTimer, 1, ENERGY_REGEN_SECONDS)
-
-    if (remaining < timer) {
-      timer -= remaining
-      remaining = 0
-    } else {
-      remaining -= timer
-      energy += 1
-      timer = ENERGY_REGEN_SECONDS
-    }
-
-    if (energy >= state.energyMax) {
-      energy = state.energyMax
-      timer = ENERGY_REGEN_SECONDS
-      remaining = 0
-    }
-
-    if (remaining > 0 && energy < state.energyMax) {
-      const passiveTicks = Math.floor(remaining / ENERGY_REGEN_SECONDS)
-      if (passiveTicks > 0) {
-        energy = Math.min(state.energyMax, energy + passiveTicks)
-        remaining -= passiveTicks * ENERGY_REGEN_SECONDS
-      }
-      timer = energy >= state.energyMax ? ENERGY_REGEN_SECONDS : Math.max(1, ENERGY_REGEN_SECONDS - remaining)
-    }
-
-    state.energy = clamp(energy, 0, state.energyMax)
-    state.energyTimer = clamp(timer, 1, ENERGY_REGEN_SECONDS)
+  if (offlineSeconds > 0) {
+    applyOfflineEnergyRegenLocal(state, offlineSeconds)
   } else if (state.energy >= state.energyMax) {
     state.energyTimer = ENERGY_REGEN_SECONDS
   }
@@ -2996,6 +3013,7 @@ function App() {
   const fortuneSpinTimeoutRef = useRef<number | null>(null)
   const dungeonRunBusyRef = useRef(false)
   const consumableBusyIdsRef = useRef<Set<number>>(new Set())
+  const lastActiveAtRef = useRef<number>(Date.now())
   const pendingProfileRef = useRef<LoadedProfile | null>(null)
   const spriteCacheRef = useRef<PlayerSpriteMap>({
     knight: null,
@@ -3786,6 +3804,36 @@ function App() {
       await refreshOfflineEnergyFromServer(false)
     })()
   }, [stage, connected, publicKey, signMessage])
+
+  useEffect(() => {
+    if (stage !== 'game') return
+    lastActiveAtRef.current = Date.now()
+
+    const handleResume = () => {
+      if (document.visibilityState !== 'visible') {
+        lastActiveAtRef.current = Date.now()
+        return
+      }
+
+      const now = Date.now()
+      const elapsedSec = Math.max(0, Math.floor((now - lastActiveAtRef.current) / 1000))
+      lastActiveAtRef.current = now
+
+      const state = gameStateRef.current
+      if (state && elapsedSec > 0) {
+        const changed = applyOfflineEnergyRegenLocal(state, elapsedSec)
+        if (changed) syncHud()
+      }
+      void refreshOfflineEnergyFromServer(false)
+    }
+
+    window.addEventListener('focus', handleResume)
+    document.addEventListener('visibilitychange', handleResume)
+    return () => {
+      window.removeEventListener('focus', handleResume)
+      document.removeEventListener('visibilitychange', handleResume)
+    }
+  }, [stage, connected, publicKey])
 
   useEffect(() => {
     if (stage !== 'game') return
