@@ -365,17 +365,18 @@
 .app.mobile .canvas-special-menu {
   position: relative;
   width: 100%;
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: visible;
   margin: 0 0 8px;
-  padding-bottom: 4px;
+  padding-bottom: 0;
 }
 
 .app.mobile .canvas-special-menu .starter-pack-btn {
-  flex: 0 0 110px;
-  min-width: 110px;
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
   padding: 6px 4px;
   border-radius: 12px;
   background: linear-gradient(160deg, rgba(22, 16, 10, 0.9), rgba(10, 12, 18, 0.88));
@@ -4810,6 +4811,18 @@ button.ghost {
 .app.mobile .village-upgrade-timer {
   font-size: 10px;
   padding: 3px 7px;
+}
+
+.app.mobile .village-slot-castle {
+  top: 31.5%;
+}
+
+.app.mobile .village-slot-btn-castle {
+  top: 40.5%;
+}
+
+.app.mobile .village-upgrade-timer-castle {
+  top: 25%;
 }
 
 .app.mobile .village-mini-backdrop {
