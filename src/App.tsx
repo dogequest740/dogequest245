@@ -2980,6 +2980,8 @@ function App() {
   const [fortuneSpinResult, setFortuneSpinResult] = useState<FortuneReward | null>(null)
   const [fortuneSpinUsed, setFortuneSpinUsed] = useState<'free' | 'paid' | null>(null)
   const [isMobile, setIsMobile] = useState(false)
+  const [dungeonRunBusy, setDungeonRunBusy] = useState(false)
+  const [, setConsumableBusyVersion] = useState(0)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const gameStateRef = useRef<GameState | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -2992,6 +2994,8 @@ function App() {
   const referralProcessedRef = useRef(false)
   const fortuneAutoOpenRef = useRef(false)
   const fortuneSpinTimeoutRef = useRef<number | null>(null)
+  const dungeonRunBusyRef = useRef(false)
+  const consumableBusyIdsRef = useRef<Set<number>>(new Set())
   const pendingProfileRef = useRef<LoadedProfile | null>(null)
   const spriteCacheRef = useRef<PlayerSpriteMap>({
     knight: null,
@@ -5036,56 +5040,70 @@ function App() {
     return { label: questRewardItemName(item), applied: true }
   }
 
+  const setConsumableBusy = (itemId: number, busy: boolean) => {
+    if (busy) {
+      consumableBusyIdsRef.current.add(itemId)
+    } else {
+      consumableBusyIdsRef.current.delete(itemId)
+    }
+    setConsumableBusyVersion((value) => value + 1)
+  }
+
   const useConsumable = async (item: ConsumableItem) => {
     const state = gameStateRef.current
     if (!state) return
+    if (consumableBusyIdsRef.current.has(item.id)) return
+    setConsumableBusy(item.id, true)
     let applied = true
     let message = ''
-
-    switch (item.type) {
-      case 'energy-small':
-        state.energy = clamp(state.energy + 10, 0, state.energyMax)
-        message = 'Energy restored by 10.'
-        break
-      case 'energy-full':
-        state.energy = state.energyMax
-        message = 'Energy fully restored.'
-        break
-      case 'speed':
-        state.speedBuffTime = Math.max(state.speedBuffTime, 300)
-        message = 'Speed increased for 300s.'
-        break
-      case 'attack':
-        state.attackSpeedBuffTime = Math.max(state.attackSpeedBuffTime, 300)
-        message = 'Attack speed increased for 300s.'
-        break
-      case 'key':
-      {
-        const result = await callDungeonSecureAuthed('use_key')
-        if (!result.ok) {
-          applied = false
-          message = result.error || 'Failed to use dungeon key.'
+    try {
+      switch (item.type) {
+        case 'energy-small':
+          state.energy = clamp(state.energy + 10, 0, state.energyMax)
+          message = 'Energy restored by 10.'
+          break
+        case 'energy-full':
+          state.energy = state.energyMax
+          message = 'Energy fully restored.'
+          break
+        case 'speed':
+          state.speedBuffTime = Math.max(state.speedBuffTime, 300)
+          message = 'Speed increased for 300s.'
+          break
+        case 'attack':
+          state.attackSpeedBuffTime = Math.max(state.attackSpeedBuffTime, 300)
+          message = 'Attack speed increased for 300s.'
+          break
+        case 'key':
+        {
+          const result = await callDungeonSecureAuthed('use_key', { consumableId: item.id })
+          if (!result.ok) {
+            applied = false
+            message = result.error || 'Failed to use dungeon key.'
+            break
+          }
+          state.tickets = Math.max(0, Math.round(result.tickets ?? state.tickets))
+          if (result.ticketDay) {
+            state.ticketDay = result.ticketDay
+          }
+          message = 'Dungeon key used.'
           break
         }
-        state.tickets = Math.max(0, Math.round(result.tickets ?? state.tickets))
-        if (result.ticketDay) {
-          state.ticketDay = result.ticketDay
-        }
-        message = 'Dungeon key used.'
-        break
+        default:
+          applied = false
+          message = 'Cannot use item.'
+          break
       }
-      default:
-        applied = false
-        message = 'Cannot use item.'
-        break
-    }
 
-    if (applied) {
-      state.consumables = state.consumables.filter((entry) => entry.id !== item.id)
+      if (applied) {
+        state.consumables = state.consumables.filter((entry) => entry.id !== item.id)
+      }
+      pushLog(state.eventLog, message)
+      syncHud()
+      void saveGameState()
+    } finally {
+      setConsumableBusy(item.id, false)
     }
-    pushLog(state.eventLog, message)
-    syncHud()
-    void saveGameState()
   }
 
   const joinWorldBoss = () => {
@@ -5162,27 +5180,40 @@ function App() {
     if (!state) return
     const score = getTierScore(state.equipment)
     if (score < dungeon.tierScore) return
-
-    const result = await callDungeonSecureAuthed('run', { dungeonId: dungeon.id })
-    if (!result.ok) {
-      pushLog(state.eventLog, result.error || 'Dungeon entry failed.')
+    if (state.tickets <= 0) {
+      pushLog(state.eventLog, 'No dungeon keys left.')
       syncHud()
       return
     }
+    if (dungeonRunBusyRef.current) return
+    dungeonRunBusyRef.current = true
+    setDungeonRunBusy(true)
 
-    const baseReward = Math.max(0, Math.round(result.reward ?? dungeon.reward))
-    const reward = isPremiumActiveAt(state.premiumEndsAt)
-      ? Math.max(0, Math.round(baseReward * PREMIUM_DUNGEON_CRYSTAL_MULTIPLIER))
-      : baseReward
-    state.tickets = Math.max(0, Math.round(result.tickets ?? state.tickets))
-    if (result.ticketDay) {
-      state.ticketDay = result.ticketDay
+    try {
+      const result = await callDungeonSecureAuthed('run', { dungeonId: dungeon.id })
+      if (!result.ok) {
+        pushLog(state.eventLog, result.error || 'Dungeon entry failed.')
+        syncHud()
+        return
+      }
+
+      const baseReward = Math.max(0, Math.round(result.reward ?? dungeon.reward))
+      const reward = isPremiumActiveAt(state.premiumEndsAt)
+        ? Math.max(0, Math.round(baseReward * PREMIUM_DUNGEON_CRYSTAL_MULTIPLIER))
+        : baseReward
+      state.tickets = Math.max(0, Math.round(result.tickets ?? state.tickets))
+      if (result.ticketDay) {
+        state.ticketDay = result.ticketDay
+      }
+      grantCrystals(state, reward)
+      state.dungeonRuns += 1
+      pushLog(state.eventLog, `${dungeon.name} cleared. +${reward} crystals.`)
+      syncHud()
+      void saveGameState()
+    } finally {
+      dungeonRunBusyRef.current = false
+      setDungeonRunBusy(false)
     }
-    grantCrystals(state, reward)
-    state.dungeonRuns += 1
-    pushLog(state.eventLog, `${dungeon.name} cleared. +${reward} crystals.`)
-    syncHud()
-    void saveGameState()
   }
 
   const acknowledgeLevelUp = () => {
@@ -6201,8 +6232,12 @@ function App() {
                         <div className="inventory-slot">{item.description}</div>
                       </div>
                       <div className="inventory-actions">
-                        <button type="button" onClick={() => useConsumable(item)}>
-                          Use
+                        <button
+                          type="button"
+                          disabled={consumableBusyIdsRef.current.has(item.id)}
+                          onClick={() => useConsumable(item)}
+                        >
+                          {consumableBusyIdsRef.current.has(item.id) ? 'Using...' : 'Use'}
                         </button>
                       </div>
                     </div>
@@ -6255,8 +6290,8 @@ function App() {
                     <div className="dungeon-bar">
                       <div className="dungeon-bar-fill" style={{ width: `${progress}%` }} />
                     </div>
-                    <button type="button" disabled={!canEnter} onClick={() => runDungeon(dungeon)}>
-                      Enter
+                    <button type="button" disabled={!canEnter || dungeonRunBusy} onClick={() => runDungeon(dungeon)}>
+                      {dungeonRunBusy ? 'Running...' : 'Enter'}
                     </button>
                   </div>
                 )

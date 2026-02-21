@@ -103,63 +103,286 @@ const getTierScoreFromState = (state: unknown) => {
   return score;
 };
 
+const asInt = (value: unknown, fallback = 0) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.floor(parsed);
+};
+
 type DungeonStateRow = {
   wallet: string;
   tickets: number;
   ticket_day: string;
   dungeon_runs: number;
+  updated_at?: string;
 };
 
+const toDungeonState = (
+  wallet: string,
+  row: Record<string, unknown>,
+  fallbackIso: string,
+): DungeonStateRow => ({
+  wallet,
+  tickets: Math.max(0, asInt(row.tickets, 0)),
+  ticket_day: String(row.ticket_day ?? ""),
+  dungeon_runs: Math.max(0, asInt(row.dungeon_runs, 0)),
+  updated_at: String(row.updated_at ?? fallbackIso),
+});
+
 const ensureDungeonState = async (supabase: ReturnType<typeof createClient>, wallet: string, now: Date) => {
-  const today = todayKeyUtc(now);
-  const { data, error } = await supabase
-    .from("dungeon_state")
-    .select("wallet, tickets, ticket_day, dungeon_runs")
-    .eq("wallet", wallet)
-    .maybeSingle();
+  const dayKey = todayKeyUtc(now);
+  const nowIso = now.toISOString();
 
-  if (error) return { ok: false as const, error: "Failed to load dungeon state." };
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const { data, error } = await supabase
+      .from("dungeon_state")
+      .select("wallet, tickets, ticket_day, dungeon_runs, updated_at")
+      .eq("wallet", wallet)
+      .maybeSingle();
+    if (error) return { ok: false as const, error: "Failed to load dungeon state." };
 
-  if (!data) {
-    const initialState: DungeonStateRow = {
-      wallet,
-      tickets: TICKETS_MAX,
-      ticket_day: today,
-      dungeon_runs: 0,
-    };
-    const { error: createError } = await supabase.from("dungeon_state").insert({
-      wallet,
-      tickets: TICKETS_MAX,
-      ticket_day: today,
-      dungeon_runs: 0,
-      updated_at: now.toISOString(),
-    });
-    if (createError) return { ok: false as const, error: "Failed to create dungeon state." };
-    return { ok: true as const, state: initialState };
-  }
+    let current: DungeonStateRow;
+    if (data) {
+      current = toDungeonState(wallet, data as Record<string, unknown>, nowIso);
+    } else {
+      const initial: DungeonStateRow = {
+        wallet,
+        tickets: TICKETS_MAX,
+        ticket_day: dayKey,
+        dungeon_runs: 0,
+        updated_at: nowIso,
+      };
+      const { error: insertError } = await supabase
+        .from("dungeon_state")
+        .insert(initial);
+      if (insertError) continue;
+      current = initial;
+    }
 
-  const state: DungeonStateRow = {
-    wallet,
-    tickets: Math.max(0, Number(data.tickets ?? 0)),
-    ticket_day: String(data.ticket_day ?? today),
-    dungeon_runs: Math.max(0, Number(data.dungeon_runs ?? 0)),
-  };
+    if (current.ticket_day === dayKey) {
+      return { ok: true as const, state: current };
+    }
 
-  if (state.ticket_day !== today) {
-    state.ticket_day = today;
-    state.tickets = TICKETS_MAX;
-    const { error: resetError } = await supabase
+    const { data: updated, error: updateError } = await supabase
       .from("dungeon_state")
       .update({
-        tickets: state.tickets,
-        ticket_day: state.ticket_day,
-        updated_at: now.toISOString(),
+        tickets: TICKETS_MAX,
+        ticket_day: dayKey,
+        updated_at: nowIso,
       })
-      .eq("wallet", wallet);
-    if (resetError) return { ok: false as const, error: "Failed to reset daily dungeon keys." };
+      .eq("wallet", wallet)
+      .eq("ticket_day", current.ticket_day)
+      .eq("tickets", current.tickets)
+      .eq("dungeon_runs", current.dungeon_runs)
+      .select("wallet, tickets, ticket_day, dungeon_runs, updated_at")
+      .maybeSingle();
+
+    if (!updateError && updated) {
+      return { ok: true as const, state: toDungeonState(wallet, updated as Record<string, unknown>, nowIso) };
+    }
   }
 
-  return { ok: true as const, state };
+  return { ok: false as const, error: "Failed to sync dungeon state." };
+};
+
+const addDungeonTicket = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  now: Date,
+) => {
+  const nowIso = now.toISOString();
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const ensured = await ensureDungeonState(supabase, wallet, now);
+    if (!ensured.ok) return ensured;
+
+    const current = ensured.state;
+    if (current.tickets >= SHOP_TICKET_CAP) {
+      return { ok: false as const, error: "Key storage is full.", state: current };
+    }
+
+    const nextTickets = current.tickets + 1;
+    const { data: updated, error: updateError } = await supabase
+      .from("dungeon_state")
+      .update({
+        tickets: nextTickets,
+        updated_at: nowIso,
+      })
+      .eq("wallet", wallet)
+      .eq("ticket_day", current.ticket_day)
+      .eq("tickets", current.tickets)
+      .eq("dungeon_runs", current.dungeon_runs)
+      .select("wallet, tickets, ticket_day, dungeon_runs, updated_at")
+      .maybeSingle();
+
+    if (!updateError && updated) {
+      return { ok: true as const, state: toDungeonState(wallet, updated as Record<string, unknown>, nowIso) };
+    }
+  }
+
+  return { ok: false as const, error: "Dungeon key conflict, retry." };
+};
+
+const spendDungeonTicket = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  now: Date,
+) => {
+  const nowIso = now.toISOString();
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const ensured = await ensureDungeonState(supabase, wallet, now);
+    if (!ensured.ok) return ensured;
+
+    const current = ensured.state;
+    if (current.tickets <= 0) {
+      return { ok: false as const, error: "No dungeon keys left.", state: current };
+    }
+
+    const nextTickets = current.tickets - 1;
+    const nextDungeonRuns = current.dungeon_runs + 1;
+    const { data: updated, error: updateError } = await supabase
+      .from("dungeon_state")
+      .update({
+        tickets: nextTickets,
+        dungeon_runs: nextDungeonRuns,
+        updated_at: nowIso,
+      })
+      .eq("wallet", wallet)
+      .eq("ticket_day", current.ticket_day)
+      .eq("tickets", current.tickets)
+      .eq("dungeon_runs", current.dungeon_runs)
+      .select("wallet, tickets, ticket_day, dungeon_runs, updated_at")
+      .maybeSingle();
+
+    if (!updateError && updated) {
+      return { ok: true as const, state: toDungeonState(wallet, updated as Record<string, unknown>, nowIso) };
+    }
+  }
+
+  return { ok: false as const, error: "Dungeon run conflict, retry." };
+};
+
+const consumeDungeonKeyFromProfile = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  consumableId: number | null,
+  now: Date,
+) => {
+  const hasTargetId = typeof consumableId === "number" && Number.isFinite(consumableId) && consumableId > 0;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const { data: profileRow, error: profileError } = await supabase
+      .from("profiles")
+      .select("state, updated_at")
+      .eq("wallet", wallet)
+      .maybeSingle();
+
+    if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+      return { ok: false as const, error: "Profile not found." };
+    }
+
+    const nextState = structuredClone(profileRow.state) as Record<string, unknown>;
+    const rawConsumables = Array.isArray(nextState.consumables) ? [...nextState.consumables] : [];
+    let removed = false;
+    const nextConsumables: unknown[] = [];
+    let maxId = 0;
+
+    for (const entry of rawConsumables) {
+      if (!entry || typeof entry !== "object") {
+        nextConsumables.push(entry);
+        continue;
+      }
+      const row = entry as Record<string, unknown>;
+      const entryId = Math.max(0, asInt(row.id, 0));
+      maxId = Math.max(maxId, entryId);
+      const entryType = String(row.type ?? "");
+      const matchesTarget = hasTargetId ? entryId === consumableId : true;
+      if (!removed && entryType === "key" && matchesTarget) {
+        removed = true;
+        continue;
+      }
+      nextConsumables.push(row);
+    }
+
+    if (!removed) {
+      return { ok: false as const, error: "Dungeon key item not found." };
+    }
+
+    nextState.consumables = nextConsumables;
+    nextState.consumableId = Math.max(asInt(nextState.consumableId, 0), maxId);
+
+    const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+    const { data: updated, error: updateError } = await supabase
+      .from("profiles")
+      .update({
+        state: nextState,
+        updated_at: now.toISOString(),
+      })
+      .eq("wallet", wallet)
+      .eq("updated_at", expectedUpdatedAt)
+      .select("wallet")
+      .maybeSingle();
+
+    if (!updateError && updated) {
+      return { ok: true as const };
+    }
+  }
+
+  return { ok: false as const, error: "Profile changed concurrently, retry." };
+};
+
+const refundDungeonKeyToProfile = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  now: Date,
+) => {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const { data: profileRow, error: profileError } = await supabase
+      .from("profiles")
+      .select("state, updated_at")
+      .eq("wallet", wallet)
+      .maybeSingle();
+    if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+      return false;
+    }
+
+    const nextState = structuredClone(profileRow.state) as Record<string, unknown>;
+    const rawConsumables = Array.isArray(nextState.consumables) ? [...nextState.consumables] : [];
+    let maxId = Math.max(0, asInt(nextState.consumableId, 0));
+    for (const entry of rawConsumables) {
+      if (!entry || typeof entry !== "object") continue;
+      const row = entry as Record<string, unknown>;
+      maxId = Math.max(maxId, Math.max(0, asInt(row.id, 0)));
+    }
+
+    const nextId = maxId + 1;
+    const keyItem = {
+      id: nextId,
+      type: "key",
+      name: "Dungeon Key",
+      description: "+1 dungeon entry.",
+      icon: "",
+    };
+
+    nextState.consumables = [keyItem, ...rawConsumables];
+    nextState.consumableId = nextId;
+
+    const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+    const { data: updated, error: updateError } = await supabase
+      .from("profiles")
+      .update({
+        state: nextState,
+        updated_at: now.toISOString(),
+      })
+      .eq("wallet", wallet)
+      .eq("updated_at", expectedUpdatedAt)
+      .select("wallet")
+      .maybeSingle();
+
+    if (!updateError && updated) {
+      return true;
+    }
+  }
+
+  return false;
 };
 
 const getSessionWallet = async (supabase: ReturnType<typeof createClient>, req: Request, now: Date) => {
@@ -369,32 +592,45 @@ serve(async (req) => {
   }
 
   if (action === "use_key") {
-    const stateResult = await ensureDungeonState(supabase, auth.wallet, now);
-    if (!stateResult.ok) return json({ ok: false, error: stateResult.error });
+    const consumableIdRaw = Math.max(0, asInt(body.consumableId, 0));
+    const consumableId = consumableIdRaw > 0 ? consumableIdRaw : null;
 
-    if (stateResult.state.tickets >= SHOP_TICKET_CAP) {
+    const stateCheck = await ensureDungeonState(supabase, auth.wallet, now);
+    if (!stateCheck.ok) return json({ ok: false, error: stateCheck.error });
+    if (stateCheck.state.tickets >= SHOP_TICKET_CAP) {
       return json({ ok: false, error: "Key storage is full." });
     }
 
-    const nextTickets = stateResult.state.tickets + 1;
-    const { error } = await supabase
-      .from("dungeon_state")
-      .update({
-        tickets: nextTickets,
-        updated_at: now.toISOString(),
-      })
-      .eq("wallet", auth.wallet);
+    const consumeResult = await consumeDungeonKeyFromProfile(supabase, auth.wallet, consumableId, now);
+    if (!consumeResult.ok) {
+      await auditEvent(supabase, auth.wallet, "dungeon_key_use_denied", {
+        consumableId,
+        reason: consumeResult.error,
+      });
+      return json({ ok: false, error: consumeResult.error });
+    }
 
-    if (error) return json({ ok: false, error: "Failed to apply key." });
+    const ticketResult = await addDungeonTicket(supabase, auth.wallet, now);
+    if (!ticketResult.ok) {
+      const refunded = await refundDungeonKeyToProfile(supabase, auth.wallet, now);
+      await auditEvent(supabase, auth.wallet, "dungeon_key_refund_attempt", {
+        consumableId,
+        reason: ticketResult.error,
+        refunded,
+      });
+      return json({ ok: false, error: ticketResult.error || "Failed to apply key." });
+    }
+
     await auditEvent(supabase, auth.wallet, "dungeon_key_used", {
-      tickets: nextTickets,
-      ticketDay: stateResult.state.ticket_day,
+      consumableId,
+      tickets: ticketResult.state.tickets,
+      ticketDay: ticketResult.state.ticket_day,
     });
     return json({
       ok: true,
-      tickets: nextTickets,
-      ticketDay: stateResult.state.ticket_day,
-      dungeonRuns: stateResult.state.dungeon_runs,
+      tickets: ticketResult.state.tickets,
+      ticketDay: ticketResult.state.ticket_day,
+      dungeonRuns: ticketResult.state.dungeon_runs,
     });
   }
 
@@ -403,13 +639,6 @@ serve(async (req) => {
     const dungeonIndex = Number(dungeonId.replace("crypt-", "")) - 1;
     if (!Number.isInteger(dungeonIndex) || dungeonIndex < 0 || dungeonIndex >= DUNGEON_REQUIREMENTS.length) {
       return json({ ok: false, error: "Invalid dungeon id." });
-    }
-
-    const stateResult = await ensureDungeonState(supabase, auth.wallet, now);
-    if (!stateResult.ok) return json({ ok: false, error: stateResult.error });
-
-    if (stateResult.state.tickets <= 0) {
-      return json({ ok: false, error: "No dungeon keys left." });
     }
 
     const { data: profileRow, error: profileError } = await supabase
@@ -428,35 +657,27 @@ serve(async (req) => {
       return json({ ok: false, error: `Requires Tier Score ${requirement}.` });
     }
 
+    const ticketSpend = await spendDungeonTicket(supabase, auth.wallet, now);
+    if (!ticketSpend.ok) {
+      return json({ ok: false, error: ticketSpend.error || "No dungeon keys left." });
+    }
+
     const reward = DUNGEON_REWARDS[dungeonIndex];
-    const nextTickets = stateResult.state.tickets - 1;
-    const nextDungeonRuns = stateResult.state.dungeon_runs + 1;
-
-    const { error: updateError } = await supabase
-      .from("dungeon_state")
-      .update({
-        tickets: nextTickets,
-        dungeon_runs: nextDungeonRuns,
-        updated_at: now.toISOString(),
-      })
-      .eq("wallet", auth.wallet);
-
-    if (updateError) return json({ ok: false, error: "Failed to save dungeon result." });
 
     await auditEvent(supabase, auth.wallet, "dungeon_run", {
       dungeonId,
       dungeonIndex: dungeonIndex + 1,
       reward,
-      tickets: nextTickets,
-      dungeonRuns: nextDungeonRuns,
+      tickets: ticketSpend.state.tickets,
+      dungeonRuns: ticketSpend.state.dungeon_runs,
     });
 
     return json({
       ok: true,
       reward,
-      tickets: nextTickets,
-      ticketDay: stateResult.state.ticket_day,
-      dungeonRuns: nextDungeonRuns,
+      tickets: ticketSpend.state.tickets,
+      ticketDay: ticketSpend.state.ticket_day,
+      dungeonRuns: ticketSpend.state.dungeon_runs,
     });
   }
 
