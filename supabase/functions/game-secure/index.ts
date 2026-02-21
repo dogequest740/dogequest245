@@ -32,6 +32,10 @@ const SOL_LAMPORTS = 1_000_000_000;
 const PREMIUM_TX_MAX_AGE_SECONDS = 2 * 60 * 60;
 const BLOCKED_ERROR_MESSAGE = "You have been banned for cheating.";
 const FORTUNE_SPIN_PACKS = [1, 10] as const;
+const FORTUNE_SPIN_PRICES_LAMPORTS: Record<(typeof FORTUNE_SPIN_PACKS)[number], number> = {
+  1: Math.round(0.007 * SOL_LAMPORTS),
+  10: Math.round(0.06 * SOL_LAMPORTS),
+};
 const ENERGY_REGEN_SECONDS = 420;
 const PREMIUM_PLANS = [
   { id: "premium-30", days: 30, lamports: Math.round(0.5 * SOL_LAMPORTS) },
@@ -232,18 +236,19 @@ const getPremiumPlan = (planIdRaw: unknown, daysRaw: unknown) => {
   return null;
 };
 
-const wasPremiumTxAlreadyProcessed = async (
+const wasTxAlreadyProcessed = async (
   supabase: ReturnType<typeof createClient>,
   wallet: string,
+  kinds: readonly string[],
   txSignature: string,
 ) => {
   const { data, error } = await supabase
     .from("security_events")
     .select("details")
     .eq("wallet", wallet)
-    .eq("kind", "premium_buy")
+    .in("kind", [...kinds])
     .order("created_at", { ascending: false })
-    .limit(300);
+    .limit(600);
 
   if (error || !data) return false;
   for (const row of data as Array<{ details?: Record<string, unknown> }>) {
@@ -255,10 +260,24 @@ const wasPremiumTxAlreadyProcessed = async (
   return false;
 };
 
-const verifyPremiumPaymentTx = async (
+const wasPremiumTxAlreadyProcessed = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  txSignature: string,
+) => wasTxAlreadyProcessed(supabase, wallet, ["premium_buy"], txSignature);
+
+const wasFortuneTxAlreadyProcessed = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  txSignature: string,
+) => wasTxAlreadyProcessed(supabase, wallet, ["fortune_buy"], txSignature);
+
+const verifySolTransferTx = async (
   wallet: string,
   txSignature: string,
   lamportsRequired: number,
+  destinationWallet: string,
+  transferMismatchError: string,
   now: Date,
 ) => {
   const connection = getSolanaConnection();
@@ -293,14 +312,14 @@ const verifyPremiumPaymentTx = async (
     const source = String(info.source ?? "");
     const destination = String(info.destination ?? "");
     const lamports = Math.max(0, asInt(info.lamports, 0));
-    if (source === wallet && destination === PREMIUM_PAYMENT_WALLET && lamports >= lamportsRequired) {
+    if (source === wallet && destination === destinationWallet && lamports >= lamportsRequired) {
       matchedTransfer = true;
       break;
     }
   }
 
   if (!matchedTransfer) {
-    return { ok: false as const, error: "Payment transfer mismatch for the selected Premium plan." };
+    return { ok: false as const, error: transferMismatchError };
   }
 
   return {
@@ -309,6 +328,36 @@ const verifyPremiumPaymentTx = async (
     slot: tx.slot,
   };
 };
+
+const verifyPremiumPaymentTx = async (
+  wallet: string,
+  txSignature: string,
+  lamportsRequired: number,
+  now: Date,
+) =>
+  verifySolTransferTx(
+    wallet,
+    txSignature,
+    lamportsRequired,
+    PREMIUM_PAYMENT_WALLET,
+    "Payment transfer mismatch for the selected Premium plan.",
+    now,
+  );
+
+const verifyFortunePaymentTx = async (
+  wallet: string,
+  txSignature: string,
+  lamportsRequired: number,
+  now: Date,
+) =>
+  verifySolTransferTx(
+    wallet,
+    txSignature,
+    lamportsRequired,
+    PREMIUM_PAYMENT_WALLET,
+    "Payment transfer mismatch for the selected fortune pack.",
+    now,
+  );
 
 const normalizeConsumables = (raw: unknown) => {
   if (!Array.isArray(raw)) return { rows: [] as ConsumableRow[], maxId: 0 };
@@ -537,10 +586,11 @@ const validateStateTransition = (
   const maxDungeonGain = Math.max(2, Math.floor(safeElapsed / 5));
   if (dungeonDelta > maxDungeonGain) return "Suspicious dungeon run gain detected.";
 
-  const worldBossAllowance = Math.floor(safeElapsed / (12 * 60 * 60)) * 600 + 600;
-  const referralAllowance = Math.floor(safeElapsed / (24 * 60 * 60)) * 5000 + 2000;
+  // Crystals must primarily come from dungeon runs and matured staking claims.
+  // World boss/referral/fortune/premium writes are server-side and should not be minted via profile_save.
+  const maxCrystalPerDungeonRun = 50;
   const stakeAllowance = Math.floor(stakeDecrease * (1 + STAKE_BONUS_RATE));
-  const maxCrystalGain = dungeonDelta * 35 + worldBossAllowance + referralAllowance + stakeAllowance + 500;
+  const maxCrystalGain = dungeonDelta * maxCrystalPerDungeonRun + stakeAllowance;
   if (crystalGain > maxCrystalGain) return "Suspicious crystal gain detected.";
 
   const maxGoldGain = Math.floor(safeElapsed / 60) * 15000 + killsDelta * 150 + dungeonDelta * 20000 + 100000;
@@ -1580,15 +1630,32 @@ serve(async (req) => {
       return json({ ok: false, error: validationError });
     }
 
-    const { error } = await supabase.from("profiles").upsert(
-      {
-        wallet: auth.wallet,
-        state: normalizedState,
-        updated_at: now.toISOString(),
-      },
-      { onConflict: "wallet" },
-    );
-    if (error) return json({ ok: false, error: "Failed to save profile." });
+    if (!existing) {
+      const { error: insertError } = await supabase
+        .from("profiles")
+        .insert({
+          wallet: auth.wallet,
+          state: normalizedState,
+          updated_at: now.toISOString(),
+        });
+      if (insertError) return json({ ok: false, error: "Failed to save profile." });
+    } else {
+      const expectedUpdatedAt = String(existing.updated_at ?? "");
+      const { data: updated, error: updateError } = await supabase
+        .from("profiles")
+        .update({
+          state: normalizedState,
+          updated_at: now.toISOString(),
+        })
+        .eq("wallet", auth.wallet)
+        .eq("updated_at", expectedUpdatedAt)
+        .select("wallet")
+        .maybeSingle();
+
+      if (updateError || !updated) {
+        return json({ ok: false, error: "Profile changed concurrently, retry save." });
+      }
+    }
     const hasMeaningfulDelta = !prevMetrics ||
       nextMetrics.level !== prevMetrics.level ||
       nextMetrics.monsterKills !== prevMetrics.monsterKills ||
@@ -1719,6 +1786,34 @@ serve(async (req) => {
     }
 
     const txSignature = String(body.txSignature ?? "").trim().slice(0, 120);
+    if (!isTxSignatureLike(txSignature)) {
+      return json({ ok: false, error: "Invalid payment transaction signature." });
+    }
+    const lamportsRequired = (FORTUNE_SPIN_PRICES_LAMPORTS as Record<number, number>)[spins];
+    if (!Number.isFinite(lamportsRequired) || lamportsRequired <= 0) {
+      return json({ ok: false, error: "Invalid fortune spin pack price." });
+    }
+
+    const alreadyProcessed = await wasFortuneTxAlreadyProcessed(supabase, auth.wallet, txSignature);
+    if (alreadyProcessed) {
+      const dayKey = todayKeyUtc(now);
+      const fortuneState = await ensureFortuneState(supabase, auth.wallet, now);
+      if (!fortuneState.ok) {
+        return json({ ok: false, error: fortuneState.error });
+      }
+      return json({
+        ok: true,
+        fortuneAlreadyProcessed: true,
+        fortuneFreeSpinAvailable: fortuneState.state.free_spin_day !== dayKey,
+        fortunePaidSpins: Math.max(0, asInt(fortuneState.state.paid_spins, 0)),
+      });
+    }
+
+    const txCheck = await verifyFortunePaymentTx(auth.wallet, txSignature, lamportsRequired, now);
+    if (!txCheck.ok) {
+      return json({ ok: false, error: txCheck.error });
+    }
+
     const dayKey = todayKeyUtc(now);
 
     for (let attempt = 0; attempt < 6; attempt += 1) {
@@ -1736,11 +1831,15 @@ serve(async (req) => {
       await auditEvent(supabase, auth.wallet, "fortune_buy", {
         spins,
         txSignature,
+        lamports: lamportsRequired,
+        txBlockTime: txCheck.blockTime,
+        txSlot: txCheck.slot,
         paidSpins: updated.state.paid_spins,
       });
 
       return json({
         ok: true,
+        fortuneAlreadyProcessed: false,
         fortuneFreeSpinAvailable: updated.state.free_spin_day !== dayKey,
         fortunePaidSpins: Math.max(0, asInt(updated.state.paid_spins, 0)),
       });
