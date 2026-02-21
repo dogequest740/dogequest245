@@ -347,6 +347,7 @@ type GameSecureResponse = {
   energyTimer?: number
   remainingCrystals?: number
   tickets?: number
+  ticketDay?: string
   gold?: number
   crystals?: number
   crystalsEarned?: number
@@ -4676,6 +4677,12 @@ function App() {
       }
 
       state.tickets = Math.max(0, Math.floor(Number(result.tickets ?? state.tickets)))
+      if (result.ticketDay) {
+        state.ticketDay = result.ticketDay
+      }
+      if (typeof result.worldBossTickets === 'number') {
+        state.worldBossTickets = Math.max(0, Math.floor(Number(result.worldBossTickets)))
+      }
       state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
       if (result.premiumClaimDay) {
         state.premiumClaimDay = result.premiumClaimDay
@@ -4683,7 +4690,7 @@ function App() {
       applyServerConsumables(state, result.consumables)
       pushLog(
         state.eventLog,
-        `Premium claim: +${PREMIUM_DAILY_KEYS} keys, +${formatNumber(PREMIUM_DAILY_GOLD)} gold, +${PREMIUM_DAILY_SMALL_POTIONS} Energy Tonic, +${PREMIUM_DAILY_BIG_POTIONS} Grand Energy Elixir.`,
+        `Premium claim: +${PREMIUM_DAILY_KEYS} keys, +2 World Boss tickets, +${formatNumber(PREMIUM_DAILY_GOLD)} gold, +${PREMIUM_DAILY_SMALL_POTIONS} Energy Tonic, +${PREMIUM_DAILY_BIG_POTIONS} Grand Energy Elixir.`,
       )
       syncHud()
     } catch (error) {

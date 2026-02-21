@@ -6,6 +6,7 @@ const MAX_LEVEL = 255;
 const WITHDRAW_RATE = 15000;
 const WITHDRAW_MIN = 2000;
 const MAX_TICKETS = 30;
+const DUNGEON_DAILY_TICKETS = 5;
 const WORLD_BOSS_DURATION_SECONDS = 12 * 60 * 60;
 const WORLD_BOSS_PRIZE_POOL = 500;
 const WORLD_BOSS_DAMAGE_PER_SEC_CAP = 5000;
@@ -94,6 +95,14 @@ type WorldBossTicketRow = {
   tickets: number;
   premium_ticket_day: string;
   starter_ticket_granted: boolean;
+  updated_at?: string;
+};
+
+type DungeonStateRow = {
+  wallet: string;
+  tickets: number;
+  ticket_day: string;
+  dungeon_runs: number;
   updated_at?: string;
 };
 
@@ -783,6 +792,122 @@ const toWorldBossTicketState = (
   updated_at: String(row.updated_at ?? fallbackIso),
 });
 
+const toDungeonState = (
+  wallet: string,
+  row: Record<string, unknown>,
+  fallbackIso: string,
+): DungeonStateRow => ({
+  wallet,
+  tickets: Math.max(0, asInt(row.tickets, 0)),
+  ticket_day: String(row.ticket_day ?? ""),
+  dungeon_runs: Math.max(0, asInt(row.dungeon_runs, 0)),
+  updated_at: String(row.updated_at ?? fallbackIso),
+});
+
+const ensureDungeonTicketState = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  now: Date,
+) => {
+  const dayKey = todayKeyUtc(now);
+  const nowIso = now.toISOString();
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const { data, error } = await supabase
+      .from("dungeon_state")
+      .select("wallet, tickets, ticket_day, dungeon_runs, updated_at")
+      .eq("wallet", wallet)
+      .maybeSingle();
+    if (error) return { ok: false as const, error: "Failed to load dungeon state." };
+
+    let current: DungeonStateRow;
+    if (data) {
+      current = toDungeonState(wallet, data as Record<string, unknown>, nowIso);
+    } else {
+      const initial: DungeonStateRow = {
+        wallet,
+        tickets: DUNGEON_DAILY_TICKETS,
+        ticket_day: dayKey,
+        dungeon_runs: 0,
+        updated_at: nowIso,
+      };
+      const { error: insertError } = await supabase
+        .from("dungeon_state")
+        .insert(initial);
+      if (insertError) continue;
+      current = initial;
+    }
+
+    if (current.ticket_day === dayKey) {
+      return { ok: true as const, state: current };
+    }
+
+    const { data: updated, error: updateError } = await supabase
+      .from("dungeon_state")
+      .update({
+        tickets: DUNGEON_DAILY_TICKETS,
+        ticket_day: dayKey,
+        updated_at: nowIso,
+      })
+      .eq("wallet", wallet)
+      .eq("ticket_day", current.ticket_day)
+      .eq("tickets", current.tickets)
+      .eq("dungeon_runs", current.dungeon_runs)
+      .select("wallet, tickets, ticket_day, dungeon_runs, updated_at")
+      .maybeSingle();
+
+    if (!updateError && updated) {
+      return { ok: true as const, state: toDungeonState(wallet, updated as Record<string, unknown>, nowIso) };
+    }
+  }
+
+  return { ok: false as const, error: "Failed to sync dungeon state." };
+};
+
+const adjustDungeonTickets = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  delta: number,
+  now: Date,
+) => {
+  const nowIso = now.toISOString();
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const ensured = await ensureDungeonTicketState(supabase, wallet, now);
+    if (!ensured.ok) return ensured;
+
+    const current = ensured.state;
+    if (delta === 0) return { ok: true as const, state: current };
+
+    const nextTickets = Math.max(0, Math.min(MAX_TICKETS, current.tickets + delta));
+    if (delta < 0 && nextTickets >= current.tickets) {
+      return { ok: false as const, error: "No dungeon keys left.", state: current };
+    }
+    if (nextTickets === current.tickets) {
+      return { ok: true as const, state: current };
+    }
+
+    const { data: updated, error: updateError } = await supabase
+      .from("dungeon_state")
+      .update({
+        tickets: nextTickets,
+        updated_at: nowIso,
+      })
+      .eq("wallet", wallet)
+      .eq("ticket_day", current.ticket_day)
+      .eq("tickets", current.tickets)
+      .eq("dungeon_runs", current.dungeon_runs)
+      .select("wallet, tickets, ticket_day, dungeon_runs, updated_at")
+      .maybeSingle();
+
+    if (!updateError && updated) {
+      return { ok: true as const, state: toDungeonState(wallet, updated as Record<string, unknown>, nowIso) };
+    }
+  }
+
+  return { ok: false as const, error: "Dungeon key conflict, retry." };
+};
+
 const getWorldBossTicketProfileFlags = async (
   supabase: ReturnType<typeof createClient>,
   wallet: string,
@@ -856,15 +981,9 @@ const ensureWorldBossTicketState = async (
     if (!flags.ok) return { ok: false as const, error: flags.error };
 
     let nextTickets = current.tickets;
-    let nextPremiumDay = current.premium_ticket_day;
     let nextStarterGranted = current.starter_ticket_granted;
     let changed = false;
 
-    if (flags.premiumActive && nextPremiumDay !== dayKey) {
-      nextTickets += WORLD_BOSS_PREMIUM_DAILY_TICKETS;
-      nextPremiumDay = dayKey;
-      changed = true;
-    }
     if (flags.starterPackPurchased && !nextStarterGranted) {
       nextTickets += WORLD_BOSS_STARTER_TICKETS;
       nextStarterGranted = true;
@@ -877,7 +996,7 @@ const ensureWorldBossTicketState = async (
       .from("world_boss_tickets")
       .update({
         tickets: nextTickets,
-        premium_ticket_day: nextPremiumDay,
+        premium_ticket_day: current.premium_ticket_day,
         starter_ticket_granted: nextStarterGranted,
         updated_at: nowIso,
       })
@@ -1966,6 +2085,7 @@ serve(async (req) => {
       }
 
       state.tickets = Math.min(MAX_TICKETS, Math.max(0, asInt(state.tickets, 0)) + PREMIUM_DAILY_KEYS);
+      state.worldBossTickets = Math.max(0, asInt(state.worldBossTickets, 0)) + WORLD_BOSS_PREMIUM_DAILY_TICKETS;
       state.gold = Math.max(0, asInt(state.gold, 0)) + PREMIUM_DAILY_GOLD;
       for (let i = 0; i < PREMIUM_DAILY_SMALL_POTIONS; i += 1) {
         addConsumableToState(state, "energy-small");
@@ -1988,14 +2108,41 @@ serve(async (req) => {
         .maybeSingle();
 
       if (!updateError && updated) {
+        const dungeonGrant = await adjustDungeonTickets(supabase, auth.wallet, PREMIUM_DAILY_KEYS, now);
+        const worldBossGrant = await adjustWorldBossTickets(
+          supabase,
+          auth.wallet,
+          WORLD_BOSS_PREMIUM_DAILY_TICKETS,
+          now,
+        );
+        const syncedTickets = dungeonGrant.ok && dungeonGrant.state
+          ? Math.max(0, asInt(dungeonGrant.state.tickets, 0))
+          : Math.max(0, asInt(state.tickets, 0));
+        const syncedTicketDay = dungeonGrant.ok && dungeonGrant.state
+          ? String(dungeonGrant.state.ticket_day ?? dayKey)
+          : String(state.ticketDay ?? dayKey);
+        const syncedWorldBossTickets = worldBossGrant.ok && worldBossGrant.state
+          ? Math.max(0, asInt(worldBossGrant.state.tickets, 0))
+          : Math.max(0, asInt(state.worldBossTickets, 0));
+        const hasTicketGrantFailure = !dungeonGrant.ok || !worldBossGrant.ok;
+        if (hasTicketGrantFailure) {
+          await auditEvent(supabase, auth.wallet, "premium_claim_daily_ticket_grant_partial", {
+            dayKey,
+            dungeonGrantError: dungeonGrant.ok ? "" : dungeonGrant.error,
+            worldBossGrantError: worldBossGrant.ok ? "" : worldBossGrant.error,
+          });
+        }
         await auditEvent(supabase, auth.wallet, "premium_claim_daily", {
           dayKey,
-          tickets: Math.max(0, asInt(state.tickets, 0)),
+          tickets: syncedTickets,
+          worldBossTickets: syncedWorldBossTickets,
           gold: Math.max(0, asInt(state.gold, 0)),
         });
         return json({
           ok: true,
-          tickets: Math.max(0, asInt(state.tickets, 0)),
+          tickets: syncedTickets,
+          ticketDay: syncedTicketDay,
+          worldBossTickets: syncedWorldBossTickets,
           gold: Math.max(0, asInt(state.gold, 0)),
           premiumClaimDay: dayKey,
           consumables: state.consumables,
