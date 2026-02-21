@@ -58,23 +58,36 @@ import goldMiddleImage from './assets/shop/gold-middle.png'
 import goldLargeImage from './assets/shop/gold-large.png'
 import worldBossImage from './assets/boss/world-boss.jpg'
 import bgMusic from './assets/audio/bg-music.mp3'
+import villageBackgroundPng from './assets/village/background.png'
+import villageCastleLv1Png from './assets/village/castle-lv1.png'
+import villageCastleLv2Png from './assets/village/castle-lv2.png'
+import villageCastleLv3Png from './assets/village/castle-lv3.png'
+import villageGoldMineLv1Png from './assets/village/gold-mine-lv1.png'
+import villageGoldMineLv2Png from './assets/village/gold-mine-lv2.png'
+import villageGoldMineLv3Png from './assets/village/gold-mine-lv3.png'
+import villageCrystalLabLv1Png from './assets/village/crystal-lab-lv1.png'
+import villageCrystalLabLv2Png from './assets/village/crystal-lab-lv2.png'
+import villageCrystalLabLv3Png from './assets/village/crystal-lab-lv3.png'
+import villageStorageLv1Png from './assets/village/storage-lv1.png'
+import villageStorageLv2Png from './assets/village/storage-lv2.png'
+import villageStorageLv3Png from './assets/village/storage-lv3.png'
 import { supabase } from './lib/supabase'
 import './App.css'
 
-const VILLAGE_FEATURE_ENABLED = import.meta.env.VITE_ENABLE_VILLAGE === '1'
-const villageBackgroundImage = worldBossImage
-const villageCastleLv1Image = iconPremium
-const villageCastleLv2Image = iconPremium
-const villageCastleLv3Image = iconPremium
-const villageGoldMineLv1Image = iconPremium
-const villageGoldMineLv2Image = iconPremium
-const villageGoldMineLv3Image = iconPremium
-const villageCrystalLabLv1Image = iconPremium
-const villageCrystalLabLv2Image = iconPremium
-const villageCrystalLabLv3Image = iconPremium
-const villageStorageLv1Image = iconPremium
-const villageStorageLv2Image = iconPremium
-const villageStorageLv3Image = iconPremium
+const VILLAGE_FEATURE_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_VILLAGE === '1'
+const villageBackgroundImage = villageBackgroundPng
+const villageCastleLv1Image = villageCastleLv1Png
+const villageCastleLv2Image = villageCastleLv2Png
+const villageCastleLv3Image = villageCastleLv3Png
+const villageGoldMineLv1Image = villageGoldMineLv1Png
+const villageGoldMineLv2Image = villageGoldMineLv2Png
+const villageGoldMineLv3Image = villageGoldMineLv3Png
+const villageCrystalLabLv1Image = villageCrystalLabLv1Png
+const villageCrystalLabLv2Image = villageCrystalLabLv2Png
+const villageCrystalLabLv3Image = villageCrystalLabLv3Png
+const villageStorageLv1Image = villageStorageLv1Png
+const villageStorageLv2Image = villageStorageLv2Png
+const villageStorageLv3Image = villageStorageLv3Png
 
 type CharacterClass = {
   id: string
@@ -6823,199 +6836,198 @@ function App() {
               const selectedView = villageSelectedBuilding ? getVillageBuildingView(villageSelectedBuilding) : null
 
               return (
-                <div className="withdraw-body village-body">
-                  <div className="village-header-card">
-                    <div className="village-header-row">
-                      <img className="starterpack-image village-header-icon" src={villageCastleLv1Image} alt="" />
-                      <div className="starterpack-meta">
-                        <div className="starterpack-title">Your Village</div>
-                        <div className="withdraw-note">Build and upgrade structures to grow passive gold and crystal income.</div>
-                        {hud.village.settlementName ? (
-                          <div className="withdraw-note">
-                            Village: <strong>{hud.village.settlementName}</strong>
-                          </div>
-                        ) : (
+                <div className={`withdraw-body village-body ${hud.village.settlementName ? 'is-ready' : 'is-setup'}`}>
+                  {!hud.village.settlementName && (
+                    <div className="village-header-card">
+                      <div className="village-header-row">
+                        <img className="starterpack-image village-header-icon" src={villageCastleLv1Image} alt="" />
+                        <div className="starterpack-meta">
+                          <div className="starterpack-title">Your Village</div>
                           <div className="withdraw-note">Choose a village name on first visit. Name cannot be changed later.</div>
-                        )}
-                      </div>
-                    </div>
-                    {!hud.village.settlementName && (
-                      <>
-                        <label className="withdraw-label">
-                          Village name
-                          <input
-                            type="text"
-                            value={villageNameDraft}
-                            maxLength={24}
-                            onChange={(event) => setVillageNameDraft(event.target.value)}
-                            placeholder="Enter village name"
-                          />
-                        </label>
-                        <button type="button" className="withdraw-submit" onClick={setVillageSettlementName}>
-                          Confirm name
-                        </button>
-                      </>
-                    )}
-                    {hud.village.settlementName && (
-                      <>
-                        <div className="village-summary-grid">
-                          <div className="withdraw-info">
-                            <span className="withdraw-info-label">
-                              <img className="icon-img small" src={iconGold} alt="" />
-                              Gold / hour
-                            </span>
-                            <strong>{formatNumber(Math.round(rates.goldPerHour))}</strong>
-                          </div>
-                          <div className="withdraw-info">
-                            <span className="withdraw-info-label">
-                              <img className="icon-img small" src={iconCrystals} alt="" />
-                              Crystals / hour
-                            </span>
-                            <strong>{rates.crystalsPerHour.toFixed(2)}</strong>
-                          </div>
-                          <div className="withdraw-info">
-                            <span className="withdraw-info-label">
-                              <img className="icon-img small" src={iconStacking} alt="" />
-                              Storage cap
-                            </span>
-                            <strong>{rates.capHours.toFixed(1)}h</strong>
-                          </div>
-                          <div className="withdraw-info">
-                            <span className="withdraw-info-label">
-                              <img className="icon-img small" src={iconBattle} alt="" />
-                              Castle bonus
-                            </span>
-                            <strong>+{Math.round((rates.castleMultiplier - 1) * 100)}%</strong>
-                          </div>
                         </div>
-                      </>
-                    )}
-                  </div>
+                      </div>
+                      <label className="withdraw-label">
+                        Village name
+                        <input
+                          type="text"
+                          value={villageNameDraft}
+                          maxLength={24}
+                          onChange={(event) => setVillageNameDraft(event.target.value)}
+                          placeholder="Enter village name"
+                        />
+                      </label>
+                      <button type="button" className="withdraw-submit" onClick={setVillageSettlementName}>
+                        Confirm name
+                      </button>
+                    </div>
+                  )}
 
                   {hud.village.settlementName && (
                     <>
-                      <div className="village-scene">
-                        <img className="village-scene-bg" src={villageBackgroundImage} alt="" />
-                        {VILLAGE_BUILDING_ORDER.map((buildingId) => {
-                          const building = hud.village.buildings[buildingId]
-                          const upgrading = building.upgradingTo > building.level && building.upgradeEndsAt > villageNowMs
-                          const upgradeRemainingSec = upgrading ? Math.max(0, Math.ceil((building.upgradeEndsAt - villageNowMs) / 1000)) : 0
-                          const slotClass =
-                            buildingId === 'castle'
-                              ? 'village-slot-castle'
-                              : buildingId === 'mine'
-                                ? 'village-slot-mine'
-                                : buildingId === 'lab'
-                                  ? 'village-slot-lab'
-                                  : 'village-slot-storage'
-                          const buttonClass =
-                            buildingId === 'castle'
-                              ? 'village-slot-btn-castle'
-                              : buildingId === 'mine'
-                                ? 'village-slot-btn-mine'
-                                : buildingId === 'lab'
-                                  ? 'village-slot-btn-lab'
-                                  : 'village-slot-btn-storage'
-                          const timerClass =
-                            buildingId === 'castle'
-                              ? 'village-upgrade-timer-castle'
-                              : buildingId === 'mine'
-                                ? 'village-upgrade-timer-mine'
-                                : buildingId === 'lab'
-                                  ? 'village-upgrade-timer-lab'
-                                  : 'village-upgrade-timer-storage'
+                      <div className="village-scene-stage">
+                        <div className="village-scene">
+                          <img className="village-scene-bg" src={villageBackgroundImage} alt="" />
+                          <div className="village-overlay village-overlay-top">
+                            <div className="village-overlay-card village-overlay-card-top">
+                              <div className="withdraw-note village-top-note">
+                                Village: <strong>{hud.village.settlementName}</strong>
+                              </div>
+                              <div className="village-summary-grid village-summary-grid-top">
+                                <div className="withdraw-info">
+                                  <span className="withdraw-info-label">
+                                    <img className="icon-img small" src={iconGold} alt="" />
+                                    Gold / hour
+                                  </span>
+                                  <strong>{formatNumber(Math.round(rates.goldPerHour))}</strong>
+                                </div>
+                                <div className="withdraw-info">
+                                  <span className="withdraw-info-label">
+                                    <img className="icon-img small" src={iconCrystals} alt="" />
+                                    Crystals / hour
+                                  </span>
+                                  <strong>{rates.crystalsPerHour.toFixed(2)}</strong>
+                                </div>
+                                <div className="withdraw-info">
+                                  <span className="withdraw-info-label">
+                                    <img className="icon-img small" src={iconStacking} alt="" />
+                                    Storage cap
+                                  </span>
+                                  <strong>{rates.capHours.toFixed(1)}h</strong>
+                                </div>
+                                <div className="withdraw-info">
+                                  <span className="withdraw-info-label">
+                                    <img className="icon-img small" src={iconBattle} alt="" />
+                                    Castle bonus
+                                  </span>
+                                  <strong>+{Math.round((rates.castleMultiplier - 1) * 100)}%</strong>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          {VILLAGE_BUILDING_ORDER.map((buildingId) => {
+                            const building = hud.village.buildings[buildingId]
+                            const upgrading = building.upgradingTo > building.level && building.upgradeEndsAt > villageNowMs
+                            const upgradeRemainingSec = upgrading ? Math.max(0, Math.ceil((building.upgradeEndsAt - villageNowMs) / 1000)) : 0
+                            const slotClass =
+                              buildingId === 'castle'
+                                ? 'village-slot-castle'
+                                : buildingId === 'mine'
+                                  ? 'village-slot-mine'
+                                  : buildingId === 'lab'
+                                    ? 'village-slot-lab'
+                                    : 'village-slot-storage'
+                            const buttonClass =
+                              buildingId === 'castle'
+                                ? 'village-slot-btn-castle'
+                                : buildingId === 'mine'
+                                  ? 'village-slot-btn-mine'
+                                  : buildingId === 'lab'
+                                    ? 'village-slot-btn-lab'
+                                    : 'village-slot-btn-storage'
+                            const timerClass =
+                              buildingId === 'castle'
+                                ? 'village-upgrade-timer-castle'
+                                : buildingId === 'mine'
+                                  ? 'village-upgrade-timer-mine'
+                                  : buildingId === 'lab'
+                                    ? 'village-upgrade-timer-lab'
+                                    : 'village-upgrade-timer-storage'
 
-                          const nodes = [
-                            <img
-                              key={`${buildingId}-img`}
-                              className={`village-building ${slotClass} ${villageSelectedBuilding === buildingId ? 'is-selected' : ''}`}
-                              src={getVillageBuildingImage(buildingId, getVillageVisualLevel(buildingId, building.level))}
-                              alt={VILLAGE_BUILDING_META[buildingId].label}
-                              onClick={() => setVillageSelectedBuilding(buildingId)}
-                            />,
-                            <button
-                              key={`${buildingId}-btn`}
-                              type="button"
-                              className={`village-slot-button ${buttonClass} ${villageSelectedBuilding === buildingId ? 'active' : ''}`}
-                              onClick={() => setVillageSelectedBuilding(buildingId)}
-                            >
-                              {VILLAGE_BUILDING_META[buildingId].label} Lv.{building.level}
-                            </button>,
-                          ]
+                            const nodes = [
+                              <img
+                                key={`${buildingId}-img`}
+                                className={`village-building ${slotClass} ${villageSelectedBuilding === buildingId ? 'is-selected' : ''}`}
+                                src={getVillageBuildingImage(buildingId, getVillageVisualLevel(buildingId, building.level))}
+                                alt={VILLAGE_BUILDING_META[buildingId].label}
+                                onClick={() => setVillageSelectedBuilding(buildingId)}
+                              />,
+                              <button
+                                key={`${buildingId}-btn`}
+                                type="button"
+                                className={`village-slot-button ${buttonClass} ${villageSelectedBuilding === buildingId ? 'active' : ''}`}
+                                onClick={() => setVillageSelectedBuilding(buildingId)}
+                              >
+                                {VILLAGE_BUILDING_META[buildingId].label} Lv.{building.level}
+                              </button>,
+                            ]
 
-                          if (upgrading) {
-                            nodes.push(
-                              <div key={`${buildingId}-timer`} className={`village-upgrade-timer ${timerClass}`}>
-                                {formatLongTimer(upgradeRemainingSec)}
-                              </div>,
-                            )
-                          }
+                            if (upgrading) {
+                              nodes.push(
+                                <div key={`${buildingId}-timer`} className={`village-upgrade-timer ${timerClass}`}>
+                                  {formatLongTimer(upgradeRemainingSec)}
+                                </div>,
+                              )
+                            }
 
-                          return nodes
-                        })}
-                        {selectedView && (
-                          <div className="village-mini-backdrop" onClick={() => setVillageSelectedBuilding(null)}>
-                            <div
-                              className={`shop-card village-mini-card village-mini-card-${selectedView.buildingId}`}
-                              onClick={(event) => event.stopPropagation()}
-                            >
-                              <div className="village-mini-header">
-                                <div className="shop-title">{VILLAGE_BUILDING_META[selectedView.buildingId].label}</div>
-                                <button type="button" className="ghost village-mini-close" onClick={() => setVillageSelectedBuilding(null)}>
-                                  Close
+                            return nodes
+                          })}
+                          {selectedView && (
+                            <div className="village-mini-backdrop" onClick={() => setVillageSelectedBuilding(null)}>
+                              <div
+                                className={`shop-card village-mini-card village-mini-card-${selectedView.buildingId}`}
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                <div className="village-mini-header">
+                                  <div className="shop-title">{VILLAGE_BUILDING_META[selectedView.buildingId].label}</div>
+                                  <button type="button" className="ghost village-mini-close" onClick={() => setVillageSelectedBuilding(null)}>
+                                    Close
+                                  </button>
+                                </div>
+                                <div className="shop-desc">{VILLAGE_BUILDING_META[selectedView.buildingId].description}</div>
+                                <div className="shop-meta">Level {selectedView.building.level}</div>
+                                <div className="village-stat-line">{selectedView.statCurrent}</div>
+                                {selectedView.building.level < selectedView.maxLevel && (
+                                  <div className="village-stat-line next">{selectedView.statNext}</div>
+                                )}
+                                {selectedView.requirementText && (
+                                  <div className={`village-req ${selectedView.requirementFailed ? 'fail' : ''}`}>{selectedView.requirementText}</div>
+                                )}
+                                {selectedView.upgrading ? (
+                                  <div className="village-upgrading">Upgrading: {formatLongTimer(selectedView.upgradeRemainingSec)}</div>
+                                ) : selectedView.building.level < selectedView.maxLevel ? (
+                                  <div className="village-upgrade-meta">
+                                    <span>
+                                      <img className="icon-img tiny" src={iconGold} alt="" /> {formatNumber(selectedView.cost)}
+                                    </span>
+                                    <span>{formatLongTimer(selectedView.durationSec)}</span>
+                                  </div>
+                                ) : (
+                                  <div className="village-upgrading">Max level reached</div>
+                                )}
+                                <button
+                                  type="button"
+                                  disabled={!selectedView.canUpgrade}
+                                  onClick={() => startVillageUpgrade(selectedView.buildingId)}
+                                >
+                                  {selectedView.upgrading
+                                    ? 'Building...'
+                                    : selectedView.building.level >= selectedView.maxLevel
+                                      ? 'Max'
+                                      : `Upgrade to Lv.${selectedView.nextLevel}`}
                                 </button>
                               </div>
-                              <div className="shop-desc">{VILLAGE_BUILDING_META[selectedView.buildingId].description}</div>
-                              <div className="shop-meta">Level {selectedView.building.level}</div>
-                              <div className="village-stat-line">{selectedView.statCurrent}</div>
-                              {selectedView.building.level < selectedView.maxLevel && (
-                                <div className="village-stat-line next">{selectedView.statNext}</div>
-                              )}
-                              {selectedView.requirementText && (
-                                <div className={`village-req ${selectedView.requirementFailed ? 'fail' : ''}`}>{selectedView.requirementText}</div>
-                              )}
-                              {selectedView.upgrading ? (
-                                <div className="village-upgrading">Upgrading: {formatLongTimer(selectedView.upgradeRemainingSec)}</div>
-                              ) : selectedView.building.level < selectedView.maxLevel ? (
-                                <div className="village-upgrade-meta">
-                                  <span>
-                                    <img className="icon-img tiny" src={iconGold} alt="" /> {formatNumber(selectedView.cost)}
-                                  </span>
-                                  <span>{formatLongTimer(selectedView.durationSec)}</span>
-                                </div>
-                              ) : (
-                                <div className="village-upgrading">Max level reached</div>
-                              )}
+                            </div>
+                          )}
+                          <div className="village-overlay village-overlay-bottom">
+                            <div className="village-overlay-card village-overlay-card-bottom">
+                              <div className="withdraw-info village-claim-row">
+                                <span>
+                                  Claimable: <strong>{formatNumber(pending.gold)}</strong> gold, <strong>{formatNumber(pending.crystals)}</strong> crystals
+                                </span>
+                                <span>{villageStorageFull ? 'Storage is full' : `Cap in ${formatLongTimer(Math.max(0, pending.capSec - pending.elapsedSec))}`}</span>
+                              </div>
                               <button
                                 type="button"
-                                disabled={!selectedView.canUpgrade}
-                                onClick={() => startVillageUpgrade(selectedView.buildingId)}
+                                className="withdraw-submit village-claim-button"
+                                disabled={pending.gold <= 0 && pending.crystals <= 0}
+                                onClick={claimVillageRewards}
                               >
-                                {selectedView.upgrading
-                                  ? 'Building...'
-                                  : selectedView.building.level >= selectedView.maxLevel
-                                    ? 'Max'
-                                    : `Upgrade to Lv.${selectedView.nextLevel}`}
+                                Claim village income
                               </button>
                             </div>
                           </div>
-                        )}
+                        </div>
                       </div>
-
-                      <div className="withdraw-info village-claim-row">
-                        <span>
-                          Claimable: <strong>{formatNumber(pending.gold)}</strong> gold, <strong>{formatNumber(pending.crystals)}</strong> crystals
-                        </span>
-                        <span>{villageStorageFull ? 'Storage is full' : `Cap in ${formatLongTimer(Math.max(0, pending.capSec - pending.elapsedSec))}`}</span>
-                      </div>
-                      <button
-                        type="button"
-                        className="withdraw-submit village-claim-button"
-                        disabled={pending.gold <= 0 && pending.crystals <= 0}
-                        onClick={claimVillageRewards}
-                      >
-                        Claim village income
-                      </button>
                     </>
                   )}
 
