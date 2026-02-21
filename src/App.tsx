@@ -406,6 +406,22 @@ type GameSecureResponse = {
   worldBossParticipants?: WorldBossParticipantRow[]
   worldBossAppliedDamage?: number
   worldBossRewardShare?: number
+  village?: VillageState
+  villageClaimedGold?: number
+  villageClaimedCrystals?: number
+  villagePending?: {
+    elapsedSec?: number
+    effectiveSec?: number
+    capSec?: number
+    gold?: number
+    crystals?: number
+  }
+  villageRates?: {
+    goldPerHour?: number
+    crystalsPerHour?: number
+    capHours?: number
+    castleMultiplier?: number
+  }
 }
 
 type ReferralEntry = {
@@ -1105,7 +1121,7 @@ const normalizeVillageBuilding = (buildingId: VillageBuildingId, raw: unknown): 
   const maxLevel = getVillageBuildingMaxLevel(buildingId)
   const level = clamp(Math.floor(Number(row.level ?? base.level)), 1, maxLevel)
   const upgradingToRaw = Math.floor(Number(row.upgradingTo ?? 0))
-  const upgradingTo = upgradingToRaw > level ? clamp(upgradingToRaw, level + 1, maxLevel) : 0
+  const upgradingTo = upgradingToRaw === level + 1 ? level + 1 : 0
   const upgradeEndsAt = upgradingTo > level ? Math.max(0, Math.floor(Number(row.upgradeEndsAt ?? 0))) : 0
   return { level, upgradingTo, upgradeEndsAt }
 }
@@ -1212,13 +1228,70 @@ const getVillagePendingRewards = (village: VillageState, nowMs = Date.now()) => 
   if (!village.settlementName) {
     return { elapsedSec: 0, effectiveSec: 0, capSec: 0, gold: 0, crystals: 0 }
   }
-  const { goldPerHour, crystalsPerHour, capHours } = getVillageProductionRates(village)
-  const elapsedSec = Math.max(0, Math.floor((nowMs - village.lastClaimAt) / 1000))
-  const capSec = Math.max(0, Math.floor(capHours * 3600))
-  const effectiveSec = Math.min(elapsedSec, capSec)
-  const gold = Math.max(0, Math.floor((goldPerHour * effectiveSec) / 3600))
-  const crystals = Math.max(0, Math.floor((crystalsPerHour * effectiveSec) / 3600))
-  return { elapsedSec, effectiveSec, capSec, gold, crystals }
+  const startMs = Math.max(0, Math.floor(village.lastClaimAt))
+  const targetMs = Math.max(startMs, nowMs)
+  const elapsedSec = Math.max(0, Math.floor((targetMs - startMs) / 1000))
+  const workingVillage = normalizeVillageState(village, targetMs)
+  workingVillage.lastClaimAt = startMs
+
+  let cursorMs = startMs
+  let effectiveSec = 0
+  let goldAcc = 0
+  let crystalsAcc = 0
+
+  const consumeSegment = (endMs: number) => {
+    if (endMs <= cursorMs) return
+    const segmentSec = Math.max(0, Math.floor((endMs - cursorMs) / 1000))
+    if (segmentSec <= 0) {
+      cursorMs = endMs
+      return
+    }
+    const rates = getVillageProductionRates(workingVillage)
+    const capSecNow = Math.max(0, Math.floor(rates.capHours * 3600))
+    const capRemaining = Math.max(0, capSecNow - effectiveSec)
+    const countedSec = Math.min(segmentSec, capRemaining)
+    if (countedSec > 0) {
+      goldAcc += (rates.goldPerHour * countedSec) / 3600
+      crystalsAcc += (rates.crystalsPerHour * countedSec) / 3600
+      effectiveSec += countedSec
+    }
+    cursorMs = endMs
+  }
+
+  let safety = 0
+  while (cursorMs < targetMs && safety < 20) {
+    safety += 1
+    let nextCompletionMs = Number.POSITIVE_INFINITY
+    for (const buildingId of VILLAGE_BUILDING_ORDER) {
+      const building = workingVillage.buildings[buildingId]
+      if (building.upgradingTo !== building.level + 1) continue
+      if (building.upgradeEndsAt <= cursorMs || building.upgradeEndsAt > targetMs) continue
+      nextCompletionMs = Math.min(nextCompletionMs, building.upgradeEndsAt)
+    }
+
+    if (Number.isFinite(nextCompletionMs)) {
+      consumeSegment(nextCompletionMs)
+      applyVillageUpgradeCompletions(workingVillage, nextCompletionMs)
+      continue
+    }
+
+    consumeSegment(targetMs)
+    break
+  }
+
+  if (cursorMs < targetMs) {
+    consumeSegment(targetMs)
+  }
+
+  const finalRates = getVillageProductionRates(workingVillage)
+  const capSec = Math.max(0, Math.floor(finalRates.capHours * 3600))
+  return {
+    elapsedSec,
+    effectiveSec: Math.max(0, effectiveSec),
+    capSec,
+    gold: Math.max(0, Math.floor(goldAcc)),
+    crystals: Math.max(0, Math.floor(crystalsAcc)),
+  }
 }
 
 const applyVillageUpgradeCompletions = (village: VillageState, nowMs = Date.now()) => {
@@ -3059,6 +3132,7 @@ function App() {
   const [villageNameDraft, setVillageNameDraft] = useState('')
   const [villageError, setVillageError] = useState('')
   const [villageSelectedBuilding, setVillageSelectedBuilding] = useState<VillageBuildingId | null>(null)
+  const [villageActionLoading, setVillageActionLoading] = useState(false)
   const [fortuneStatusLoading, setFortuneStatusLoading] = useState(false)
   const [fortuneSpinLoading, setFortuneSpinLoading] = useState(false)
   const [fortuneBuyLoading, setFortuneBuyLoading] = useState<FortunePackId | null>(null)
@@ -3372,6 +3446,39 @@ function App() {
       state.worldBossTickets = Math.max(0, Math.floor(result.worldBossTickets))
       syncHud()
     }
+  }
+
+  const applyVillageFromServer = (state: GameState, result: GameSecureResponse) => {
+    if (result.village) {
+      state.village = normalizeVillageState(result.village, Date.now())
+      applyVillageUpgradeCompletions(state.village, Date.now())
+    }
+    if (typeof result.gold === 'number') {
+      state.gold = Math.max(0, Math.floor(result.gold))
+    }
+    if (typeof result.crystals === 'number') {
+      state.crystals = Math.max(0, Math.floor(result.crystals))
+    }
+    if (typeof result.crystalsEarned === 'number') {
+      state.crystalsEarned = Math.max(0, Math.floor(result.crystalsEarned))
+    }
+  }
+
+  const syncVillageStateFromServer = async (interactive = false) => {
+    const state = gameStateRef.current
+    const wallet = publicKey?.toBase58()
+    if (!state || !wallet) return
+
+    const result = await callGameSecureAuthed('village_status', {}, interactive)
+    if (!result.ok) {
+      if (result.error && result.error !== 'Wallet signature required for secure actions.') {
+        console.warn('Village state sync skipped:', result.error)
+      }
+      return
+    }
+
+    applyVillageFromServer(state, result)
+    syncHud()
   }
 
   const applyReferralSummary = (result: GameSecureResponse) => {
@@ -4019,6 +4126,7 @@ function App() {
     if (stage !== 'game') return
     void syncWorldBossFromServer()
     void syncWorldBossTicketsFromServer(false)
+    void syncVillageStateFromServer(false)
   }, [stage, publicKey])
 
   useEffect(() => {
@@ -4026,6 +4134,7 @@ function App() {
     const interval = window.setInterval(() => {
       void syncDungeonStateFromServer()
       void syncWorldBossTicketsFromServer(false)
+      void syncVillageStateFromServer(false)
     }, 60000)
     return () => window.clearInterval(interval)
   }, [stage, publicKey, connected])
@@ -4118,6 +4227,7 @@ function App() {
       if (prev.trim().length > 0) return prev
       return hud.village.settlementName || ''
     })
+    void syncVillageStateFromServer(false)
   }, [activePanel, hud?.village.settlementName])
 
   useEffect(() => {
@@ -5037,119 +5147,92 @@ function App() {
     }
   }
 
-  const setVillageSettlementName = () => {
+  const setVillageSettlementName = async () => {
     const state = gameStateRef.current
-    if (!state) return
+    const wallet = publicKey?.toBase58()
+    if (!state || !wallet) return
+    if (villageActionLoading) return
     if (state.village.settlementName) {
       setVillageError('Village name is already locked.')
       return
     }
+
     const nextName = sanitizeSettlementName(villageNameDraft)
     if (nextName.length < 3) {
       setVillageError('Village name must be at least 3 characters.')
       return
     }
-    state.village.settlementName = nextName
-    state.village.lastClaimAt = Date.now()
-    setVillageNameDraft(nextName)
-    setVillageSelectedBuilding(null)
-    setVillageError('')
-    pushLog(state.eventLog, `Village founded: ${nextName}.`)
-    syncHud()
-    void saveGameState()
-  }
 
-  const claimVillageRewards = () => {
-    const state = gameStateRef.current
-    if (!state) return
-    if (!state.village.settlementName) {
-      setVillageError('Set your village name first.')
-      return
-    }
-    const completed = applyVillageUpgradeCompletions(state.village, Date.now())
-    for (const buildingId of completed) {
-      pushLog(state.eventLog, `${VILLAGE_BUILDING_META[buildingId].label} upgrade completed.`)
-    }
-    const pending = getVillagePendingRewards(state.village, Date.now())
-    if (pending.gold <= 0 && pending.crystals <= 0) {
-      setVillageError('No rewards to claim yet.')
-      syncHud()
-      return
-    }
-    state.gold += pending.gold
-    grantCrystals(state, pending.crystals)
-    state.village.lastClaimAt = Date.now()
-    setVillageError('')
-    pushLog(state.eventLog, `Village claim: +${formatNumber(pending.gold)} gold, +${formatNumber(pending.crystals)} crystals.`)
-    syncHud()
-    void saveGameState()
-  }
-
-  const startVillageUpgrade = (buildingId: VillageBuildingId) => {
-    const state = gameStateRef.current
-    if (!state) return
-    if (!state.village.settlementName) {
-      setVillageError('Set your village name first.')
-      return
-    }
-
-    const nowMs = Date.now()
-    const completed = applyVillageUpgradeCompletions(state.village, nowMs)
-    for (const completedBuildingId of completed) {
-      pushLog(state.eventLog, `${VILLAGE_BUILDING_META[completedBuildingId].label} upgrade completed.`)
-    }
-
-    const activeUpgrade = getVillageActiveUpgrade(state.village, nowMs)
-    if (activeUpgrade && activeUpgrade.buildingId !== buildingId) {
-      setVillageError(
-        `Only one building can be upgraded at a time. ${VILLAGE_BUILDING_META[activeUpgrade.buildingId].label} is still upgrading.`,
-      )
-      syncHud()
-      return
-    }
-
-    const building = state.village.buildings[buildingId]
-    if (building.upgradingTo > building.level && building.upgradeEndsAt > nowMs) {
-      setVillageError(`${VILLAGE_BUILDING_META[buildingId].label} is already upgrading.`)
-      syncHud()
-      return
-    }
-
-    const maxLevel = getVillageBuildingMaxLevel(buildingId)
-    if (building.level >= maxLevel) {
-      setVillageError(`${VILLAGE_BUILDING_META[buildingId].label} is at max level.`)
-      syncHud()
-      return
-    }
-
-    const nextLevel = building.level + 1
-    if (buildingId === 'castle') {
-      const castleRequirement = getCastleUpgradeRequirement(state.village, state.player.level, nextLevel)
-      if (castleRequirement?.failed) {
-        setVillageError(`Castle upgrade locked. ${castleRequirement.text}`)
-        syncHud()
+    setVillageActionLoading(true)
+    try {
+      const result = await callGameSecureAuthed('village_init', { name: nextName }, true)
+      if (!result.ok) {
+        setVillageError(result.error || 'Failed to create village.')
         return
       }
-    }
-
-    const cost = getVillageUpgradeCost(buildingId, building.level)
-    if (state.gold < cost) {
-      setVillageError(`Not enough gold. Need ${formatNumber(cost)}.`)
+      applyVillageFromServer(state, result)
+      setVillageNameDraft(state.village.settlementName || nextName)
+      setVillageSelectedBuilding(null)
+      setVillageError('')
+      pushLog(state.eventLog, `Village founded: ${state.village.settlementName}.`)
       syncHud()
+    } finally {
+      setVillageActionLoading(false)
+    }
+  }
+
+  const claimVillageRewards = async () => {
+    const state = gameStateRef.current
+    const wallet = publicKey?.toBase58()
+    if (!state || !wallet) return
+    if (villageActionLoading) return
+    if (!state.village.settlementName) {
+      setVillageError('Set your village name first.')
       return
     }
 
-    const durationSec = getVillageUpgradeDurationSec(buildingId, building.level)
-    state.gold -= cost
-    building.upgradingTo = nextLevel
-    building.upgradeEndsAt = nowMs + durationSec * 1000
-    setVillageError('')
-    pushLog(
-      state.eventLog,
-      `${VILLAGE_BUILDING_META[buildingId].label} upgrade started (Lv.${building.level} -> Lv.${nextLevel}).`,
-    )
-    syncHud()
-    void saveGameState()
+    setVillageActionLoading(true)
+    try {
+      const result = await callGameSecureAuthed('village_claim', {}, true)
+      if (!result.ok) {
+        setVillageError(result.error || 'Failed to claim village income.')
+        return
+      }
+      applyVillageFromServer(state, result)
+      const claimedGold = Math.max(0, Math.floor(Number(result.villageClaimedGold ?? 0)))
+      const claimedCrystals = Math.max(0, Math.floor(Number(result.villageClaimedCrystals ?? 0)))
+      setVillageError('')
+      pushLog(state.eventLog, `Village claim: +${formatNumber(claimedGold)} gold, +${formatNumber(claimedCrystals)} crystals.`)
+      syncHud()
+    } finally {
+      setVillageActionLoading(false)
+    }
+  }
+
+  const startVillageUpgrade = async (buildingId: VillageBuildingId) => {
+    const state = gameStateRef.current
+    const wallet = publicKey?.toBase58()
+    if (!state || !wallet) return
+    if (villageActionLoading) return
+    if (!state.village.settlementName) {
+      setVillageError('Set your village name first.')
+      return
+    }
+
+    setVillageActionLoading(true)
+    try {
+      const result = await callGameSecureAuthed('village_upgrade_start', { buildingId }, true)
+      if (!result.ok) {
+        setVillageError(result.error || 'Failed to start upgrade.')
+        return
+      }
+      applyVillageFromServer(state, result)
+      setVillageError('')
+      pushLog(state.eventLog, `${VILLAGE_BUILDING_META[buildingId].label} upgrade started.`)
+      syncHud()
+    } finally {
+      setVillageActionLoading(false)
+    }
   }
 
   const grantQuestRewardItem = (state: GameState, item: QuestRewardItem) => {
@@ -7013,8 +7096,8 @@ function App() {
                           placeholder="Enter village name"
                         />
                       </label>
-                      <button type="button" className="withdraw-submit" onClick={setVillageSettlementName}>
-                        Confirm name
+                      <button type="button" className="withdraw-submit" onClick={setVillageSettlementName} disabled={villageActionLoading}>
+                        {villageActionLoading ? 'Processing...' : 'Confirm name'}
                       </button>
                     </div>
                   )}
@@ -7175,10 +7258,12 @@ function App() {
                                 )}
                                 <button
                                   type="button"
-                                  disabled={!selectedView.canUpgrade}
+                                  disabled={villageActionLoading || !selectedView.canUpgrade}
                                   onClick={() => startVillageUpgrade(selectedView.buildingId)}
                                 >
-                                  {selectedView.upgrading
+                                  {villageActionLoading
+                                    ? 'Processing...'
+                                    : selectedView.upgrading
                                     ? 'Building...'
                                     : selectedView.building.level >= selectedView.maxLevel
                                       ? 'Max'
@@ -7198,10 +7283,10 @@ function App() {
                               <button
                                 type="button"
                                 className="withdraw-submit village-claim-button"
-                                disabled={pending.gold <= 0 && pending.crystals <= 0}
+                                disabled={villageActionLoading || (pending.gold <= 0 && pending.crystals <= 0)}
                                 onClick={claimVillageRewards}
                               >
-                                Claim village income
+                                {villageActionLoading ? 'Processing...' : 'Claim village income'}
                               </button>
                             </div>
                           </div>

@@ -41,6 +41,82 @@ const PREMIUM_PLANS = [
   { id: "premium-30", days: 30, lamports: Math.round(0.5 * SOL_LAMPORTS) },
   { id: "premium-90", days: 90, lamports: Math.round(1 * SOL_LAMPORTS) },
 ] as const;
+const VILLAGE_CASTLE_MAX_LEVEL = 3;
+const VILLAGE_OTHER_MAX_LEVEL = 25;
+const VILLAGE_CASTLE_LEVEL2_REQUIREMENT = 10;
+const VILLAGE_CASTLE_LEVEL3_REQUIREMENT = 25;
+const VILLAGE_CASTLE_LEVEL2_PLAYER_LEVEL = 50;
+const VILLAGE_CASTLE_LEVEL3_PLAYER_LEVEL = 75;
+const VILLAGE_MINE_GOLD_PER_HOUR_BY_LEVEL = [
+  0,
+  800, 1600, 2400, 3200, 4000, 4800, 5600, 6400, 7200, 8000,
+  8800, 9600, 10400, 11200, 12000, 12800, 13600, 14400, 15200, 16000,
+  16800, 17600, 18400, 19200, 20000,
+];
+const VILLAGE_LAB_CRYSTALS_PER_HOUR_BY_LEVEL = [
+  0,
+  11, 22, 33, 44, 55, 66, 77, 88, 99, 110,
+  121, 132, 143, 154, 165, 176, 187, 198, 209, 220,
+  231, 242, 253, 264, 275,
+];
+const VILLAGE_STORAGE_CAP_HOURS_BY_LEVEL = [
+  0,
+  1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5,
+  6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5,
+  11, 11.5, 12, 12, 12,
+];
+const VILLAGE_CASTLE_BONUS_BY_LEVEL = [
+  0,
+  0, 0.1, 0.25,
+];
+const VILLAGE_UPGRADE_COST_BY_TARGET_LEVEL: Record<VillageBuildingId, number[]> = {
+  mine: [
+    0,
+    4000, 5120, 6554, 8392, 10739, 13747, 17590, 22486, 28732, 36704,
+    46900, 59925, 76513, 97464, 124101, 158849, 203166, 259221, 330982, 422898,
+    540031, 689238, 878318, 1120000, 1426000,
+  ],
+  lab: [
+    0,
+    6000, 7680, 9835, 12597, 16081, 20539, 26226, 33456, 42704, 54540,
+    69632, 88939, 113628, 145061, 185015, 235821, 300949, 383232, 487614, 620459,
+    790636, 1006020, 1278188, 1624290, 2065000,
+  ],
+  storage: [
+    0,
+    3000, 3840, 4915, 6298, 8041, 10270, 13113, 16728, 21382, 27309,
+    34910, 44588, 56996, 72872, 93136, 118966, 151881, 194000, 247973, 317144,
+    405350, 518571, 664093, 850000, 1150000,
+  ],
+  castle: [
+    0,
+    0, 2500000, 3200000,
+  ],
+};
+const VILLAGE_UPGRADE_HOURS_BY_TARGET_LEVEL: Record<VillageBuildingId, number[]> = {
+  mine: [
+    0,
+    1, 1.28, 1.64, 2.1, 2.7, 3.5, 4.5, 5.8, 7.4, 9.5,
+    12.2, 15.7, 20.2, 26, 33.3, 42.6, 54.5, 69.8, 89.4, 114.7,
+    147, 188, 241, 309, 307,
+  ],
+  lab: [
+    0,
+    1, 1.28, 1.64, 2.1, 2.7, 3.5, 4.5, 5.8, 7.4, 9.5,
+    12.2, 15.7, 20.2, 26, 33.3, 42.6, 54.5, 69.8, 89.4, 114.7,
+    147, 188, 241, 309, 307,
+  ],
+  storage: [
+    0,
+    1, 1.28, 1.64, 2.1, 2.7, 3.5, 4.5, 5.8, 7.4, 9.5,
+    12.2, 15.7, 20.2, 26, 33.3, 42.6, 54.5, 69.8, 89.4, 114.7,
+    147, 188, 241, 309, 307,
+  ],
+  castle: [
+    0,
+    0, 48, 96,
+  ],
+};
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -122,6 +198,18 @@ type ReferralRow = {
   crystals_earned: number;
   created_at: string;
   updated_at?: string;
+};
+
+type VillageBuildingId = "castle" | "mine" | "lab" | "storage";
+type VillageBuildingState = {
+  level: number;
+  upgradingTo: number;
+  upgradeEndsAt: number;
+};
+type VillageState = {
+  settlementName: string;
+  lastClaimAt: number;
+  buildings: Record<VillageBuildingId, VillageBuildingState>;
 };
 
 const CONSUMABLE_DEFS: Record<ConsumableType, { name: string; description: string }> = {
@@ -206,11 +294,19 @@ const sanitizeName = (value: unknown) =>
     .trim()
     .slice(0, 18) || "Hero";
 
+const sanitizeSettlementName = (value: unknown) =>
+  String(value ?? "")
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .trim()
+    .slice(0, 24);
+
 const isWalletLike = (value: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
 const isTxSignatureLike = (value: string) => /^[1-9A-HJ-NP-Za-km-z]{70,120}$/.test(value);
 const todayKeyUtc = (now: Date) => now.toISOString().slice(0, 10);
 const isConsumableType = (value: string): value is ConsumableType =>
   Object.prototype.hasOwnProperty.call(CONSUMABLE_DEFS, value);
+const isVillageBuildingId = (value: string): value is VillageBuildingId =>
+  value === "castle" || value === "mine" || value === "lab" || value === "storage";
 
 let solanaConnection: Connection | null = null;
 const getSolanaConnection = () => {
@@ -446,6 +542,223 @@ const stakeStats = (state: Record<string, unknown>) => {
 const serializeStakeEntries = (state: Record<string, unknown>) =>
   normalizeStakes(state.stake, Math.max(1, asInt(state.stakeId, 1)));
 
+const createVillageState = (nowMs = Date.now()): VillageState => ({
+  settlementName: "",
+  lastClaimAt: nowMs,
+  buildings: {
+    castle: { level: 1, upgradingTo: 0, upgradeEndsAt: 0 },
+    mine: { level: 1, upgradingTo: 0, upgradeEndsAt: 0 },
+    lab: { level: 1, upgradingTo: 0, upgradeEndsAt: 0 },
+    storage: { level: 1, upgradingTo: 0, upgradeEndsAt: 0 },
+  },
+});
+
+const getVillageBuildingMaxLevel = (buildingId: VillageBuildingId) =>
+  buildingId === "castle" ? VILLAGE_CASTLE_MAX_LEVEL : VILLAGE_OTHER_MAX_LEVEL;
+
+const getVillageTableValue = (values: number[], levelRaw: number) => {
+  if (values.length <= 1) return 0;
+  const maxLevel = values.length - 1;
+  const level = Math.max(1, Math.min(maxLevel, Math.floor(levelRaw)));
+  return Number(values[level] ?? values[maxLevel] ?? 0);
+};
+
+const normalizeVillageBuilding = (buildingId: VillageBuildingId, raw: unknown): VillageBuildingState => {
+  const base = createVillageState(0).buildings[buildingId];
+  if (!raw || typeof raw !== "object") return { ...base };
+  const row = raw as Record<string, unknown>;
+  const maxLevel = getVillageBuildingMaxLevel(buildingId);
+  const level = clampInt(row.level ?? base.level, 1, maxLevel);
+  const upgradingToRaw = asInt(row.upgradingTo, 0);
+  const upgradingTo = upgradingToRaw === level + 1 ? level + 1 : 0;
+  const upgradeEndsAt = upgradingTo > level ? Math.max(0, asInt(row.upgradeEndsAt, 0)) : 0;
+  return { level, upgradingTo, upgradeEndsAt };
+};
+
+const normalizeVillageState = (raw: unknown, nowMs = Date.now()): VillageState => {
+  const base = createVillageState(nowMs);
+  if (!raw || typeof raw !== "object") return base;
+  const row = raw as Record<string, unknown>;
+  const settlementName = sanitizeSettlementName(row.settlementName ?? "");
+  const lastClaimAtRaw = asInt(row.lastClaimAt, nowMs);
+  const lastClaimAt = Math.max(0, Math.min(nowMs, lastClaimAtRaw));
+  const buildingsRaw = (row.buildings && typeof row.buildings === "object")
+    ? row.buildings as Record<string, unknown>
+    : {};
+  return {
+    settlementName,
+    lastClaimAt,
+    buildings: {
+      castle: normalizeVillageBuilding("castle", buildingsRaw.castle),
+      mine: normalizeVillageBuilding("mine", buildingsRaw.mine),
+      lab: normalizeVillageBuilding("lab", buildingsRaw.lab),
+      storage: normalizeVillageBuilding("storage", buildingsRaw.storage),
+    },
+  };
+};
+
+const cloneVillageState = (village: VillageState): VillageState =>
+  structuredClone(village) as VillageState;
+
+const getVillageUpgradeCost = (buildingId: VillageBuildingId, currentLevelRaw: number) => {
+  const maxLevel = getVillageBuildingMaxLevel(buildingId);
+  const targetLevel = Math.min(maxLevel, Math.max(1, Math.floor(currentLevelRaw) + 1));
+  const byLevel = VILLAGE_UPGRADE_COST_BY_TARGET_LEVEL[buildingId];
+  return Math.max(0, Math.round(getVillageTableValue(byLevel, targetLevel)));
+};
+
+const getVillageUpgradeDurationSec = (buildingId: VillageBuildingId, currentLevelRaw: number) => {
+  const maxLevel = getVillageBuildingMaxLevel(buildingId);
+  const targetLevel = Math.min(maxLevel, Math.max(1, Math.floor(currentLevelRaw) + 1));
+  const byLevel = VILLAGE_UPGRADE_HOURS_BY_TARGET_LEVEL[buildingId];
+  const hours = getVillageTableValue(byLevel, targetLevel);
+  return Math.max(5, Math.round(hours * 3600));
+};
+
+const getVillageStorageCapHours = (storageLevelRaw: number) =>
+  getVillageTableValue(VILLAGE_STORAGE_CAP_HOURS_BY_LEVEL, storageLevelRaw);
+
+const getVillageCastleMultiplier = (castleLevelRaw: number) =>
+  1 + getVillageTableValue(VILLAGE_CASTLE_BONUS_BY_LEVEL, castleLevelRaw);
+
+const getVillageMineGoldPerHour = (mineLevelRaw: number, castleLevelRaw: number) =>
+  (getVillageTableValue(VILLAGE_MINE_GOLD_PER_HOUR_BY_LEVEL, mineLevelRaw) / 24) *
+  getVillageCastleMultiplier(castleLevelRaw);
+
+const getVillageLabCrystalsPerHour = (labLevelRaw: number, castleLevelRaw: number) =>
+  (getVillageTableValue(VILLAGE_LAB_CRYSTALS_PER_HOUR_BY_LEVEL, labLevelRaw) / 24) *
+  getVillageCastleMultiplier(castleLevelRaw);
+
+const getVillageProductionRates = (village: VillageState) => {
+  const castleLevel = village.buildings.castle.level;
+  const mineLevel = village.buildings.mine.level;
+  const labLevel = village.buildings.lab.level;
+  const storageLevel = village.buildings.storage.level;
+  const castleMultiplier = getVillageCastleMultiplier(castleLevel);
+  const goldPerHour = getVillageMineGoldPerHour(mineLevel, castleLevel);
+  const crystalsPerHour = getVillageLabCrystalsPerHour(labLevel, castleLevel);
+  const capHours = getVillageStorageCapHours(storageLevel);
+  return { goldPerHour, crystalsPerHour, capHours, castleMultiplier };
+};
+
+const applyVillageUpgradeCompletions = (village: VillageState, nowMs = Date.now()) => {
+  const completed: VillageBuildingId[] = [];
+  const order: VillageBuildingId[] = ["castle", "mine", "lab", "storage"];
+  for (const buildingId of order) {
+    const building = village.buildings[buildingId];
+    if (building.upgradingTo !== building.level + 1) continue;
+    if (building.upgradeEndsAt <= 0 || nowMs < building.upgradeEndsAt) continue;
+    building.level = building.upgradingTo;
+    building.upgradingTo = 0;
+    building.upgradeEndsAt = 0;
+    completed.push(buildingId);
+  }
+  return completed;
+};
+
+const getVillageActiveUpgrade = (village: VillageState, nowMs = Date.now()) => {
+  const order: VillageBuildingId[] = ["castle", "mine", "lab", "storage"];
+  for (const buildingId of order) {
+    const building = village.buildings[buildingId];
+    if (building.upgradingTo !== building.level + 1) continue;
+    if (building.upgradeEndsAt <= nowMs) continue;
+    return {
+      buildingId,
+      remainingSec: Math.max(0, Math.ceil((building.upgradeEndsAt - nowMs) / 1000)),
+    };
+  }
+  return null;
+};
+
+const getCastleUpgradeRequirement = (village: VillageState, playerLevelRaw: number, nextLevel: number) => {
+  if (nextLevel !== 2 && nextLevel !== 3) return null;
+  const requiredBuildingLevel = nextLevel === 2 ? VILLAGE_CASTLE_LEVEL2_REQUIREMENT : VILLAGE_CASTLE_LEVEL3_REQUIREMENT;
+  const requiredPlayerLevel = nextLevel === 2 ? VILLAGE_CASTLE_LEVEL2_PLAYER_LEVEL : VILLAGE_CASTLE_LEVEL3_PLAYER_LEVEL;
+  const playerLevel = Math.max(1, Math.floor(playerLevelRaw));
+  const mineLevel = village.buildings.mine.level;
+  const labLevel = village.buildings.lab.level;
+  const storageLevel = village.buildings.storage.level;
+  const allBuildingsReady = mineLevel >= requiredBuildingLevel && labLevel >= requiredBuildingLevel && storageLevel >= requiredBuildingLevel;
+  const playerReady = playerLevel >= requiredPlayerLevel;
+  return {
+    failed: !allBuildingsReady || !playerReady,
+    text: `Requirements for Castle Lv.${nextLevel}: Mine ${mineLevel}/${requiredBuildingLevel}, Lab ${labLevel}/${requiredBuildingLevel}, Storage ${storageLevel}/${requiredBuildingLevel}, Player ${playerLevel}/${requiredPlayerLevel}.`,
+  };
+};
+
+const getVillagePendingRewards = (villageRaw: VillageState, nowMs = Date.now()) => {
+  const village = normalizeVillageState(villageRaw, nowMs);
+  if (!village.settlementName) {
+    return { elapsedSec: 0, effectiveSec: 0, capSec: 0, gold: 0, crystals: 0 };
+  }
+
+  const startMs = village.lastClaimAt;
+  const targetMs = Math.max(startMs, nowMs);
+  const elapsedSec = Math.max(0, Math.floor((targetMs - startMs) / 1000));
+  const working = cloneVillageState(village);
+  let cursorMs = startMs;
+  let effectiveSec = 0;
+  let goldAcc = 0;
+  let crystalsAcc = 0;
+
+  const consumeSegment = (endMs: number) => {
+    if (endMs <= cursorMs) return;
+    const segmentSec = Math.max(0, Math.floor((endMs - cursorMs) / 1000));
+    if (segmentSec <= 0) {
+      cursorMs = endMs;
+      return;
+    }
+
+    const rates = getVillageProductionRates(working);
+    const capSec = Math.max(0, Math.floor(rates.capHours * 3600));
+    const capRemaining = Math.max(0, capSec - effectiveSec);
+    const countedSec = Math.min(segmentSec, capRemaining);
+    if (countedSec > 0) {
+      goldAcc += (rates.goldPerHour * countedSec) / 3600;
+      crystalsAcc += (rates.crystalsPerHour * countedSec) / 3600;
+      effectiveSec += countedSec;
+    }
+    cursorMs = endMs;
+  };
+
+  let safety = 0;
+  while (cursorMs < targetMs && safety < 20) {
+    safety += 1;
+    let nextCompletionMs = Number.POSITIVE_INFINITY;
+    const order: VillageBuildingId[] = ["castle", "mine", "lab", "storage"];
+    for (const buildingId of order) {
+      const building = working.buildings[buildingId];
+      if (building.upgradingTo !== building.level + 1) continue;
+      const completionMs = Math.max(0, building.upgradeEndsAt);
+      if (completionMs <= cursorMs || completionMs > targetMs) continue;
+      if (completionMs < nextCompletionMs) nextCompletionMs = completionMs;
+    }
+
+    if (Number.isFinite(nextCompletionMs)) {
+      consumeSegment(nextCompletionMs);
+      applyVillageUpgradeCompletions(working, nextCompletionMs);
+      continue;
+    }
+
+    consumeSegment(targetMs);
+    break;
+  }
+
+  if (cursorMs < targetMs) {
+    consumeSegment(targetMs);
+  }
+
+  const finalRates = getVillageProductionRates(working);
+  const capSec = Math.max(0, Math.floor(finalRates.capHours * 3600));
+  return {
+    elapsedSec,
+    effectiveSec: Math.max(0, effectiveSec),
+    capSec,
+    gold: Math.max(0, Math.floor(goldAcc)),
+    crystals: Math.max(0, Math.floor(crystalsAcc)),
+  };
+};
+
 const getMetrics = (state: Record<string, unknown>): Metrics => {
   const player = (state.player as Record<string, unknown> | undefined) ?? {};
   return {
@@ -495,6 +808,7 @@ const normalizeState = (raw: unknown) => {
   state.starterPackPurchased = Boolean(state.starterPackPurchased);
   state.premiumEndsAt = Math.max(0, asInt(state.premiumEndsAt, 0));
   state.premiumClaimDay = String(state.premiumClaimDay ?? "").slice(0, 10);
+  state.village = normalizeVillageState(state.village, Date.now());
   const normalizedConsumables = normalizeConsumables(state.consumables);
   state.consumables = normalizedConsumables.rows;
   state.consumableId = Math.max(asInt(state.consumableId, 0), normalizedConsumables.maxId);
@@ -1611,6 +1925,13 @@ serve(async (req) => {
       if (nextPremiumEndsAt < prevPremiumEndsAt) {
         normalizedState.premiumEndsAt = prevPremiumEndsAt;
       }
+      const prevPremiumClaimDay = String(prevState.premiumClaimDay ?? "");
+      const nextPremiumClaimDay = String(normalizedState.premiumClaimDay ?? "");
+      if (nextPremiumClaimDay < prevPremiumClaimDay) {
+        normalizedState.premiumClaimDay = prevPremiumClaimDay;
+      }
+      // Village writes are server-authoritative and must never be accepted from client profile_save.
+      normalizedState.village = normalizeVillageState(prevState.village, now.getTime());
     }
     const prevMetrics = prevState ? getMetrics(prevState) : null;
     const nextMetrics = getMetrics(normalizedState);
@@ -2250,6 +2571,290 @@ serve(async (req) => {
     }
 
     return json({ ok: false, error: "Profile changed concurrently, retry premium claim." });
+  }
+
+  if (action === "village_status") {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const nowMs = Date.now();
+      const nowIso = new Date(nowMs).toISOString();
+      const { data: profileRow, error: profileError } = await supabase
+        .from("profiles")
+        .select("state, updated_at")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+
+      if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+        return json({ ok: false, error: "Profile not found." });
+      }
+
+      const state = normalizeState(profileRow.state as unknown);
+      if (!state) return json({ ok: false, error: "Invalid profile state." });
+
+      const village = normalizeVillageState(state.village, nowMs);
+      const completed = applyVillageUpgradeCompletions(village, nowMs);
+      state.village = village;
+
+      if (completed.length > 0) {
+        const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+        const { data: updated, error: updateError } = await supabase
+          .from("profiles")
+          .update({
+            state,
+            updated_at: nowIso,
+          })
+          .eq("wallet", auth.wallet)
+          .eq("updated_at", expectedUpdatedAt)
+          .select("wallet")
+          .maybeSingle();
+        if (updateError || !updated) continue;
+        await auditEvent(supabase, auth.wallet, "village_upgrade_complete", { completed });
+      }
+
+      const pending = getVillagePendingRewards(village, nowMs);
+      const rates = getVillageProductionRates(village);
+      return json({
+        ok: true,
+        gold: Math.max(0, asInt(state.gold, 0)),
+        crystals: Math.max(0, asInt(state.crystals, 0)),
+        crystalsEarned: Math.max(0, asInt(state.crystalsEarned, 0)),
+        village,
+        villagePending: pending,
+        villageRates: rates,
+      });
+    }
+
+    return json({ ok: false, error: "Village status changed concurrently, retry." });
+  }
+
+  if (action === "village_init") {
+    const name = sanitizeSettlementName(body.name ?? "");
+    if (name.length < 3) {
+      return json({ ok: false, error: "Village name must be at least 3 characters." });
+    }
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const nowMs = Date.now();
+      const nowIso = new Date(nowMs).toISOString();
+      const { data: profileRow, error: profileError } = await supabase
+        .from("profiles")
+        .select("state, updated_at")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+
+      if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+        return json({ ok: false, error: "Profile not found." });
+      }
+
+      const state = normalizeState(profileRow.state as unknown);
+      if (!state) return json({ ok: false, error: "Invalid profile state." });
+      const village = normalizeVillageState(state.village, nowMs);
+      if (village.settlementName) {
+        return json({ ok: false, error: "Village name is already locked." });
+      }
+
+      village.settlementName = name;
+      village.lastClaimAt = nowMs;
+      state.village = village;
+
+      const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+      const { data: updated, error: updateError } = await supabase
+        .from("profiles")
+        .update({
+          state,
+          updated_at: nowIso,
+        })
+        .eq("wallet", auth.wallet)
+        .eq("updated_at", expectedUpdatedAt)
+        .select("wallet")
+        .maybeSingle();
+      if (updateError || !updated) continue;
+
+      await auditEvent(supabase, auth.wallet, "village_init", { settlementName: name });
+      const pending = getVillagePendingRewards(village, nowMs);
+      const rates = getVillageProductionRates(village);
+      return json({
+        ok: true,
+        gold: Math.max(0, asInt(state.gold, 0)),
+        crystals: Math.max(0, asInt(state.crystals, 0)),
+        crystalsEarned: Math.max(0, asInt(state.crystalsEarned, 0)),
+        village,
+        villagePending: pending,
+        villageRates: rates,
+      });
+    }
+
+    return json({ ok: false, error: "Village changed concurrently, retry setup." });
+  }
+
+  if (action === "village_upgrade_start") {
+    const buildingIdRaw = String(body.buildingId ?? "").trim();
+    if (!isVillageBuildingId(buildingIdRaw)) {
+      return json({ ok: false, error: "Invalid building." });
+    }
+    const buildingId = buildingIdRaw;
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const nowMs = Date.now();
+      const nowIso = new Date(nowMs).toISOString();
+      const { data: profileRow, error: profileError } = await supabase
+        .from("profiles")
+        .select("state, updated_at")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+
+      if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+        return json({ ok: false, error: "Profile not found." });
+      }
+
+      const state = normalizeState(profileRow.state as unknown);
+      if (!state) return json({ ok: false, error: "Invalid profile state." });
+
+      const village = normalizeVillageState(state.village, nowMs);
+      const completed = applyVillageUpgradeCompletions(village, nowMs);
+      const activeUpgrade = getVillageActiveUpgrade(village, nowMs);
+      if (!village.settlementName) {
+        return json({ ok: false, error: "Set village name first." });
+      }
+      if (activeUpgrade && activeUpgrade.buildingId !== buildingId) {
+        return json({ ok: false, error: "Only one building can be upgraded at a time." });
+      }
+
+      const building = village.buildings[buildingId];
+      if (building.upgradingTo === building.level + 1 && building.upgradeEndsAt > nowMs) {
+        return json({ ok: false, error: "Building is already upgrading." });
+      }
+
+      const maxLevel = getVillageBuildingMaxLevel(buildingId);
+      if (building.level >= maxLevel) {
+        return json({ ok: false, error: "Building is at max level." });
+      }
+
+      const nextLevel = building.level + 1;
+      if (buildingId === "castle") {
+        const player = (state.player as Record<string, unknown> | undefined) ?? {};
+        const requirement = getCastleUpgradeRequirement(village, asInt(player.level, 1), nextLevel);
+        if (requirement?.failed) {
+          return json({ ok: false, error: requirement.text });
+        }
+      }
+
+      const cost = getVillageUpgradeCost(buildingId, building.level);
+      const gold = Math.max(0, asInt(state.gold, 0));
+      if (gold < cost) {
+        return json({ ok: false, error: `Not enough gold. Need ${cost}.` });
+      }
+
+      const durationSec = getVillageUpgradeDurationSec(buildingId, building.level);
+      building.upgradingTo = nextLevel;
+      building.upgradeEndsAt = nowMs + durationSec * 1000;
+      state.gold = gold - cost;
+      state.village = village;
+
+      const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+      const { data: updated, error: updateError } = await supabase
+        .from("profiles")
+        .update({
+          state,
+          updated_at: nowIso,
+        })
+        .eq("wallet", auth.wallet)
+        .eq("updated_at", expectedUpdatedAt)
+        .select("wallet")
+        .maybeSingle();
+      if (updateError || !updated) continue;
+
+      await auditEvent(supabase, auth.wallet, "village_upgrade_start", {
+        buildingId,
+        fromLevel: building.level,
+        toLevel: nextLevel,
+        cost,
+        durationSec,
+        completed,
+      });
+      const pending = getVillagePendingRewards(village, nowMs);
+      const rates = getVillageProductionRates(village);
+      return json({
+        ok: true,
+        gold: Math.max(0, asInt(state.gold, 0)),
+        crystals: Math.max(0, asInt(state.crystals, 0)),
+        crystalsEarned: Math.max(0, asInt(state.crystalsEarned, 0)),
+        village,
+        villagePending: pending,
+        villageRates: rates,
+      });
+    }
+
+    return json({ ok: false, error: "Village changed concurrently, retry upgrade." });
+  }
+
+  if (action === "village_claim") {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const nowMs = Date.now();
+      const nowIso = new Date(nowMs).toISOString();
+      const { data: profileRow, error: profileError } = await supabase
+        .from("profiles")
+        .select("state, updated_at")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+
+      if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+        return json({ ok: false, error: "Profile not found." });
+      }
+
+      const state = normalizeState(profileRow.state as unknown);
+      if (!state) return json({ ok: false, error: "Invalid profile state." });
+
+      const village = normalizeVillageState(state.village, nowMs);
+      const completed = applyVillageUpgradeCompletions(village, nowMs);
+      if (!village.settlementName) {
+        return json({ ok: false, error: "Set village name first." });
+      }
+
+      const pending = getVillagePendingRewards(village, nowMs);
+      if (pending.gold <= 0 && pending.crystals <= 0) {
+        return json({ ok: false, error: "No rewards to claim yet." });
+      }
+
+      state.gold = Math.max(0, asInt(state.gold, 0)) + pending.gold;
+      state.crystals = Math.max(0, asInt(state.crystals, 0)) + pending.crystals;
+      state.crystalsEarned = Math.max(0, asInt(state.crystalsEarned ?? state.crystals, 0)) + pending.crystals;
+      village.lastClaimAt = nowMs;
+      state.village = village;
+
+      const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+      const { data: updated, error: updateError } = await supabase
+        .from("profiles")
+        .update({
+          state,
+          updated_at: nowIso,
+        })
+        .eq("wallet", auth.wallet)
+        .eq("updated_at", expectedUpdatedAt)
+        .select("wallet")
+        .maybeSingle();
+      if (updateError || !updated) continue;
+
+      await auditEvent(supabase, auth.wallet, "village_claim", {
+        claimedGold: pending.gold,
+        claimedCrystals: pending.crystals,
+        completed,
+      });
+      const nextPending = getVillagePendingRewards(village, nowMs);
+      const rates = getVillageProductionRates(village);
+      return json({
+        ok: true,
+        gold: Math.max(0, asInt(state.gold, 0)),
+        crystals: Math.max(0, asInt(state.crystals, 0)),
+        crystalsEarned: Math.max(0, asInt(state.crystalsEarned, 0)),
+        village,
+        villageClaimedGold: pending.gold,
+        villageClaimedCrystals: pending.crystals,
+        villagePending: nextPending,
+        villageRates: rates,
+      });
+    }
+
+    return json({ ok: false, error: "Village changed concurrently, retry claim." });
   }
 
   if (action === "stake_start") {
