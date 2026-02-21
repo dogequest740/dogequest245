@@ -1604,50 +1604,27 @@ const updateProfileWithRetry = async (
     mutate(nextState);
 
     const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+    const updatedAt = new Date().toISOString();
     const { data: updated, error: updateError } = await supabase
       .from("profiles")
       .update({
         state: nextState,
-        updated_at: new Date().toISOString(),
+        updated_at: updatedAt,
       })
       .eq("wallet", wallet)
       .eq("updated_at", expectedUpdatedAt)
-      .select("wallet")
+      .select("wallet, updated_at")
       .maybeSingle();
 
     if (!updateError && updated) {
-      return { ok: true as const, state: nextState };
+      return {
+        ok: true as const,
+        state: nextState,
+        updatedAt: String((updated as { updated_at?: string }).updated_at ?? updatedAt),
+      };
     }
   }
-
-  const { data: fallbackRow, error: fallbackError } = await supabase
-    .from("profiles")
-    .select("state")
-    .eq("wallet", wallet)
-    .maybeSingle();
-
-  if (fallbackError || !fallbackRow || !fallbackRow.state || typeof fallbackRow.state !== "object") {
-    return { ok: false as const };
-  }
-
-  const fallbackState = normalizeState(fallbackRow.state);
-  if (!fallbackState) return { ok: false as const };
-
-  const nextFallbackState = structuredClone(fallbackState) as Record<string, unknown>;
-  mutate(nextFallbackState);
-
-  const { data: forceUpdated, error: forceError } = await supabase
-    .from("profiles")
-    .update({
-      state: nextFallbackState,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("wallet", wallet)
-    .select("wallet")
-    .maybeSingle();
-
-  if (forceError || !forceUpdated) return { ok: false as const };
-  return { ok: true as const, state: nextFallbackState };
+  return { ok: false as const };
 };
 
 const claimWorldBossReward = async (
@@ -1656,8 +1633,8 @@ const claimWorldBossReward = async (
   boss: WorldBossRow,
   now: Date,
 ) => {
-  if (!boss.last_cycle_start || !boss.last_cycle_end || !boss.last_prize_pool) return 0;
-  if (new Date(boss.last_cycle_end).getTime() > now.getTime()) return 0;
+  if (!boss.last_cycle_start || !boss.last_cycle_end || !boss.last_prize_pool) return { share: 0 as const };
+  if (new Date(boss.last_cycle_end).getTime() > now.getTime()) return { share: 0 as const };
 
   const { data: playerRow, error: playerError } = await supabase
     .from("world_boss_participants")
@@ -1666,15 +1643,15 @@ const claimWorldBossReward = async (
     .eq("wallet", wallet)
     .maybeSingle();
 
-  if (playerError || !playerRow) return 0;
-  if (Boolean(playerRow.reward_claimed) || !Boolean(playerRow.joined)) return 0;
+  if (playerError || !playerRow) return { share: 0 as const };
+  if (Boolean(playerRow.reward_claimed) || !Boolean(playerRow.joined)) return { share: 0 as const };
 
   const { data: totalRows, error: totalError } = await supabase
     .from("world_boss_participants")
     .select("damage")
     .eq("cycle_start", boss.last_cycle_start)
     .eq("joined", true);
-  if (totalError || !totalRows) return 0;
+  if (totalError || !totalRows) return { share: 0 as const };
 
   const totalDamage = totalRows.reduce((sum, row) => sum + Math.max(0, asInt(row.damage, 0)), 0);
   const playerDamage = Math.max(0, asInt(playerRow.damage, 0));
@@ -1691,7 +1668,7 @@ const claimWorldBossReward = async (
     .select("wallet")
     .maybeSingle();
 
-  if (claimError || !claimRow || share <= 0) return 0;
+  if (claimError || !claimRow || share <= 0) return { share: 0 as const };
 
   const creditResult = await updateProfileWithRetry(supabase, wallet, (state) => {
     state.crystals = Math.max(0, asInt(state.crystals, 0)) + share;
@@ -1703,10 +1680,13 @@ const claimWorldBossReward = async (
       share,
       cycleStart: boss.last_cycle_start,
     });
-    return 0;
+    return { share: 0 as const };
   }
 
-  return share;
+  return {
+    share,
+    updatedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
+  };
 };
 
 const syncOwnReferralProgress = async (
@@ -1842,6 +1822,7 @@ serve(async (req) => {
   if (action === "profile_refresh_energy") {
     for (let attempt = 0; attempt < 4; attempt += 1) {
       const attemptNow = new Date();
+      const attemptNowIso = attemptNow.toISOString();
       const { data: profileRow, error: profileError } = await supabase
         .from("profiles")
         .select("state, updated_at")
@@ -1862,8 +1843,10 @@ serve(async (req) => {
 
       const changed = applyOfflineEnergyRegen(state, elapsedSec);
       if (!changed) {
+        const savedAt = String(profileRow.updated_at ?? attemptNowIso);
         return json({
           ok: true,
+          savedAt,
           energy: Math.max(0, asInt(state.energy, 0)),
           energyTimer: clampInt(state.energyTimer, 1, ENERGY_REGEN_SECONDS),
         });
@@ -1874,7 +1857,7 @@ serve(async (req) => {
         .from("profiles")
         .update({
           state,
-          updated_at: attemptNow.toISOString(),
+          updated_at: attemptNowIso,
         })
         .eq("wallet", auth.wallet)
         .eq("updated_at", expectedUpdatedAt)
@@ -1889,6 +1872,7 @@ serve(async (req) => {
         });
         return json({
           ok: true,
+          savedAt: attemptNowIso,
           energy: Math.max(0, asInt(state.energy, 0)),
           energyTimer: clampInt(state.energyTimer, 1, ENERGY_REGEN_SECONDS),
         });
@@ -1903,6 +1887,7 @@ serve(async (req) => {
     if (!normalizedState) {
       return json({ ok: false, error: "Invalid profile payload." });
     }
+    const clientUpdatedAt = String(body.clientUpdatedAt ?? "").trim();
 
     const { data: existing, error: existingError } = await supabase
       .from("profiles")
@@ -1912,6 +1897,28 @@ serve(async (req) => {
 
     if (existingError) {
       return json({ ok: false, error: "Failed to load profile." });
+    }
+    if (existing) {
+      if (!clientUpdatedAt) {
+        await auditEvent(supabase, auth.wallet, "profile_save_rejected", {
+          reason: "Missing clientUpdatedAt.",
+        });
+        return json({ ok: false, error: "Profile version is missing. Refresh the game." });
+      }
+      const serverUpdatedAtMs = existing.updated_at ? new Date(String(existing.updated_at)).getTime() : Number.NaN;
+      const clientUpdatedAtMs = new Date(clientUpdatedAt).getTime();
+      if (
+        Number.isFinite(serverUpdatedAtMs) &&
+        Number.isFinite(clientUpdatedAtMs) &&
+        serverUpdatedAtMs - clientUpdatedAtMs > 2000
+      ) {
+        await auditEvent(supabase, auth.wallet, "profile_save_rejected", {
+          reason: "Stale client profile version.",
+          serverUpdatedAt: existing.updated_at,
+          clientUpdatedAt,
+        });
+        return json({ ok: false, error: "Profile is outdated. Reload game state and retry." });
+      }
     }
 
     const prevStateRaw = existing?.state && typeof existing.state === "object"
@@ -1932,6 +1939,11 @@ serve(async (req) => {
       }
       // Village writes are server-authoritative and must never be accepted from client profile_save.
       normalizedState.village = normalizeVillageState(prevState.village, now.getTime());
+    } else if (!existing) {
+      // Initial village state is server-owned; never accept custom client seed values.
+      normalizedState.village = createVillageState(now.getTime());
+    } else {
+      return json({ ok: false, error: "Invalid previous profile state. Contact support." });
     }
     const prevMetrics = prevState ? getMetrics(prevState) : null;
     const nextMetrics = getMetrics(normalizedState);
@@ -2069,6 +2081,7 @@ serve(async (req) => {
 
     return json({
       ok: true,
+      savedAt: now.toISOString(),
       withdrawal: withdrawalRow,
       remainingCrystals: nextCrystals,
     });
@@ -2236,6 +2249,7 @@ serve(async (req) => {
 
       return json({
         ok: true,
+        savedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
         fortuneUsed: useFreeSpin ? "free" : "paid",
         fortuneReward: {
           id: reward.id,
@@ -2384,6 +2398,7 @@ serve(async (req) => {
 
     return json({
       ok: true,
+      savedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
       claimedKeys,
       claimedCrystals,
       tickets: Math.max(0, asInt(creditResult.state.tickets, 0)),
@@ -2469,6 +2484,7 @@ serve(async (req) => {
         });
         return json({
           ok: true,
+          savedAt: now.toISOString(),
           premiumEndsAt: nextPremiumEndsAt,
           premiumDaysAdded: plan.days,
           premiumAlreadyProcessed: false,
@@ -2560,6 +2576,7 @@ serve(async (req) => {
         });
         return json({
           ok: true,
+          savedAt: now.toISOString(),
           tickets: syncedTickets,
           ticketDay: syncedTicketDay,
           worldBossTickets: syncedWorldBossTickets,
@@ -2612,8 +2629,10 @@ serve(async (req) => {
 
       const pending = getVillagePendingRewards(village, nowMs);
       const rates = getVillageProductionRates(village);
+      const savedAt = completed.length > 0 ? nowIso : String(profileRow.updated_at ?? nowIso);
       return json({
         ok: true,
+        savedAt,
         gold: Math.max(0, asInt(state.gold, 0)),
         crystals: Math.max(0, asInt(state.crystals, 0)),
         crystalsEarned: Math.max(0, asInt(state.crystalsEarned, 0)),
@@ -2674,6 +2693,7 @@ serve(async (req) => {
       const rates = getVillageProductionRates(village);
       return json({
         ok: true,
+        savedAt: nowIso,
         gold: Math.max(0, asInt(state.gold, 0)),
         crystals: Math.max(0, asInt(state.crystals, 0)),
         crystalsEarned: Math.max(0, asInt(state.crystalsEarned, 0)),
@@ -2775,6 +2795,7 @@ serve(async (req) => {
       const rates = getVillageProductionRates(village);
       return json({
         ok: true,
+        savedAt: nowIso,
         gold: Math.max(0, asInt(state.gold, 0)),
         crystals: Math.max(0, asInt(state.crystals, 0)),
         crystalsEarned: Math.max(0, asInt(state.crystalsEarned, 0)),
@@ -2843,6 +2864,7 @@ serve(async (req) => {
       const rates = getVillageProductionRates(village);
       return json({
         ok: true,
+        savedAt: nowIso,
         gold: Math.max(0, asInt(state.gold, 0)),
         crystals: Math.max(0, asInt(state.crystals, 0)),
         crystalsEarned: Math.max(0, asInt(state.crystalsEarned, 0)),
@@ -2930,6 +2952,7 @@ serve(async (req) => {
         });
         return json({
           ok: true,
+          savedAt: now.toISOString(),
           crystals: Math.max(0, asInt(state.crystals, 0)),
           stakeId: nextStakeId,
           stakeEntries: nextEntries,
@@ -2997,6 +3020,7 @@ serve(async (req) => {
         });
         return json({
           ok: true,
+          savedAt: now.toISOString(),
           crystals: Math.max(0, asInt(state.crystals, 0)),
           crystalsEarned: Math.max(0, asInt(state.crystalsEarned, 0)),
           stakeId: Math.max(0, asInt(state.stakeId, 0)),
@@ -3090,6 +3114,7 @@ serve(async (req) => {
 
       return json({
         ok: true,
+        savedAt: now.toISOString(),
         gold: Math.max(0, asInt(state.gold, 0)),
         worldBossTickets: Math.max(0, asInt(ticketUpdate.state.tickets, 0)),
       });
@@ -3110,7 +3135,8 @@ serve(async (req) => {
     const safePendingDamage = cycleMatches ? pendingDamageInput : 0;
     const safeJoined = joinedInput;
 
-    const rewardShare = await claimWorldBossReward(supabase, auth.wallet, boss, now);
+    const reward = await claimWorldBossReward(supabase, auth.wallet, boss, now);
+    const rewardShare = reward.share;
 
     const { data: existing, error: existingError } = await supabase
       .from("world_boss_participants")
@@ -3206,6 +3232,7 @@ serve(async (req) => {
 
     return json({
       ok: true,
+      savedAt: reward.updatedAt,
       worldBossTickets,
       worldBoss: boss,
       worldBossParticipants: participants,

@@ -3162,6 +3162,8 @@ function App() {
   const consumableBusyIdsRef = useRef<Set<number>>(new Set())
   const lastActiveAtRef = useRef<number>(Date.now())
   const pendingProfileRef = useRef<LoadedProfile | null>(null)
+  const profileUpdatedAtRef = useRef('')
+  const profileSaveInFlightRef = useRef(false)
   const spriteCacheRef = useRef<PlayerSpriteMap>({
     knight: null,
     mage: null,
@@ -3388,6 +3390,9 @@ function App() {
     )
     if (!result.ok && result.error) {
       handleSecurityAuthFailure(result.error, interactive)
+    }
+    if (result.ok && typeof result.savedAt === 'string' && result.savedAt.trim()) {
+      profileUpdatedAtRef.current = result.savedAt
     }
     return result
   }
@@ -3944,6 +3949,7 @@ function App() {
       isNewProfileRef.current = false
       referralProcessedRef.current = false
       fortuneAutoOpenRef.current = false
+      profileUpdatedAtRef.current = ''
       setSecurityAuthError('')
       setStage('select')
       return () => {
@@ -3956,6 +3962,7 @@ function App() {
       if (saved) {
         isNewProfileRef.current = false
         referralProcessedRef.current = true
+        profileUpdatedAtRef.current = saved.updatedAt || ''
         pendingProfileRef.current = saved
         setSelectedId(saved.state.classId || CHARACTER_CLASSES[0].id)
         setPlayerName(sanitizePlayerName(saved.state.name || ''))
@@ -3963,6 +3970,7 @@ function App() {
       } else {
         isNewProfileRef.current = true
         referralProcessedRef.current = false
+        profileUpdatedAtRef.current = ''
         pendingProfileRef.current = null
         setStage('select')
       }
@@ -4056,6 +4064,7 @@ function App() {
     if (pendingProfile) {
       isNewProfileRef.current = false
       referralProcessedRef.current = true
+      profileUpdatedAtRef.current = pendingProfile.updatedAt || ''
       applyPersistedState(state, pendingProfile.state, pendingProfile.updatedAt)
       pendingProfileRef.current = null
       serverLoadedRef.current = true
@@ -4067,10 +4076,12 @@ function App() {
         if (saved) {
           isNewProfileRef.current = false
           referralProcessedRef.current = true
+          profileUpdatedAtRef.current = saved.updatedAt || ''
           applyPersistedState(gameStateRef.current, saved.state, saved.updatedAt)
         } else {
           isNewProfileRef.current = true
           referralProcessedRef.current = false
+          profileUpdatedAtRef.current = ''
         }
         serverLoadedRef.current = true
         syncHud()
@@ -4350,17 +4361,24 @@ function App() {
   }
 
   const saveGameState = async () => {
+    if (profileSaveInFlightRef.current) return
     const state = gameStateRef.current
     if (!state) return
     const wallet = publicKey?.toBase58()
     if (!wallet || !serverLoadedRef.current) return
-    const result = await callGameSecureAuthed(
-      'profile_save',
-      { state: buildPersistedState(state) },
-      false,
-    )
-    if (!result.ok && result.error && result.error !== 'Wallet signature required for secure actions.') {
-      console.warn('Secure profile save skipped:', result.error)
+    profileSaveInFlightRef.current = true
+    try {
+      const clientUpdatedAt = profileUpdatedAtRef.current.trim()
+      const result = await callGameSecureAuthed(
+        'profile_save',
+        { state: buildPersistedState(state), ...(clientUpdatedAt ? { clientUpdatedAt } : {}) },
+        false,
+      )
+      if (!result.ok && result.error && result.error !== 'Wallet signature required for secure actions.') {
+        console.warn('Secure profile save skipped:', result.error)
+      }
+    } finally {
+      profileSaveInFlightRef.current = false
     }
   }
 
