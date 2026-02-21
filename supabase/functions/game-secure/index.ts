@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { clusterApiUrl, Connection } from "https://esm.sh/@solana/web3.js@1.98.4";
 
 const MAX_LEVEL = 255;
 const WITHDRAW_RATE = 15000;
@@ -25,9 +26,16 @@ const PREMIUM_DAILY_KEYS = 5;
 const PREMIUM_DAILY_GOLD = 50000;
 const PREMIUM_DAILY_SMALL_POTIONS = 5;
 const PREMIUM_DAILY_BIG_POTIONS = 3;
+const PREMIUM_PAYMENT_WALLET = "9a5GXRjX6HKh9Yjc9d7gp9RFmuRvMQAcV1VJ9WV7LU8c";
+const SOL_LAMPORTS = 1_000_000_000;
+const PREMIUM_TX_MAX_AGE_SECONDS = 2 * 60 * 60;
 const BLOCKED_ERROR_MESSAGE = "You have been banned for cheating.";
 const FORTUNE_SPIN_PACKS = [1, 10] as const;
 const ENERGY_REGEN_SECONDS = 420;
+const PREMIUM_PLANS = [
+  { id: "premium-30", days: 30, lamports: Math.round(0.5 * SOL_LAMPORTS) },
+  { id: "premium-90", days: 90, lamports: Math.round(1 * SOL_LAMPORTS) },
+] as const;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -186,9 +194,112 @@ const sanitizeName = (value: unknown) =>
     .slice(0, 18) || "Hero";
 
 const isWalletLike = (value: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
+const isTxSignatureLike = (value: string) => /^[1-9A-HJ-NP-Za-km-z]{70,120}$/.test(value);
 const todayKeyUtc = (now: Date) => now.toISOString().slice(0, 10);
 const isConsumableType = (value: string): value is ConsumableType =>
   Object.prototype.hasOwnProperty.call(CONSUMABLE_DEFS, value);
+
+let solanaConnection: Connection | null = null;
+const getSolanaConnection = () => {
+  if (solanaConnection) return solanaConnection;
+  const rpcUrl = Deno.env.get("SOLANA_RPC_URL") ||
+    Deno.env.get("VITE_SOLANA_RPC") ||
+    clusterApiUrl("mainnet-beta");
+  solanaConnection = new Connection(rpcUrl, "confirmed");
+  return solanaConnection;
+};
+
+const getPremiumPlan = (planIdRaw: unknown, daysRaw: unknown) => {
+  const planId = String(planIdRaw ?? "").trim();
+  if (planId) {
+    const byId = PREMIUM_PLANS.find((entry) => entry.id === planId);
+    if (byId) return byId;
+  }
+  const days = asInt(daysRaw, 0);
+  if (days > 0) {
+    const byDays = PREMIUM_PLANS.find((entry) => entry.days === days);
+    if (byDays) return byDays;
+  }
+  return null;
+};
+
+const wasPremiumTxAlreadyProcessed = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  txSignature: string,
+) => {
+  const { data, error } = await supabase
+    .from("security_events")
+    .select("details")
+    .eq("wallet", wallet)
+    .eq("kind", "premium_buy")
+    .order("created_at", { ascending: false })
+    .limit(300);
+
+  if (error || !data) return false;
+  for (const row of data as Array<{ details?: Record<string, unknown> }>) {
+    const details = row.details && typeof row.details === "object" ? row.details : {};
+    if (String(details?.txSignature ?? "") === txSignature) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const verifyPremiumPaymentTx = async (
+  wallet: string,
+  txSignature: string,
+  lamportsRequired: number,
+  now: Date,
+) => {
+  const connection = getSolanaConnection();
+  const tx = await connection.getParsedTransaction(txSignature, {
+    commitment: "confirmed",
+    maxSupportedTransactionVersion: 0,
+  });
+
+  if (!tx) {
+    return { ok: false as const, error: "Payment transaction not found yet. Wait a few seconds and retry." };
+  }
+  if (tx.meta?.err) {
+    return { ok: false as const, error: "Payment transaction failed on-chain." };
+  }
+
+  if (tx.blockTime) {
+    const ageSec = Math.max(0, Math.floor(now.getTime() / 1000 - tx.blockTime));
+    if (ageSec > PREMIUM_TX_MAX_AGE_SECONDS) {
+      return { ok: false as const, error: "Payment transaction is too old. Contact support." };
+    }
+  }
+
+  let matchedTransfer = false;
+  for (const instruction of tx.transaction.message.instructions) {
+    const ix = instruction as {
+      program?: string;
+      parsed?: { type?: string; info?: Record<string, unknown> };
+    };
+    if (!ix || ix.program !== "system") continue;
+    if (!ix.parsed || ix.parsed.type !== "transfer" || !ix.parsed.info) continue;
+    const info = ix.parsed.info;
+    const source = String(info.source ?? "");
+    const destination = String(info.destination ?? "");
+    const lamports = Math.max(0, asInt(info.lamports, 0));
+    if (source === wallet && destination === PREMIUM_PAYMENT_WALLET && lamports >= lamportsRequired) {
+      matchedTransfer = true;
+      break;
+    }
+  }
+
+  if (!matchedTransfer) {
+    return { ok: false as const, error: "Payment transfer mismatch for the selected Premium plan." };
+  }
+
+  return {
+    ok: true as const,
+    blockTime: tx.blockTime ?? null,
+    slot: tx.slot,
+  };
+};
 
 const normalizeConsumables = (raw: unknown) => {
   if (!Array.isArray(raw)) return { rows: [] as ConsumableRow[], maxId: 0 };
@@ -1731,6 +1842,94 @@ serve(async (req) => {
       tickets: Math.max(0, asInt(creditResult.state.tickets, 0)),
       crystals: Math.max(0, asInt(creditResult.state.crystals, 0)),
     });
+  }
+
+  if (action === "premium_buy") {
+    const plan = getPremiumPlan(body.planId, body.days);
+    if (!plan) {
+      return json({ ok: false, error: "Invalid Premium plan." });
+    }
+
+    const txSignature = String(body.txSignature ?? "").trim().slice(0, 120);
+    if (!isTxSignatureLike(txSignature)) {
+      return json({ ok: false, error: "Invalid payment transaction signature." });
+    }
+
+    const alreadyProcessed = await wasPremiumTxAlreadyProcessed(supabase, auth.wallet, txSignature);
+    if (alreadyProcessed) {
+      const { data: profileRow } = await supabase
+        .from("profiles")
+        .select("state")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+      const state = normalizeState(profileRow?.state ?? null);
+      if (!state) {
+        return json({ ok: false, error: "Profile not found." });
+      }
+      return json({
+        ok: true,
+        premiumEndsAt: Math.max(0, asInt(state.premiumEndsAt, 0)),
+        premiumAlreadyProcessed: true,
+      });
+    }
+
+    const txCheck = await verifyPremiumPaymentTx(auth.wallet, txSignature, plan.lamports, now);
+    if (!txCheck.ok) {
+      return json({ ok: false, error: txCheck.error });
+    }
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const { data: profileRow, error: profileError } = await supabase
+        .from("profiles")
+        .select("state, updated_at")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+
+      if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+        return json({ ok: false, error: "Profile not found." });
+      }
+
+      const state = normalizeState(profileRow.state as unknown);
+      if (!state) return json({ ok: false, error: "Invalid profile state." });
+
+      const nowMs = now.getTime();
+      const currentPremiumEndsAt = Math.max(0, asInt(state.premiumEndsAt, 0));
+      const base = Math.max(nowMs, currentPremiumEndsAt);
+      const nextPremiumEndsAt = base + plan.days * 24 * 60 * 60 * 1000;
+      state.premiumEndsAt = nextPremiumEndsAt;
+
+      const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+      const { data: updated, error: updateError } = await supabase
+        .from("profiles")
+        .update({
+          state,
+          updated_at: now.toISOString(),
+        })
+        .eq("wallet", auth.wallet)
+        .eq("updated_at", expectedUpdatedAt)
+        .select("wallet")
+        .maybeSingle();
+
+      if (!updateError && updated) {
+        await auditEvent(supabase, auth.wallet, "premium_buy", {
+          planId: plan.id,
+          days: plan.days,
+          txSignature,
+          lamports: plan.lamports,
+          premiumEndsAt: nextPremiumEndsAt,
+          txBlockTime: txCheck.blockTime,
+          txSlot: txCheck.slot,
+        });
+        return json({
+          ok: true,
+          premiumEndsAt: nextPremiumEndsAt,
+          premiumDaysAdded: plan.days,
+          premiumAlreadyProcessed: false,
+        });
+      }
+    }
+
+    return json({ ok: false, error: "Profile changed concurrently, retry premium activation." });
   }
 
   if (action === "premium_claim_daily") {
