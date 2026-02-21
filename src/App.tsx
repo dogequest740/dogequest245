@@ -293,6 +293,19 @@ type AdminPlayerRow = {
   blockedAt: string
 }
 
+type AdminVillageRow = {
+  wallet: string
+  name: string
+  villageName: string
+  castleLevel: number
+  mineLevel: number
+  labLevel: number
+  storageLevel: number
+  updatedAt: string
+  blocked: boolean
+  blockedReason: string
+}
+
 type AdminSummary = {
   totalPlayers: number
   active24h: number
@@ -328,6 +341,7 @@ type BlockedWalletRow = {
 type AdminData = {
   summary: AdminSummary
   players: AdminPlayerRow[]
+  villages: AdminVillageRow[]
   withdrawals: WithdrawalRow[]
   events: AdminEventRow[]
 }
@@ -987,36 +1001,75 @@ const VILLAGE_CASTLE_LEVEL2_REQUIREMENT = 10
 const VILLAGE_CASTLE_LEVEL3_REQUIREMENT = 25
 const VILLAGE_CASTLE_LEVEL2_PLAYER_LEVEL = 50
 const VILLAGE_CASTLE_LEVEL3_PLAYER_LEVEL = 75
-const VILLAGE_CASTLE_PRODUCTION_BONUS_PER_LEVEL = 0.15
-const VILLAGE_MINE_BASE_GOLD_PER_HOUR = 320
-const VILLAGE_MINE_GROWTH = 1.18
-const VILLAGE_LAB_BASE_CRYSTALS_PER_HOUR = 1.4
-const VILLAGE_LAB_GROWTH = 1.17
-const VILLAGE_STORAGE_BASE_CAP_HOURS = 6
-const VILLAGE_STORAGE_CAP_HOURS_PER_LEVEL = 0.55
-const VILLAGE_UPGRADE_BASE_COST: Record<VillageBuildingId, number> = {
-  castle: 90000,
-  mine: 6000,
-  lab: 8000,
-  storage: 7000,
+const VILLAGE_MINE_GOLD_PER_HOUR_BY_LEVEL = [
+  0,
+  800, 1600, 2400, 3200, 4000, 4800, 5600, 6400, 7200, 8000,
+  8800, 9600, 10400, 11200, 12000, 12800, 13600, 14400, 15200, 16000,
+  16800, 17600, 18400, 19200, 20000,
+]
+const VILLAGE_LAB_CRYSTALS_PER_HOUR_BY_LEVEL = [
+  0,
+  11, 22, 33, 44, 55, 66, 77, 88, 99, 110,
+  121, 132, 143, 154, 165, 176, 187, 198, 209, 220,
+  231, 242, 253, 264, 275,
+]
+const VILLAGE_STORAGE_CAP_HOURS_BY_LEVEL = [
+  0,
+  1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5,
+  6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5,
+  11, 11.5, 12, 12, 12,
+]
+const VILLAGE_CASTLE_BONUS_BY_LEVEL = [
+  0,
+  0, 0.1, 0.25,
+]
+const VILLAGE_UPGRADE_COST_BY_TARGET_LEVEL: Record<VillageBuildingId, number[]> = {
+  mine: [
+    0,
+    4000, 5120, 6554, 8392, 10739, 13747, 17590, 22486, 28732, 36704,
+    46900, 59925, 76513, 97464, 124101, 158849, 203166, 259221, 330982, 422898,
+    540031, 689238, 878318, 1120000, 1426000,
+  ],
+  lab: [
+    0,
+    6000, 7680, 9835, 12597, 16081, 20539, 26226, 33456, 42704, 54540,
+    69632, 88939, 113628, 145061, 185015, 235821, 300949, 383232, 487614, 620459,
+    790636, 1006020, 1278188, 1624290, 2065000,
+  ],
+  storage: [
+    0,
+    3000, 3840, 4915, 6298, 8041, 10270, 13113, 16728, 21382, 27309,
+    34910, 44588, 56996, 72872, 93136, 118966, 151881, 194000, 247973, 317144,
+    405350, 518571, 664093, 850000, 1150000,
+  ],
+  castle: [
+    0,
+    0, 2500000, 3200000,
+  ],
 }
-const VILLAGE_UPGRADE_COST_GROWTH: Record<VillageBuildingId, number> = {
-  castle: 2.6,
-  mine: 1.36,
-  lab: 1.38,
-  storage: 1.35,
-}
-const VILLAGE_UPGRADE_BASE_TIME_SEC: Record<VillageBuildingId, number> = {
-  castle: 3600,
-  mine: 180,
-  lab: 240,
-  storage: 210,
-}
-const VILLAGE_UPGRADE_TIME_GROWTH: Record<VillageBuildingId, number> = {
-  castle: 2.1,
-  mine: 1.3,
-  lab: 1.32,
-  storage: 1.3,
+const VILLAGE_UPGRADE_HOURS_BY_TARGET_LEVEL: Record<VillageBuildingId, number[]> = {
+  mine: [
+    0,
+    1, 1.28, 1.64, 2.1, 2.7, 3.5, 4.5, 5.8, 7.4, 9.5,
+    12.2, 15.7, 20.2, 26, 33.3, 42.6, 54.5, 69.8, 89.4, 114.7,
+    147, 188, 241, 309, 307,
+  ],
+  lab: [
+    0,
+    1, 1.28, 1.64, 2.1, 2.7, 3.5, 4.5, 5.8, 7.4, 9.5,
+    12.2, 15.7, 20.2, 26, 33.3, 42.6, 54.5, 69.8, 89.4, 114.7,
+    147, 188, 241, 309, 307,
+  ],
+  storage: [
+    0,
+    1, 1.28, 1.64, 2.1, 2.7, 3.5, 4.5, 5.8, 7.4, 9.5,
+    12.2, 15.7, 20.2, 26, 33.3, 42.6, 54.5, 69.8, 89.4, 114.7,
+    147, 188, 241, 309, 307,
+  ],
+  castle: [
+    0,
+    0, 48, 96,
+  ],
 }
 const VILLAGE_BUILDING_META: Record<VillageBuildingId, { label: string; description: string }> = {
   castle: { label: 'Castle', description: 'Boosts city production and unlocks new progression tiers.' },
@@ -1106,37 +1159,41 @@ const getVillageVisualLevel = (buildingId: VillageBuildingId, currentLevel: numb
   }
 }
 
+const getVillageTableValue = (values: number[], level: number) => {
+  if (values.length <= 1) return 0
+  const clampedLevel = clamp(Math.floor(level), 1, values.length - 1)
+  return values[clampedLevel] ?? values[values.length - 1] ?? 0
+}
+
 const getVillageUpgradeCost = (buildingId: VillageBuildingId, currentLevel: number) =>
-  Math.max(
-    1,
-    Math.round(
-      VILLAGE_UPGRADE_BASE_COST[buildingId] * Math.pow(VILLAGE_UPGRADE_COST_GROWTH[buildingId], Math.max(0, currentLevel - 1)),
-    ),
-  )
+  (() => {
+    const maxLevel = getVillageBuildingMaxLevel(buildingId)
+    const targetLevel = Math.min(maxLevel, Math.max(1, Math.floor(currentLevel) + 1))
+    const byLevel = VILLAGE_UPGRADE_COST_BY_TARGET_LEVEL[buildingId]
+    return Math.max(0, Math.round(getVillageTableValue(byLevel, targetLevel)))
+  })()
 
 const getVillageUpgradeDurationSec = (buildingId: VillageBuildingId, currentLevel: number) =>
-  Math.max(
-    5,
-    Math.round(
-      VILLAGE_UPGRADE_BASE_TIME_SEC[buildingId] *
-        Math.pow(VILLAGE_UPGRADE_TIME_GROWTH[buildingId], Math.max(0, currentLevel - 1)),
-    ),
-  )
+  (() => {
+    const maxLevel = getVillageBuildingMaxLevel(buildingId)
+    const targetLevel = Math.min(maxLevel, Math.max(1, Math.floor(currentLevel) + 1))
+    const byLevel = VILLAGE_UPGRADE_HOURS_BY_TARGET_LEVEL[buildingId]
+    const hours = getVillageTableValue(byLevel, targetLevel)
+    return Math.max(5, Math.round(hours * 3600))
+  })()
 
 const getVillageStorageCapHours = (storageLevel: number) =>
-  VILLAGE_STORAGE_BASE_CAP_HOURS + Math.max(0, storageLevel - 1) * VILLAGE_STORAGE_CAP_HOURS_PER_LEVEL
+  getVillageTableValue(VILLAGE_STORAGE_CAP_HOURS_BY_LEVEL, storageLevel)
 
 const getVillageCastleMultiplier = (castleLevel: number) =>
-  1 + Math.max(0, castleLevel - 1) * VILLAGE_CASTLE_PRODUCTION_BONUS_PER_LEVEL
+  1 + getVillageTableValue(VILLAGE_CASTLE_BONUS_BY_LEVEL, castleLevel)
 
 const getVillageMineGoldPerHour = (mineLevel: number, castleLevel: number) =>
-  VILLAGE_MINE_BASE_GOLD_PER_HOUR *
-  Math.pow(VILLAGE_MINE_GROWTH, Math.max(0, mineLevel - 1)) *
+  (getVillageTableValue(VILLAGE_MINE_GOLD_PER_HOUR_BY_LEVEL, mineLevel) / 24) *
   getVillageCastleMultiplier(castleLevel)
 
 const getVillageLabCrystalsPerHour = (labLevel: number, castleLevel: number) =>
-  VILLAGE_LAB_BASE_CRYSTALS_PER_HOUR *
-  Math.pow(VILLAGE_LAB_GROWTH, Math.max(0, labLevel - 1)) *
+  (getVillageTableValue(VILLAGE_LAB_CRYSTALS_PER_HOUR_BY_LEVEL, labLevel) / 24) *
   getVillageCastleMultiplier(castleLevel)
 
 const getVillageProductionRates = (village: VillageState) => {
@@ -1189,6 +1246,21 @@ const getVillageActiveUpgrade = (village: VillageState, nowMs = Date.now()) => {
     }
   }
   return null
+}
+
+const getCastleUpgradeRequirement = (village: VillageState, playerLevel: number, nextLevel: number) => {
+  if (nextLevel !== 2 && nextLevel !== 3) return null
+  const requiredBuildingLevel = nextLevel === 2 ? VILLAGE_CASTLE_LEVEL2_REQUIREMENT : VILLAGE_CASTLE_LEVEL3_REQUIREMENT
+  const requiredPlayerLevel = nextLevel === 2 ? VILLAGE_CASTLE_LEVEL2_PLAYER_LEVEL : VILLAGE_CASTLE_LEVEL3_PLAYER_LEVEL
+  const mineLevel = village.buildings.mine.level
+  const labLevel = village.buildings.lab.level
+  const storageLevel = village.buildings.storage.level
+  const allBuildingsReady = mineLevel >= requiredBuildingLevel && labLevel >= requiredBuildingLevel && storageLevel >= requiredBuildingLevel
+  const playerReady = playerLevel >= requiredPlayerLevel
+  return {
+    failed: !allBuildingsReady || !playerReady,
+    text: `Requirements for Lv.${nextLevel}: Mine ${mineLevel}/${requiredBuildingLevel}, Lab ${labLevel}/${requiredBuildingLevel}, Storage ${storageLevel}/${requiredBuildingLevel}, Player ${playerLevel}/${requiredPlayerLevel}.`,
+  }
 }
 
 const MONSTER_HP_TIER_TARGET = 30000
@@ -2956,6 +3028,7 @@ function App() {
   const [adminEventWalletFilter, setAdminEventWalletFilter] = useState('')
   const [adminEventKindFilter, setAdminEventKindFilter] = useState('')
   const [adminEventLimit, setAdminEventLimit] = useState('300')
+  const [adminStatsView, setAdminStatsView] = useState<'players' | 'villages'>('players')
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [withdrawError, setWithdrawError] = useState('')
   const [playerWithdrawals, setPlayerWithdrawals] = useState<WithdrawalRow[]>([])
@@ -4381,6 +4454,26 @@ function App() {
       }
     })
 
+    const villages: AdminVillageRow[] = (data ?? []).map((row) => {
+      const saved = (row.state as PersistedState | null) ?? null
+      const wallet = row.wallet as string
+      const blocked = blockedMap.get(wallet)
+      const village = normalizeVillageState(saved?.village, now)
+      const hasVillage = village.settlementName.length > 0
+      return {
+        wallet,
+        name: saved?.name || 'Unknown',
+        villageName: hasVillage ? village.settlementName : 'Not founded',
+        castleLevel: hasVillage ? village.buildings.castle.level : 0,
+        mineLevel: hasVillage ? village.buildings.mine.level : 0,
+        labLevel: hasVillage ? village.buildings.lab.level : 0,
+        storageLevel: hasVillage ? village.buildings.storage.level : 0,
+        updatedAt: (row.updated_at as string) || new Date(0).toISOString(),
+        blocked: Boolean(blocked),
+        blockedReason: blocked?.reason || '',
+      }
+    })
+
     const totalPlayers = players.length
     const totals = players.reduce(
       (acc, player) => {
@@ -4427,7 +4520,7 @@ function App() {
       pendingCrystals,
     }
 
-    setAdminData({ summary, players, withdrawals, events })
+    setAdminData({ summary, players, villages, withdrawals, events })
     setAdminEventLimit(String(eventLimit))
     setAdminLoading(false)
   }
@@ -4445,7 +4538,7 @@ function App() {
     await loadAdminData()
   }
 
-  const togglePlayerBlock = async (player: AdminPlayerRow) => {
+  const togglePlayerBlock = async (player: { wallet: string; blocked: boolean }) => {
     if (!isAdmin) return
     setAdminLoading(true)
     setAdminError('')
@@ -5031,35 +5124,11 @@ function App() {
 
     const nextLevel = building.level + 1
     if (buildingId === 'castle') {
-      if (nextLevel === 2) {
-        const allReady = ['mine', 'lab', 'storage'].every(
-          (id) => state.village.buildings[id as VillageBuildingId].level >= VILLAGE_CASTLE_LEVEL2_REQUIREMENT,
-        )
-        if (!allReady) {
-          setVillageError('For Castle Lv.2 all other buildings must be at least Lv.10.')
-          syncHud()
-          return
-        }
-        if (state.player.level < VILLAGE_CASTLE_LEVEL2_PLAYER_LEVEL) {
-          setVillageError('Castle Lv.2 requires player level 50.')
-          syncHud()
-          return
-        }
-      }
-      if (nextLevel === 3) {
-        const allReady = ['mine', 'lab', 'storage'].every(
-          (id) => state.village.buildings[id as VillageBuildingId].level >= VILLAGE_CASTLE_LEVEL3_REQUIREMENT,
-        )
-        if (!allReady) {
-          setVillageError('For Castle Lv.3 all other buildings must be at least Lv.25.')
-          syncHud()
-          return
-        }
-        if (state.player.level < VILLAGE_CASTLE_LEVEL3_PLAYER_LEVEL) {
-          setVillageError('Castle Lv.3 requires player level 75.')
-          syncHud()
-          return
-        }
+      const castleRequirement = getCastleUpgradeRequirement(state.village, state.player.level, nextLevel)
+      if (castleRequirement?.failed) {
+        setVillageError(`Castle upgrade locked. ${castleRequirement.text}`)
+        syncHud()
+        return
       }
     }
 
@@ -5927,12 +5996,6 @@ function App() {
                       <img className="icon-img" src={iconWorldBoss} alt="" />
                       World Boss
                     </button>
-                    {VILLAGE_FEATURE_ENABLED && (
-                      <button type="button" className="menu-big" onClick={() => setActivePanel('village')}>
-                        <img className="icon-img" src={villageCastleLv1Image} alt="" />
-                        Village
-                      </button>
-                    )}
                   </div>
                 </>
               ) : (
@@ -5979,6 +6042,18 @@ function App() {
                       <strong>Invite Friends</strong>
                     </div>
                   </button>
+                  {VILLAGE_FEATURE_ENABLED && (
+                    <button
+                      type="button"
+                      className={`starter-pack-btn starter-pack-float village-float ${!hud?.starterPackPurchased ? 'with-starterpack' : ''}`}
+                      onClick={() => setActivePanel('village')}
+                    >
+                      <img className="starter-pack-icon" src={villageCastleLv1Image} alt="" />
+                      <div className="starter-pack-text">
+                        <strong>Your Village</strong>
+                      </div>
+                    </button>
+                  )}
                 </div>
                 <canvas ref={canvasRef} className="game-canvas" />
                 <div className="buff-stack">
@@ -6034,12 +6109,6 @@ function App() {
                     <img className="icon-img" src={iconWorldBoss} alt="" />
                     <span>Boss</span>
                   </button>
-                  {VILLAGE_FEATURE_ENABLED && (
-                    <button type="button" onClick={() => setActivePanel('village')}>
-                      <img className="icon-img" src={villageCastleLv1Image} alt="" />
-                      <span>Village</span>
-                    </button>
-                  )}
                 </div>
               )}
             </div>
@@ -6866,43 +6935,41 @@ function App() {
 
                 let requirementText = ''
                 let requirementFailed = false
-                if (buildingId === 'castle' && nextLevel === 2) {
-                  const allReady = ['mine', 'lab', 'storage'].every(
-                    (id) => hud.village.buildings[id as VillageBuildingId].level >= VILLAGE_CASTLE_LEVEL2_REQUIREMENT,
-                  )
-                  requirementText = `Requires Mine/Lab/Storage Lv.${VILLAGE_CASTLE_LEVEL2_REQUIREMENT}+ and player Lv.${VILLAGE_CASTLE_LEVEL2_PLAYER_LEVEL}.`
-                  requirementFailed = !allReady || hud.level < VILLAGE_CASTLE_LEVEL2_PLAYER_LEVEL
-                }
-                if (buildingId === 'castle' && nextLevel === 3) {
-                  const allReady = ['mine', 'lab', 'storage'].every(
-                    (id) => hud.village.buildings[id as VillageBuildingId].level >= VILLAGE_CASTLE_LEVEL3_REQUIREMENT,
-                  )
-                  requirementText = `Requires Mine/Lab/Storage Lv.${VILLAGE_CASTLE_LEVEL3_REQUIREMENT}+ and player Lv.${VILLAGE_CASTLE_LEVEL3_PLAYER_LEVEL}.`
-                  requirementFailed = !allReady || hud.level < VILLAGE_CASTLE_LEVEL3_PLAYER_LEVEL
+                let lockText = ''
+                if (buildingId === 'castle') {
+                  const castleRequirement = getCastleUpgradeRequirement(hud.village, hud.level, nextLevel)
+                  if (castleRequirement) {
+                    requirementText = castleRequirement.text
+                    requirementFailed = castleRequirement.failed
+                  }
                 }
 
                 if (activeVillageUpgrade && activeVillageUpgrade.buildingId !== buildingId && !upgrading) {
-                  requirementText = `${VILLAGE_BUILDING_META[activeVillageUpgrade.buildingId].label} is upgrading.`
-                  requirementFailed = true
+                  lockText = `${VILLAGE_BUILDING_META[activeVillageUpgrade.buildingId].label} is upgrading.`
                 }
 
                 let statCurrent = ''
                 let statNext = ''
+                let statLabel = ''
                 if (buildingId === 'castle') {
-                  statCurrent = `Production bonus: +${Math.round((getVillageCastleMultiplier(building.level) - 1) * 100)}%`
-                  statNext = `Next: +${Math.round((getVillageCastleMultiplier(nextLevel) - 1) * 100)}%`
+                  statLabel = 'Production bonus'
+                  statCurrent = `+${Math.round((getVillageCastleMultiplier(building.level) - 1) * 100)}%`
+                  statNext = `+${Math.round((getVillageCastleMultiplier(nextLevel) - 1) * 100)}%`
                 } else if (buildingId === 'mine') {
-                  statCurrent = `Gold/hour: ${formatNumber(Math.round(getVillageMineGoldPerHour(building.level, hud.village.buildings.castle.level)))}`
-                  statNext = `Next: ${formatNumber(Math.round(getVillageMineGoldPerHour(nextLevel, hud.village.buildings.castle.level)))}`
+                  statLabel = 'Gold / hour'
+                  statCurrent = formatNumber(Math.round(getVillageMineGoldPerHour(building.level, hud.village.buildings.castle.level)))
+                  statNext = formatNumber(Math.round(getVillageMineGoldPerHour(nextLevel, hud.village.buildings.castle.level)))
                 } else if (buildingId === 'lab') {
-                  statCurrent = `Crystals/hour: ${getVillageLabCrystalsPerHour(building.level, hud.village.buildings.castle.level).toFixed(2)}`
-                  statNext = `Next: ${getVillageLabCrystalsPerHour(nextLevel, hud.village.buildings.castle.level).toFixed(2)}`
+                  statLabel = 'Crystals / hour'
+                  statCurrent = getVillageLabCrystalsPerHour(building.level, hud.village.buildings.castle.level).toFixed(2)
+                  statNext = getVillageLabCrystalsPerHour(nextLevel, hud.village.buildings.castle.level).toFixed(2)
                 } else {
-                  statCurrent = `Storage cap: ${getVillageStorageCapHours(building.level).toFixed(1)}h`
-                  statNext = `Next: ${getVillageStorageCapHours(nextLevel).toFixed(1)}h`
+                  statLabel = 'Storage cap'
+                  statCurrent = `${getVillageStorageCapHours(building.level).toFixed(1)}h`
+                  statNext = `${getVillageStorageCapHours(nextLevel).toFixed(1)}h`
                 }
 
-                const canUpgrade = !upgrading && building.level < maxLevel && !requirementFailed && hud.gold >= cost
+                const canUpgrade = !upgrading && building.level < maxLevel && !requirementFailed && !lockText && hud.gold >= cost
 
                 return {
                   buildingId,
@@ -6915,6 +6982,8 @@ function App() {
                   durationSec,
                   requirementText,
                   requirementFailed,
+                  lockText,
+                  statLabel,
                   statCurrent,
                   statNext,
                   canUpgrade,
@@ -7062,22 +7131,44 @@ function App() {
                                   </button>
                                 </div>
                                 <div className="shop-desc">{VILLAGE_BUILDING_META[selectedView.buildingId].description}</div>
-                                <div className="shop-meta">Level {selectedView.building.level}</div>
-                                <div className="village-stat-line">{selectedView.statCurrent}</div>
-                                {selectedView.building.level < selectedView.maxLevel && (
-                                  <div className="village-stat-line next">{selectedView.statNext}</div>
-                                )}
+                                <div className="shop-meta village-level-meta">
+                                  Level {selectedView.building.level}
+                                  {selectedView.building.level < selectedView.maxLevel && (
+                                    <span className="village-level-next">{'->'} Lv.{selectedView.nextLevel}</span>
+                                  )}
+                                </div>
+                                <div className="village-stats-table">
+                                  <div className="village-stats-row village-stats-head">
+                                    <span>Stat</span>
+                                    <span>Current</span>
+                                    <span>Next</span>
+                                  </div>
+                                  <div className="village-stats-row">
+                                    <span>{selectedView.statLabel}</span>
+                                    <strong>{selectedView.statCurrent}</strong>
+                                    <strong className="village-next-value">
+                                      {selectedView.building.level < selectedView.maxLevel ? selectedView.statNext : 'MAX'}
+                                    </strong>
+                                  </div>
+                                </div>
                                 {selectedView.requirementText && (
                                   <div className={`village-req ${selectedView.requirementFailed ? 'fail' : ''}`}>{selectedView.requirementText}</div>
                                 )}
+                                {selectedView.lockText && <div className="village-req fail">{selectedView.lockText}</div>}
                                 {selectedView.upgrading ? (
                                   <div className="village-upgrading">Upgrading: {formatLongTimer(selectedView.upgradeRemainingSec)}</div>
                                 ) : selectedView.building.level < selectedView.maxLevel ? (
                                   <div className="village-upgrade-meta">
-                                    <span>
-                                      <img className="icon-img tiny" src={iconGold} alt="" /> {formatNumber(selectedView.cost)}
-                                    </span>
-                                    <span>{formatLongTimer(selectedView.durationSec)}</span>
+                                    <div className="village-upgrade-meta-row">
+                                      <span className="village-upgrade-meta-label">Upgrade cost</span>
+                                      <strong>
+                                        <img className="icon-img tiny" src={iconGold} alt="" /> {formatNumber(selectedView.cost)}
+                                      </strong>
+                                    </div>
+                                    <div className="village-upgrade-meta-row">
+                                      <span className="village-upgrade-meta-label">Build time</span>
+                                      <strong>{formatLongTimer(selectedView.durationSec)}</strong>
+                                    </div>
                                   </div>
                                 ) : (
                                   <div className="village-upgrading">Max level reached</div>
@@ -7577,53 +7668,117 @@ function App() {
                         Apply filters
                       </button>
                     </div>
-                    <div className="admin-table">
-                      <div className="admin-row header">
-                        <span>Player</span>
-                        <span>Level</span>
-                        <span>Tier</span>
-                        <span>Gold</span>
-                        <span>Crystals</span>
-                        <span>Kills</span>
-                        <span>Dungeons</span>
-                        <span>Last Seen</span>
-                        <span>Wallet</span>
-                        <span>Status</span>
-                        <span>Action</span>
-                      </div>
-                      {adminData.players.map((player) => (
-                        <div key={player.wallet} className="admin-row">
-                          <span>{player.name}</span>
-                          <span>{formatNumber(player.level)}</span>
-                          <span>{formatNumber(player.tierScore)}</span>
-                          <span>{formatNumber(player.gold)}</span>
-                          <span>{formatNumber(player.crystals)}</span>
-                          <span>{formatNumber(player.kills)}</span>
-                          <span>{formatNumber(player.dungeons)}</span>
-                          <span>{formatDateTime(player.updatedAt)}</span>
-                          <span className="wallet-chip">{formatShortWallet(player.wallet)}</span>
-                          <span>
-                            {player.blocked ? (
-                              <span className="status blocked" title={player.blockedReason || 'Cheating'}>
-                                blocked
-                              </span>
-                            ) : (
-                              <span className="status paid">active</span>
-                            )}
-                          </span>
-                          <span>
-                            <button
-                              type="button"
-                              className={`admin-action ${player.blocked ? 'neutral' : 'danger'}`}
-                              onClick={() => togglePlayerBlock(player)}
-                              disabled={adminLoading}
-                            >
-                              {player.blocked ? 'Unblock' : 'Block'}
-                            </button>
-                          </span>
-                        </div>
-                      ))}
+                    <div className="admin-stats-tabs">
+                      <button
+                        type="button"
+                        className={`admin-tab-btn ${adminStatsView === 'players' ? 'active' : ''}`}
+                        onClick={() => setAdminStatsView('players')}
+                      >
+                        Player Stats
+                      </button>
+                      <button
+                        type="button"
+                        className={`admin-tab-btn ${adminStatsView === 'villages' ? 'active' : ''}`}
+                        onClick={() => setAdminStatsView('villages')}
+                      >
+                        Village Stats
+                      </button>
                     </div>
+                    {adminStatsView === 'players' ? (
+                      <div className="admin-table">
+                        <div className="admin-row header">
+                          <span>Player</span>
+                          <span>Level</span>
+                          <span>Tier</span>
+                          <span>Gold</span>
+                          <span>Crystals</span>
+                          <span>Kills</span>
+                          <span>Dungeons</span>
+                          <span>Last Seen</span>
+                          <span>Wallet</span>
+                          <span>Status</span>
+                          <span>Action</span>
+                        </div>
+                        {adminData.players.map((player) => (
+                          <div key={player.wallet} className="admin-row">
+                            <span>{player.name}</span>
+                            <span>{formatNumber(player.level)}</span>
+                            <span>{formatNumber(player.tierScore)}</span>
+                            <span>{formatNumber(player.gold)}</span>
+                            <span>{formatNumber(player.crystals)}</span>
+                            <span>{formatNumber(player.kills)}</span>
+                            <span>{formatNumber(player.dungeons)}</span>
+                            <span>{formatDateTime(player.updatedAt)}</span>
+                            <span className="wallet-chip">{formatShortWallet(player.wallet)}</span>
+                            <span>
+                              {player.blocked ? (
+                                <span className="status blocked" title={player.blockedReason || 'Cheating'}>
+                                  blocked
+                                </span>
+                              ) : (
+                                <span className="status paid">active</span>
+                              )}
+                            </span>
+                            <span>
+                              <button
+                                type="button"
+                                className={`admin-action ${player.blocked ? 'neutral' : 'danger'}`}
+                                onClick={() => togglePlayerBlock(player)}
+                                disabled={adminLoading}
+                              >
+                                {player.blocked ? 'Unblock' : 'Block'}
+                              </button>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="admin-table">
+                        <div className="admin-row header villages">
+                          <span>Player</span>
+                          <span>Village</span>
+                          <span>Castle</span>
+                          <span>Mine</span>
+                          <span>Lab</span>
+                          <span>Storage</span>
+                          <span>Last Seen</span>
+                          <span>Wallet</span>
+                          <span>Status</span>
+                          <span>Action</span>
+                        </div>
+                        {adminData.villages.map((village) => (
+                          <div key={village.wallet} className="admin-row villages">
+                            <span>{village.name}</span>
+                            <span className={village.villageName === 'Not founded' ? 'admin-village-empty' : ''}>{village.villageName}</span>
+                            <span>{formatNumber(village.castleLevel)}</span>
+                            <span>{formatNumber(village.mineLevel)}</span>
+                            <span>{formatNumber(village.labLevel)}</span>
+                            <span>{formatNumber(village.storageLevel)}</span>
+                            <span>{formatDateTime(village.updatedAt)}</span>
+                            <span className="wallet-chip">{formatShortWallet(village.wallet)}</span>
+                            <span>
+                              {village.blocked ? (
+                                <span className="status blocked" title={village.blockedReason || 'Cheating'}>
+                                  blocked
+                                </span>
+                              ) : (
+                                <span className="status paid">active</span>
+                              )}
+                            </span>
+                            <span>
+                              <button
+                                type="button"
+                                className={`admin-action ${village.blocked ? 'neutral' : 'danger'}`}
+                                onClick={() => togglePlayerBlock(village)}
+                                disabled={adminLoading}
+                              >
+                                {village.blocked ? 'Unblock' : 'Block'}
+                              </button>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <div className="admin-table events">
                       <div className="admin-row header events">
                         <span>Time</span>
