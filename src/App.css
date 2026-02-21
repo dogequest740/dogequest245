@@ -1285,10 +1285,16 @@
   pointer-events: none;
 }
 
-.auth-x-button {
+.auth-social-buttons {
   position: absolute;
   top: 18px;
-  right: 120px;
+  right: 22px;
+  display: flex;
+  gap: 10px;
+  z-index: 2;
+}
+
+.auth-social-button {
   width: 58px;
   height: 58px;
   border-radius: 16px;
@@ -1301,14 +1307,37 @@
   display: grid;
   place-items: center;
   text-decoration: none;
-  z-index: 2;
   box-shadow: 0 12px 20px rgba(0, 0, 0, 0.35);
 }
 
-.auth-x-button:hover {
+.auth-discord-button {
+  width: 118px;
+  font-size: 14px;
+  letter-spacing: 0.8px;
+}
+
+.auth-social-button:hover {
   box-shadow:
     0 16px 24px rgba(0, 0, 0, 0.4),
     0 0 16px rgba(214, 178, 95, 0.35);
+}
+
+.app.mobile .auth-social-buttons {
+  top: 14px;
+  right: 14px;
+  gap: 8px;
+}
+
+.app.mobile .auth-social-button {
+  width: 50px;
+  height: 50px;
+  border-radius: 14px;
+  font-size: 18px;
+}
+
+.app.mobile .auth-discord-button {
+  width: 102px;
+  font-size: 12px;
 }
 
 .auth-hero {
