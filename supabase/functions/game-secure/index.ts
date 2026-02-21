@@ -1435,6 +1435,14 @@ serve(async (req) => {
       ? (existing.state as Record<string, unknown>)
       : null;
     const prevState = prevStateRaw ? normalizeState(prevStateRaw) : null;
+    // Never allow client saves to roll premium back (stale client state can otherwise erase active premium).
+    if (prevState) {
+      const prevPremiumEndsAt = Math.max(0, asInt(prevState.premiumEndsAt, 0));
+      const nextPremiumEndsAt = Math.max(0, asInt(normalizedState.premiumEndsAt, 0));
+      if (nextPremiumEndsAt < prevPremiumEndsAt) {
+        normalizedState.premiumEndsAt = prevPremiumEndsAt;
+      }
+    }
     const prevMetrics = prevState ? getMetrics(prevState) : null;
     const nextMetrics = getMetrics(normalizedState);
     const previousUpdatedAtMs = existing?.updated_at ? new Date(String(existing.updated_at)).getTime() : Number.NaN;
