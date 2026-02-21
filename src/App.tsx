@@ -57,22 +57,24 @@ import goldSmallImage from './assets/shop/gold-small.png'
 import goldMiddleImage from './assets/shop/gold-middle.png'
 import goldLargeImage from './assets/shop/gold-large.png'
 import worldBossImage from './assets/boss/world-boss.jpg'
-import villageBackgroundImage from './assets/village/background.png'
-import villageCastleLv1Image from './assets/village/castle-lv1.png'
-import villageCastleLv2Image from './assets/village/castle-lv2.png'
-import villageCastleLv3Image from './assets/village/castle-lv3.png'
-import villageGoldMineLv1Image from './assets/village/gold-mine-lv1.png'
-import villageGoldMineLv2Image from './assets/village/gold-mine-lv2.png'
-import villageGoldMineLv3Image from './assets/village/gold-mine-lv3.png'
-import villageCrystalLabLv1Image from './assets/village/crystal-lab-lv1.png'
-import villageCrystalLabLv2Image from './assets/village/crystal-lab-lv2.png'
-import villageCrystalLabLv3Image from './assets/village/crystal-lab-lv3.png'
-import villageStorageLv1Image from './assets/village/storage-lv1.png'
-import villageStorageLv2Image from './assets/village/storage-lv2.png'
-import villageStorageLv3Image from './assets/village/storage-lv3.png'
 import bgMusic from './assets/audio/bg-music.mp3'
 import { supabase } from './lib/supabase'
 import './App.css'
+
+const VILLAGE_FEATURE_ENABLED = import.meta.env.VITE_ENABLE_VILLAGE === '1'
+const villageBackgroundImage = worldBossImage
+const villageCastleLv1Image = iconPremium
+const villageCastleLv2Image = iconPremium
+const villageCastleLv3Image = iconPremium
+const villageGoldMineLv1Image = iconPremium
+const villageGoldMineLv2Image = iconPremium
+const villageGoldMineLv3Image = iconPremium
+const villageCrystalLabLv1Image = iconPremium
+const villageCrystalLabLv2Image = iconPremium
+const villageCrystalLabLv3Image = iconPremium
+const villageStorageLv1Image = iconPremium
+const villageStorageLv2Image = iconPremium
+const villageStorageLv3Image = iconPremium
 
 type CharacterClass = {
   id: string
@@ -5821,10 +5823,12 @@ function App() {
                       <img className="icon-img" src={iconWorldBoss} alt="" />
                       World Boss
                     </button>
-                    <button type="button" className="menu-big" onClick={() => setActivePanel('village')}>
-                      <img className="icon-img" src={villageCastleLv1Image} alt="" />
-                      Village
-                    </button>
+                    {VILLAGE_FEATURE_ENABLED && (
+                      <button type="button" className="menu-big" onClick={() => setActivePanel('village')}>
+                        <img className="icon-img" src={villageCastleLv1Image} alt="" />
+                        Village
+                      </button>
+                    )}
                   </div>
                 </>
               ) : (
@@ -5926,10 +5930,12 @@ function App() {
                     <img className="icon-img" src={iconWorldBoss} alt="" />
                     <span>Boss</span>
                   </button>
-                  <button type="button" onClick={() => setActivePanel('village')}>
-                    <img className="icon-img" src={villageCastleLv1Image} alt="" />
-                    <span>Village</span>
-                  </button>
+                  {VILLAGE_FEATURE_ENABLED && (
+                    <button type="button" onClick={() => setActivePanel('village')}>
+                      <img className="icon-img" src={villageCastleLv1Image} alt="" />
+                      <span>Village</span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -6727,7 +6733,7 @@ function App() {
         </div>
       )}
 
-      {activePanel === 'village' && hud && (
+      {VILLAGE_FEATURE_ENABLED && activePanel === 'village' && hud && (
         <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
           <div className="modal wide village-modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
