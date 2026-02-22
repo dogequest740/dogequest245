@@ -4078,30 +4078,57 @@ function App() {
     lastActiveAtRef.current = Date.now()
     lastResumeSyncAtRef.current = 0
 
-    const handleResume = () => {
-      if (document.visibilityState !== 'visible') {
-        lastActiveAtRef.current = Date.now()
-        return
-      }
+    const markHidden = () => {
+      lastActiveAtRef.current = Date.now()
+      void saveGameState(true)
+    }
 
-      const state = gameStateRef.current
+    const syncOnResume = () => {
+      if (document.visibilityState !== 'visible') return
       const now = Date.now()
-      const elapsedSec = Math.max(0, (now - lastActiveAtRef.current) / 1000)
-      if (state && elapsedSec > 0) {
-        applyEnergyRegen(state, elapsedSec)
-        syncHud()
-      }
-      lastActiveAtRef.current = now
       if (now - lastResumeSyncAtRef.current < 750) return
       lastResumeSyncAtRef.current = now
       void refreshOfflineEnergyFromServer(false)
     }
 
-    window.addEventListener('focus', handleResume)
-    document.addEventListener('visibilitychange', handleResume)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        markHidden()
+        return
+      }
+      syncOnResume()
+    }
+
+    const handleFocus = () => {
+      if (document.visibilityState !== 'visible') return
+      syncOnResume()
+    }
+
+    const handleBlur = () => {
+      if (document.visibilityState === 'hidden') {
+        markHidden()
+      }
+    }
+
+    const handlePageShow = () => {
+      syncOnResume()
+    }
+
+    const handlePageHide = () => {
+      markHidden()
+    }
+
+    window.addEventListener('focus', handleFocus)
+    window.addEventListener('blur', handleBlur)
+    window.addEventListener('pageshow', handlePageShow)
+    window.addEventListener('pagehide', handlePageHide)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
     return () => {
-      window.removeEventListener('focus', handleResume)
-      document.removeEventListener('visibilitychange', handleResume)
+      window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('blur', handleBlur)
+      window.removeEventListener('pageshow', handlePageShow)
+      window.removeEventListener('pagehide', handlePageHide)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [stage, connected, publicKey])
 
@@ -4111,7 +4138,7 @@ function App() {
       void saveGameState()
     }, 15000)
     const handleUnload = () => {
-      void saveGameState()
+      void saveGameState(true)
     }
     window.addEventListener('beforeunload', handleUnload)
     return () => {
@@ -4448,12 +4475,13 @@ function App() {
     syncHud()
   }
 
-  const saveGameState = async () => {
+  const saveGameState = async (force = false) => {
     if (profileSaveInFlightRef.current) return
     const state = gameStateRef.current
     if (!state) return
     const wallet = publicKey?.toBase58()
     if (!wallet || !serverLoadedRef.current) return
+    if (!force && typeof document !== 'undefined' && document.visibilityState !== 'visible') return
     profileSaveInFlightRef.current = true
     try {
       const clientUpdatedAt = profileUpdatedAtRef.current.trim()
@@ -4466,7 +4494,7 @@ function App() {
         result = await callGameSecureAuthed(
           'profile_save',
           { state: buildPersistedState(state), ...(clientUpdatedAt ? { clientUpdatedAt } : {}) },
-          true,
+          !force,
         )
       }
       if (!result.ok && result.error && result.error !== 'Wallet signature required for secure actions.') {
