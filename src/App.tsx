@@ -2533,6 +2533,20 @@ const grantCrystals = (state: GameState, amount: number) => {
   state.crystalsEarned += value
 }
 
+const applyEnergyRegen = (state: GameState, elapsedSecRaw: number) => {
+  const elapsedSec = Math.max(0, elapsedSecRaw)
+  if (elapsedSec <= 0) return
+  if (state.energy < state.energyMax) {
+    state.energyTimer -= elapsedSec
+    while (state.energyTimer <= 0 && state.energy < state.energyMax) {
+      state.energy += 1
+      state.energyTimer += ENERGY_REGEN_SECONDS
+    }
+  } else {
+    state.energyTimer = ENERGY_REGEN_SECONDS
+  }
+}
+
 const addEffect = (state: GameState, effect: EffectInput) => {
   const effectWithId = { id: ++state.effectId, ...effect } as Effect
   state.effects.push(effectWithId)
@@ -2595,15 +2609,7 @@ const updateGame = (state: GameState, dt: number) => {
     }
   }
 
-  if (state.energy < state.energyMax) {
-    state.energyTimer -= dt
-    while (state.energyTimer <= 0 && state.energy < state.energyMax) {
-      state.energy += 1
-      state.energyTimer += ENERGY_REGEN_SECONDS
-    }
-  } else {
-    state.energyTimer = ENERGY_REGEN_SECONDS
-  }
+  applyEnergyRegen(state, dt)
 
   recomputePlayerStats(state)
   if (state.speedBuffTime > 0) {
@@ -4163,8 +4169,13 @@ function App() {
 
     const tick = (time: number) => {
       if (!running) return
-      const frameTime = Math.min((time - lastTime) / 1000, MAX_FRAME)
+      const rawFrameTime = Math.max(0, (time - lastTime) / 1000)
+      const frameTime = Math.min(rawFrameTime, MAX_FRAME)
+      const skippedFrameTime = Math.max(0, rawFrameTime - frameTime)
       lastTime = time
+      if (skippedFrameTime > 0) {
+        applyEnergyRegen(state, skippedFrameTime)
+      }
       accumulator += frameTime
       let steps = 0
       while (accumulator >= FIXED_STEP && steps < MAX_STEPS) {
