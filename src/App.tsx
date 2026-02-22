@@ -3240,6 +3240,19 @@ function App() {
     }
   }
 
+  const isSessionTokenError = (message: string) => {
+    const normalized = message.toLowerCase()
+    return normalized.includes('missing session token') ||
+      normalized.includes('invalid session token') ||
+      normalized.includes('session expired')
+  }
+
+  const isStaleProfileError = (message: string) => {
+    return message.includes('Profile is outdated') ||
+      message.includes('Profile changed concurrently') ||
+      message.includes('Invalid profile version')
+  }
+
   const ensureDungeonSession = async (interactive = true) => {
     const wallet = publicKey?.toBase58()
     if (!wallet) return null
@@ -3313,14 +3326,27 @@ function App() {
     payload: Record<string, unknown> = {},
     interactive = true,
   ): Promise<DungeonSecureResponse> => {
-    const token = await ensureDungeonSession(interactive)
+    let token = await ensureDungeonSession(interactive)
     if (!token) {
       return { ok: false, error: 'Wallet signature required for dungeon actions.' }
     }
-    const result = await callDungeonSecure(
+    let result = await callDungeonSecure(
       { action, ...payload },
       { 'x-session-token': token },
     )
+    if (!result.ok && result.error && isSessionTokenError(result.error)) {
+      dungeonSessionRef.current = null
+      if (interactive) {
+        const refreshed = await ensureDungeonSession(true)
+        if (refreshed) {
+          token = refreshed
+          result = await callDungeonSecure(
+            { action, ...payload },
+            { 'x-session-token': token },
+          )
+        }
+      }
+    }
     if (!result.ok && result.error) {
       handleSecurityAuthFailure(result.error, interactive)
     }
@@ -3348,19 +3374,35 @@ function App() {
     payload: Record<string, unknown> = {},
     interactive = true,
   ): Promise<GameSecureResponse> => {
-    const token = await ensureDungeonSession(interactive)
+    let token = await ensureDungeonSession(interactive)
     if (!token) {
       return { ok: false, error: 'Wallet signature required for secure actions.' }
     }
-    const result = await callGameSecure(
+    let result = await callGameSecure(
       { action, ...payload },
       { 'x-session-token': token },
     )
+    if (!result.ok && result.error && isSessionTokenError(result.error)) {
+      dungeonSessionRef.current = null
+      if (interactive) {
+        const refreshed = await ensureDungeonSession(true)
+        if (refreshed) {
+          token = refreshed
+          result = await callGameSecure(
+            { action, ...payload },
+            { 'x-session-token': token },
+          )
+        }
+      }
+    }
     if (!result.ok && result.error) {
       handleSecurityAuthFailure(result.error, interactive)
     }
     if (result.ok && typeof result.savedAt === 'string' && result.savedAt.trim()) {
       profileUpdatedAtRef.current = result.savedAt
+    }
+    if (result.ok && result.profile && typeof result.profile.updated_at === 'string' && result.profile.updated_at.trim()) {
+      profileUpdatedAtRef.current = result.profile.updated_at
     }
     return result
   }
@@ -4387,21 +4429,31 @@ function App() {
     profileSaveInFlightRef.current = true
     try {
       const clientUpdatedAt = profileUpdatedAtRef.current.trim()
-      const result = await callGameSecureAuthed(
+      let result = await callGameSecureAuthed(
         'profile_save',
         { state: buildPersistedState(state), ...(clientUpdatedAt ? { clientUpdatedAt } : {}) },
         false,
       )
+      if (!result.ok && result.error && isSessionTokenError(result.error)) {
+        result = await callGameSecureAuthed(
+          'profile_save',
+          { state: buildPersistedState(state), ...(clientUpdatedAt ? { clientUpdatedAt } : {}) },
+          true,
+        )
+      }
       if (!result.ok && result.error && result.error !== 'Wallet signature required for secure actions.') {
         console.warn('Secure profile save skipped:', result.error)
-        if (
-          result.error.includes('Profile is outdated') ||
-          result.error.includes('Profile changed concurrently') ||
-          result.error.includes('Invalid profile version')
-        ) {
+        if (isStaleProfileError(result.error)) {
           const fresh = await loadProfileStateSecure(false)
-          if (fresh?.updatedAt) {
-            profileUpdatedAtRef.current = fresh.updatedAt
+          if (fresh) {
+            if (fresh.updatedAt) {
+              profileUpdatedAtRef.current = fresh.updatedAt
+            }
+            const current = gameStateRef.current
+            if (current) {
+              applyPersistedState(current, fresh.state, fresh.updatedAt)
+              syncHud()
+            }
           }
         }
       }

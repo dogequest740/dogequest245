@@ -419,10 +419,21 @@ const verifySolTransferTx = async (
   now: Date,
 ) => {
   const connection = getSolanaConnection();
-  const tx = await connection.getParsedTransaction(txSignature, {
-    commitment: "confirmed",
-    maxSupportedTransactionVersion: 0,
-  });
+  let tx = null as Awaited<ReturnType<typeof connection.getParsedTransaction>>;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    tx = await connection.getParsedTransaction(txSignature, {
+      commitment: "confirmed",
+      maxSupportedTransactionVersion: 0,
+    });
+    if (!tx) {
+      tx = await connection.getParsedTransaction(txSignature, {
+        commitment: "finalized",
+        maxSupportedTransactionVersion: 0,
+      });
+    }
+    if (tx) break;
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+  }
 
   if (!tx) {
     return { ok: false as const, error: "Payment transaction not found yet. Wait a few seconds and retry." };
