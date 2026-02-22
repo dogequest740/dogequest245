@@ -2111,12 +2111,19 @@ serve(async (req) => {
         });
         return json({ ok: false, error: "Profile version is missing. Refresh the game." });
       }
-      const serverUpdatedAtMs = existing.updated_at ? new Date(String(existing.updated_at)).getTime() : Number.NaN;
+      const serverUpdatedAtRaw = String(existing.updated_at ?? "").trim();
+      const serverUpdatedAtMs = serverUpdatedAtRaw ? new Date(serverUpdatedAtRaw).getTime() : Number.NaN;
       const clientUpdatedAtMs = new Date(clientUpdatedAt).getTime();
+      if (!Number.isFinite(serverUpdatedAtMs) || !Number.isFinite(clientUpdatedAtMs)) {
+        await auditEvent(supabase, auth.wallet, "profile_save_rejected", {
+          reason: "Invalid profile version timestamp.",
+          serverUpdatedAt: existing.updated_at,
+          clientUpdatedAt,
+        });
+        return json({ ok: false, error: "Invalid profile version. Reload game state and retry." });
+      }
       if (
-        Number.isFinite(serverUpdatedAtMs) &&
-        Number.isFinite(clientUpdatedAtMs) &&
-        serverUpdatedAtMs - clientUpdatedAtMs > 2000
+        clientUpdatedAtMs < serverUpdatedAtMs
       ) {
         await auditEvent(supabase, auth.wallet, "profile_save_rejected", {
           reason: "Stale client profile version.",
@@ -2124,6 +2131,14 @@ serve(async (req) => {
           clientUpdatedAt,
         });
         return json({ ok: false, error: "Profile is outdated. Reload game state and retry." });
+      }
+      if (clientUpdatedAtMs > serverUpdatedAtMs + 5 * 60 * 1000) {
+        await auditEvent(supabase, auth.wallet, "profile_save_rejected", {
+          reason: "Client profile version is in the future.",
+          serverUpdatedAt: existing.updated_at,
+          clientUpdatedAt,
+        });
+        return json({ ok: false, error: "Invalid profile version. Reload game state and retry." });
       }
     }
 
@@ -2179,7 +2194,7 @@ serve(async (req) => {
         });
       if (insertError) return json({ ok: false, error: "Failed to save profile." });
     } else {
-      const expectedUpdatedAt = String(existing.updated_at ?? "");
+      const expectedUpdatedAt = clientUpdatedAt;
       const { data: updated, error: updateError } = await supabase
         .from("profiles")
         .update({

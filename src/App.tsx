@@ -4451,6 +4451,16 @@ function App() {
       )
       if (!result.ok && result.error && result.error !== 'Wallet signature required for secure actions.') {
         console.warn('Secure profile save skipped:', result.error)
+        if (
+          result.error.includes('Profile is outdated') ||
+          result.error.includes('Profile changed concurrently') ||
+          result.error.includes('Invalid profile version')
+        ) {
+          const fresh = await loadProfileStateSecure(false)
+          if (fresh?.updatedAt) {
+            profileUpdatedAtRef.current = fresh.updatedAt
+          }
+        }
       }
     } finally {
       profileSaveInFlightRef.current = false
