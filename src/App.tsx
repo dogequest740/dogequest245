@@ -3135,6 +3135,7 @@ function App() {
   const dungeonRunBusyRef = useRef(false)
   const consumableBusyIdsRef = useRef<Set<number>>(new Set())
   const lastActiveAtRef = useRef<number>(Date.now())
+  const lastResumeSyncAtRef = useRef<number>(0)
   const pendingProfileRef = useRef<LoadedProfile | null>(null)
   const profileUpdatedAtRef = useRef('')
   const profileSaveInFlightRef = useRef(false)
@@ -4075,6 +4076,7 @@ function App() {
   useEffect(() => {
     if (stage !== 'game') return
     lastActiveAtRef.current = Date.now()
+    lastResumeSyncAtRef.current = 0
 
     const handleResume = () => {
       if (document.visibilityState !== 'visible') {
@@ -4082,7 +4084,16 @@ function App() {
         return
       }
 
-      lastActiveAtRef.current = Date.now()
+      const state = gameStateRef.current
+      const now = Date.now()
+      const elapsedSec = Math.max(0, (now - lastActiveAtRef.current) / 1000)
+      if (state && elapsedSec > 0) {
+        applyEnergyRegen(state, elapsedSec)
+        syncHud()
+      }
+      lastActiveAtRef.current = now
+      if (now - lastResumeSyncAtRef.current < 750) return
+      lastResumeSyncAtRef.current = now
       void refreshOfflineEnergyFromServer(false)
     }
 
@@ -4169,13 +4180,8 @@ function App() {
 
     const tick = (time: number) => {
       if (!running) return
-      const rawFrameTime = Math.max(0, (time - lastTime) / 1000)
-      const frameTime = Math.min(rawFrameTime, MAX_FRAME)
-      const skippedFrameTime = Math.max(0, rawFrameTime - frameTime)
+      const frameTime = Math.min(Math.max(0, (time - lastTime) / 1000), MAX_FRAME)
       lastTime = time
-      if (skippedFrameTime > 0) {
-        applyEnergyRegen(state, skippedFrameTime)
-      }
       accumulator += frameTime
       let steps = 0
       while (accumulator >= FIXED_STEP && steps < MAX_STEPS) {
