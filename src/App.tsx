@@ -278,6 +278,12 @@ type LoadedProfile = {
   updatedAt?: string
 }
 
+type SecureProfileRow = {
+  wallet: string
+  state: PersistedState
+  updated_at: string
+}
+
 type AdminPlayerRow = {
   wallet: string
   name: string
@@ -370,6 +376,11 @@ type GameSecureResponse = {
   ok: boolean
   error?: string
   savedAt?: string
+  profile?: {
+    state?: PersistedState
+    updated_at?: string
+  } | null
+  profiles?: SecureProfileRow[]
   energy?: number
   energyTimer?: number
   remainingCrystals?: number
@@ -1552,24 +1563,6 @@ const applyPersistedState = (state: GameState, saved: PersistedState, savedUpdat
   state.consumableId = Math.max(state.consumableId, ...consumableIds, 0)
 
   recomputePlayerStats(state)
-}
-
-const loadProfileState = async (wallet: string) => {
-  if (!supabase) return null
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('state, updated_at')
-    .eq('wallet', wallet)
-    .maybeSingle()
-  if (error) {
-    console.warn('Supabase load failed', error)
-    return null
-  }
-  if (!data?.state) return null
-  return {
-    state: data.state as PersistedState,
-    updatedAt: typeof data.updated_at === 'string' ? data.updated_at : undefined,
-  } as LoadedProfile
 }
 
 const MONSTER_TYPES = [
@@ -3419,6 +3412,22 @@ function App() {
     syncHud()
   }
 
+  const loadProfileStateSecure = async (interactive = false): Promise<LoadedProfile | null> => {
+    const result = await callGameSecureAuthed('profile_load', {}, interactive)
+    if (!result.ok) {
+      if (result.error && result.error !== 'Wallet signature required for secure actions.') {
+        console.warn('Secure profile load skipped:', result.error)
+      }
+      return null
+    }
+    const profile = result.profile
+    if (!profile || !profile.state) return null
+    return {
+      state: profile.state,
+      updatedAt: typeof profile.updated_at === 'string' ? profile.updated_at : undefined,
+    }
+  }
+
   const syncDungeonStateFromServer = async () => {
     const state = gameStateRef.current
     if (!state || !connected || !publicKey || !supabase) return
@@ -3956,8 +3965,13 @@ function App() {
         active = false
       }
     }
+    if (!signMessage) {
+      return () => {
+        active = false
+      }
+    }
 
-    loadProfileState(wallet).then((saved) => {
+    loadProfileStateSecure(true).then((saved) => {
       if (!active) return
       if (saved) {
         isNewProfileRef.current = false
@@ -3979,7 +3993,7 @@ function App() {
     return () => {
       active = false
     }
-  }, [connected, publicKey])
+  }, [connected, publicKey, signMessage])
 
   useEffect(() => {
     if (stage !== 'game') return
@@ -4071,7 +4085,7 @@ function App() {
       syncHud()
       void syncDungeonStateFromServer()
     } else if (wallet && supabase) {
-      loadProfileState(wallet).then((saved) => {
+      loadProfileStateSecure(false).then((saved) => {
         if (!gameStateRef.current) return
         if (saved) {
           isNewProfileRef.current = false
@@ -4486,16 +4500,13 @@ function App() {
     }
     setAdminLoading(true)
     setAdminError('')
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('wallet, state, updated_at')
-      .order('updated_at', { ascending: false })
-      .limit(250)
-    if (error) {
-      setAdminError('Failed to load players.')
+    const profilesResult = await callGameSecureAuthed('admin_profiles', { limit: 250 }, true)
+    if (!profilesResult.ok) {
+      setAdminError(profilesResult.error || 'Failed to load players.')
       setAdminLoading(false)
       return
     }
+    const profileRows = profilesResult.profiles ?? []
 
     const { data: withdrawalsData, error: withdrawalsError } = await supabase
       .from('withdrawals')
@@ -4554,9 +4565,9 @@ function App() {
     })
 
     const now = Date.now()
-    const players: AdminPlayerRow[] = (data ?? []).map((row) => {
+    const players: AdminPlayerRow[] = profileRows.map((row) => {
       const saved = (row.state as PersistedState | null) ?? null
-      const wallet = row.wallet as string
+      const wallet = String(row.wallet ?? '')
       const blocked = blockedMap.get(wallet)
       const equipment = normalizeEquipment(saved?.equipment)
       const tierScore = getTierScore(equipment)
@@ -4575,16 +4586,16 @@ function App() {
         crystals,
         kills,
         dungeons,
-        updatedAt: (row.updated_at as string) || new Date(0).toISOString(),
+        updatedAt: String(row.updated_at || new Date(0).toISOString()),
         blocked: Boolean(blocked),
         blockedReason: blocked?.reason || '',
         blockedAt: blocked?.created_at || '',
       }
     })
 
-    const villages: AdminVillageRow[] = (data ?? []).map((row) => {
+    const villages: AdminVillageRow[] = profileRows.map((row) => {
       const saved = (row.state as PersistedState | null) ?? null
-      const wallet = row.wallet as string
+      const wallet = String(row.wallet ?? '')
       const blocked = blockedMap.get(wallet)
       const village = normalizeVillageState(saved?.village, now)
       const hasVillage = village.settlementName.length > 0
@@ -4596,7 +4607,7 @@ function App() {
         mineLevel: hasVillage ? village.buildings.mine.level : 0,
         labLevel: hasVillage ? village.buildings.lab.level : 0,
         storageLevel: hasVillage ? village.buildings.storage.level : 0,
-        updatedAt: (row.updated_at as string) || new Date(0).toISOString(),
+        updatedAt: String(row.updated_at || new Date(0).toISOString()),
         blocked: Boolean(blocked),
         blockedReason: blocked?.reason || '',
       }

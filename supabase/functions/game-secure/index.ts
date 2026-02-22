@@ -1882,6 +1882,33 @@ serve(async (req) => {
     return json({ ok: false, error: "Profile changed concurrently, retry energy sync." });
   }
 
+  if (action === "profile_load") {
+    const { data: profileRow, error: profileError } = await supabase
+      .from("profiles")
+      .select("state, updated_at")
+      .eq("wallet", auth.wallet)
+      .maybeSingle();
+
+    if (profileError) {
+      return json({ ok: false, error: "Failed to load profile." });
+    }
+    if (!profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+      return json({ ok: true, profile: null });
+    }
+
+    const state = normalizeState(profileRow.state as unknown);
+    if (!state) {
+      return json({ ok: false, error: "Invalid profile state." });
+    }
+    return json({
+      ok: true,
+      profile: {
+        state,
+        updated_at: String(profileRow.updated_at ?? ""),
+      },
+    });
+  }
+
   if (action === "profile_save") {
     const normalizedState = normalizeState(body.state);
     if (!normalizedState) {
@@ -3352,6 +3379,39 @@ serve(async (req) => {
     return json({
       ok: true,
       events: (data as SecurityEventRow[] | null) ?? [],
+    });
+  }
+
+  if (action === "admin_profiles") {
+    const adminWallets = toWalletList(Deno.env.get("ADMIN_WALLETS"));
+    if (!adminWallets.includes(auth.wallet)) {
+      return json({ ok: false, error: "Admin access required." });
+    }
+
+    const limit = clampInt(body.limit, 20, 1000);
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("wallet, state, updated_at")
+      .order("updated_at", { ascending: false })
+      .limit(limit);
+    if (error) return json({ ok: false, error: "Failed to load profiles." });
+
+    const profiles = ((data as Array<Record<string, unknown>> | null) ?? [])
+      .map((row) => {
+        const wallet = String(row.wallet ?? "");
+        const normalized = normalizeState(row.state ?? null);
+        if (!wallet || !normalized) return null;
+        return {
+          wallet,
+          state: normalized,
+          updated_at: String(row.updated_at ?? ""),
+        };
+      })
+      .filter((row): row is { wallet: string; state: Record<string, unknown>; updated_at: string } => Boolean(row));
+
+    return json({
+      ok: true,
+      profiles,
     });
   }
 

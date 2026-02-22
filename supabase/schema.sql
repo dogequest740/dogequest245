@@ -9,11 +9,13 @@ create table if not exists public.profiles (
 alter table public.profiles enable row level security;
 
 drop policy if exists "public read/write" on public.profiles;
+drop policy if exists "profiles read only" on public.profiles;
+drop policy if exists "profiles no client read" on public.profiles;
 
-create policy "profiles read only"
+create policy "profiles no client read"
 on public.profiles
 for select
-using (true);
+using (false);
 
 create table if not exists public.world_boss (
   id int primary key,
