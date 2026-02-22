@@ -3256,6 +3256,14 @@ function App() {
     return url.toString()
   }, [publicKey])
 
+  useEffect(() => {
+    if (!securityAuthError || isBlockedAuthError(securityAuthError)) return
+    const timeoutId = window.setTimeout(() => {
+      setSecurityAuthError((prev) => (prev === securityAuthError ? '' : prev))
+    }, 6000)
+    return () => window.clearTimeout(timeoutId)
+  }, [securityAuthError])
+
   const callDungeonSecure = async (
     payload: Record<string, unknown>,
     headers?: Record<string, string>,
@@ -5707,8 +5715,18 @@ function App() {
       )}
 
       {securityAuthError && (
-        <div className="security-auth-banner">
-          {securityAuthError}
+        <div
+          className={`security-auth-banner ${isBlockedAuthError(securityAuthError) ? 'persistent' : ''}`}
+          role="alert"
+        >
+          <span>{securityAuthError}</span>
+          <button
+            type="button"
+            className="security-auth-banner-close"
+            onClick={() => setSecurityAuthError('')}
+          >
+            Close
+          </button>
         </div>
       )}
 
