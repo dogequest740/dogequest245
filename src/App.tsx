@@ -1046,9 +1046,9 @@ const VILLAGE_MINE_GOLD_PER_HOUR_BY_LEVEL = [
 ]
 const VILLAGE_LAB_CRYSTALS_PER_HOUR_BY_LEVEL = [
   0,
-  11, 22, 33, 44, 55, 66, 77, 88, 99, 110,
-  121, 132, 143, 154, 165, 176, 187, 198, 209, 220,
-  231, 242, 253, 264, 275,
+  1, 2, 3, 4, 5, 6, 7, 8, 9, 11,
+  12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+  22, 23, 24, 25, 30,
 ]
 const VILLAGE_STORAGE_CAP_HOURS_BY_LEVEL = [
   0,
@@ -1236,7 +1236,7 @@ const getVillageLabCrystalsPerHour = (labLevel: number, castleLevel: number) =>
   Math.max(
     0,
     Math.ceil(
-      (getVillageTableValue(VILLAGE_LAB_CRYSTALS_PER_HOUR_BY_LEVEL, labLevel) / 24) *
+      getVillageTableValue(VILLAGE_LAB_CRYSTALS_PER_HOUR_BY_LEVEL, labLevel) *
       getVillageCastleMultiplier(castleLevel),
     ),
   )
