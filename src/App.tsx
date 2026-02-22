@@ -364,6 +364,7 @@ type AdminEventRow = {
 type DungeonSecureResponse = {
   ok: boolean
   error?: string
+  savedAt?: string
   token?: string
   expiresAt?: string
   message?: string
@@ -371,6 +372,8 @@ type DungeonSecureResponse = {
   ticketDay?: string
   dungeonRuns?: number
   reward?: number
+  crystals?: number
+  crystalsEarned?: number
 }
 
 type GameSecureResponse = {
@@ -3355,6 +3358,9 @@ function App() {
     if (!result.ok && result.error) {
       handleSecurityAuthFailure(result.error, interactive)
     }
+    if (result.ok && typeof result.savedAt === 'string' && result.savedAt.trim()) {
+      profileUpdatedAtRef.current = result.savedAt
+    }
     return result
   }
 
@@ -5560,16 +5566,24 @@ function App() {
         return
       }
 
-      const baseReward = Math.max(0, Math.round(result.reward ?? dungeon.reward))
-      const reward = isPremiumActiveAt(state.premiumEndsAt)
-        ? Math.max(0, Math.round(baseReward * PREMIUM_DUNGEON_CRYSTAL_MULTIPLIER))
-        : baseReward
+      const reward = Math.max(0, Math.round(result.reward ?? dungeon.reward))
       state.tickets = Math.max(0, Math.round(result.tickets ?? state.tickets))
       if (result.ticketDay) {
         state.ticketDay = result.ticketDay
       }
-      grantCrystals(state, reward)
-      state.dungeonRuns += 1
+      if (typeof result.crystals === 'number') {
+        state.crystals = Math.max(0, Math.floor(result.crystals))
+      } else {
+        grantCrystals(state, reward)
+      }
+      if (typeof result.crystalsEarned === 'number') {
+        state.crystalsEarned = Math.max(0, Math.floor(result.crystalsEarned))
+      }
+      if (typeof result.dungeonRuns === 'number') {
+        state.dungeonRuns = Math.max(0, Math.floor(result.dungeonRuns))
+      } else {
+        state.dungeonRuns += 1
+      }
       pushLog(state.eventLog, `${dungeon.name} cleared. +${reward} crystals.`)
       syncHud()
       void saveGameState()

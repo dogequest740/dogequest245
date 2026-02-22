@@ -10,6 +10,7 @@ const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const CHALLENGE_TTL_SECONDS = 5 * 60;
 const CHALLENGE_REUSE_WINDOW_SECONDS = 10;
 const ITEM_TIER_SCORE_MULTIPLIER = 0.5;
+const PREMIUM_DUNGEON_CRYSTAL_MULTIPLIER = 1.5;
 const BLOCKED_ERROR_MESSAGE = "You have been banned for cheating.";
 
 const DUNGEON_BASE_REQUIREMENTS = [
@@ -259,6 +260,79 @@ const spendDungeonTicket = async (
   }
 
   return { ok: false as const, error: "Dungeon run conflict, retry." };
+};
+
+const rollbackDungeonTicketSpend = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  spentState: DungeonStateRow,
+  now: Date,
+) => {
+  const nowIso = now.toISOString();
+  const revertedTickets = Math.max(0, asInt(spentState.tickets, 0) + 1);
+  const revertedRuns = Math.max(0, asInt(spentState.dungeon_runs, 0) - 1);
+  const { data: updated, error } = await supabase
+    .from("dungeon_state")
+    .update({
+      tickets: revertedTickets,
+      dungeon_runs: revertedRuns,
+      updated_at: nowIso,
+    })
+    .eq("wallet", wallet)
+    .eq("ticket_day", spentState.ticket_day)
+    .eq("tickets", spentState.tickets)
+    .eq("dungeon_runs", spentState.dungeon_runs)
+    .select("wallet")
+    .maybeSingle();
+  return !error && Boolean(updated);
+};
+
+const creditDungeonRewardToProfile = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  reward: number,
+  dungeonRuns: number,
+  now: Date,
+) => {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const { data: profileRow, error: profileError } = await supabase
+      .from("profiles")
+      .select("state, updated_at")
+      .eq("wallet", wallet)
+      .maybeSingle();
+    if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+      return { ok: false as const, error: "Profile not found." };
+    }
+
+    const nextState = structuredClone(profileRow.state) as Record<string, unknown>;
+    const currentCrystals = Math.max(0, asInt(nextState.crystals, 0));
+    const currentCrystalsEarned = Math.max(0, asInt(nextState.crystalsEarned ?? nextState.crystals, 0));
+    const currentDungeonRuns = Math.max(0, asInt(nextState.dungeonRuns, 0));
+    nextState.crystals = currentCrystals + reward;
+    nextState.crystalsEarned = currentCrystalsEarned + reward;
+    nextState.dungeonRuns = Math.max(currentDungeonRuns, Math.max(0, asInt(dungeonRuns, 0)));
+
+    const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+    const updatedAt = now.toISOString();
+    const { data: updated, error: updateError } = await supabase
+      .from("profiles")
+      .update({
+        state: nextState,
+        updated_at: updatedAt,
+      })
+      .eq("wallet", wallet)
+      .eq("updated_at", expectedUpdatedAt)
+      .select("wallet, updated_at")
+      .maybeSingle();
+    if (!updateError && updated) {
+      return {
+        ok: true as const,
+        state: nextState,
+        updatedAt: String((updated as { updated_at?: string }).updated_at ?? updatedAt),
+      };
+    }
+  }
+  return { ok: false as const, error: "Profile changed concurrently, retry." };
 };
 
 const consumeDungeonKeyFromProfile = async (
@@ -662,12 +736,41 @@ serve(async (req) => {
       return json({ ok: false, error: ticketSpend.error || "No dungeon keys left." });
     }
 
-    const reward = DUNGEON_REWARDS[dungeonIndex];
+    const baseReward = DUNGEON_REWARDS[dungeonIndex];
+    const profileStateForPremium = profileRow.state && typeof profileRow.state === "object"
+      ? (profileRow.state as Record<string, unknown>)
+      : null;
+    const premiumEndsAt = Math.max(0, asInt(profileStateForPremium?.premiumEndsAt, 0));
+    const premiumActive = premiumEndsAt > now.getTime();
+    const reward = premiumActive
+      ? Math.max(0, Math.round(baseReward * PREMIUM_DUNGEON_CRYSTAL_MULTIPLIER))
+      : baseReward;
+
+    const creditResult = await creditDungeonRewardToProfile(
+      supabase,
+      auth.wallet,
+      reward,
+      ticketSpend.state.dungeon_runs,
+      now,
+    );
+    if (!creditResult.ok || !creditResult.state) {
+      const rolledBack = await rollbackDungeonTicketSpend(supabase, auth.wallet, ticketSpend.state, now);
+      await auditEvent(supabase, auth.wallet, "dungeon_run_credit_failed", {
+        dungeonId,
+        dungeonIndex: dungeonIndex + 1,
+        reward,
+        premiumActive,
+        rollbackApplied: rolledBack,
+        reason: creditResult.error || "credit_failed",
+      });
+      return json({ ok: false, error: "Failed to credit dungeon reward. Please retry." });
+    }
 
     await auditEvent(supabase, auth.wallet, "dungeon_run", {
       dungeonId,
       dungeonIndex: dungeonIndex + 1,
       reward,
+      premiumActive,
       tickets: ticketSpend.state.tickets,
       dungeonRuns: ticketSpend.state.dungeon_runs,
     });
@@ -678,6 +781,9 @@ serve(async (req) => {
       tickets: ticketSpend.state.tickets,
       ticketDay: ticketSpend.state.ticket_day,
       dungeonRuns: ticketSpend.state.dungeon_runs,
+      crystals: Math.max(0, asInt(creditResult.state.crystals, 0)),
+      crystalsEarned: Math.max(0, asInt(creditResult.state.crystalsEarned, 0)),
+      savedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
     });
   }
 
