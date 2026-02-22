@@ -377,6 +377,7 @@ type GameSecureResponse = {
   ok: boolean
   error?: string
   savedAt?: string
+  buyGoldAlreadyProcessed?: boolean
   profile?: {
     state?: PersistedState
     updated_at?: string
@@ -434,6 +435,13 @@ type GameSecureResponse = {
     capHours?: number
     castleMultiplier?: number
   }
+  shopDayKey?: string
+  shopDungeonKeyDailyLimit?: number
+  shopDungeonKeyBuysToday?: number
+  shopDungeonKeysLeftToday?: number
+  shopWorldBossTicketDailyLimit?: number
+  shopWorldBossTicketBuysToday?: number
+  shopWorldBossTicketsLeftToday?: number
 }
 
 type ReferralEntry = {
@@ -977,7 +985,9 @@ const STARTER_PACK_PRICE = 0.35
 const STARTER_PACK_GOLD = 300000
 const STARTER_PACK_WORLD_BOSS_TICKETS = 5
 const SHOP_DUNGEON_KEY_COST = 50000
+const SHOP_DUNGEON_KEY_DAILY_LIMIT = 10
 const WORLD_BOSS_TICKET_COST = 7000
+const SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT = 2
 const STARTER_PACK_ITEMS: { type: ConsumableType; qty: number }[] = [
   { type: 'energy-small', qty: 20 },
   { type: 'energy-full', qty: 5 },
@@ -3112,6 +3122,10 @@ function App() {
   const [starterPackLoading, setStarterPackLoading] = useState(false)
   const [dungeonKeyBuyLoading, setDungeonKeyBuyLoading] = useState(false)
   const [worldBossTicketBuyLoading, setWorldBossTicketBuyLoading] = useState(false)
+  const [shopDungeonKeyDailyLimit, setShopDungeonKeyDailyLimit] = useState(SHOP_DUNGEON_KEY_DAILY_LIMIT)
+  const [shopDungeonKeysLeftToday, setShopDungeonKeysLeftToday] = useState(SHOP_DUNGEON_KEY_DAILY_LIMIT)
+  const [shopWorldBossTicketDailyLimit, setShopWorldBossTicketDailyLimit] = useState(SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT)
+  const [shopWorldBossTicketsLeftToday, setShopWorldBossTicketsLeftToday] = useState(SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT)
   const [premiumError, setPremiumError] = useState('')
   const [premiumLoading, setPremiumLoading] = useState<string | null>(null)
   const [premiumClaimLoading, setPremiumClaimLoading] = useState(false)
@@ -3467,6 +3481,30 @@ function App() {
       state.worldBossTickets = Math.max(0, Math.floor(result.worldBossTickets))
       syncHud()
     }
+    applyShopLimitsFromResult(result)
+  }
+
+  const applyShopLimitsFromResult = (result: GameSecureResponse) => {
+    if (typeof result.shopDungeonKeyDailyLimit === 'number') {
+      setShopDungeonKeyDailyLimit(Math.max(0, Math.floor(result.shopDungeonKeyDailyLimit)))
+    }
+    if (typeof result.shopDungeonKeysLeftToday === 'number') {
+      setShopDungeonKeysLeftToday(Math.max(0, Math.floor(result.shopDungeonKeysLeftToday)))
+    }
+    if (typeof result.shopWorldBossTicketDailyLimit === 'number') {
+      setShopWorldBossTicketDailyLimit(Math.max(0, Math.floor(result.shopWorldBossTicketDailyLimit)))
+    }
+    if (typeof result.shopWorldBossTicketsLeftToday === 'number') {
+      setShopWorldBossTicketsLeftToday(Math.max(0, Math.floor(result.shopWorldBossTicketsLeftToday)))
+    }
+  }
+
+  const syncShopLimitsFromServer = async (interactive = false) => {
+    const wallet = publicKey?.toBase58()
+    if (!wallet) return
+    const result = await callGameSecureAuthed('shop_limits_status', {}, interactive)
+    if (!result.ok) return
+    applyShopLimitsFromResult(result)
   }
 
   const applyVillageFromServer = (state: GameState, result: GameSecureResponse) => {
@@ -4300,6 +4338,11 @@ function App() {
   }, [activePanel, publicKey])
 
   useEffect(() => {
+    if (activePanel !== 'shop') return
+    void syncShopLimitsFromServer(false)
+  }, [activePanel, publicKey])
+
+  useEffect(() => {
     if (activePanel !== 'worldboss') return
     const interval = window.setInterval(() => {
       void syncWorldBossFromServer(false)
@@ -4799,10 +4842,19 @@ function App() {
       )
       const signature = await sendTransaction(tx, connection)
       await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
-      state.gold += pack.gold
-      pushLog(state.eventLog, `Purchased ${formatNumber(pack.gold)} gold.`)
+      const result = await callGameSecureAuthed('buy_gold', { packId: pack.id, txSignature: signature }, true)
+      if (!result.ok) {
+        setBuyGoldError(
+          `Payment sent (${signature.slice(0, 8)}...), but gold credit failed: ${result.error || 'unknown error'}. Contact support.`,
+        )
+        return
+      }
+      state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold + pack.gold)))
+      pushLog(
+        state.eventLog,
+        result.buyGoldAlreadyProcessed ? 'Gold purchase already processed.' : `Purchased ${formatNumber(pack.gold)} gold.`,
+      )
       syncHud()
-      void saveGameState()
       setActivePanel(null)
     } catch (error) {
       console.warn('Gold purchase failed', error)
@@ -5155,11 +5207,13 @@ function App() {
       const result = await callGameSecureAuthed('shop_buy_dungeon_key', {}, true)
       if (!result.ok) {
         pushLog(state.eventLog, result.error || 'Failed to buy dungeon key.')
+        applyShopLimitsFromResult(result)
         syncHud()
         return
       }
       state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
       applyServerConsumables(state, result.consumables)
+      applyShopLimitsFromResult(result)
       pushLog(state.eventLog, 'Dungeon key purchased.')
       syncHud()
       void saveGameState()
@@ -5188,6 +5242,7 @@ function App() {
       const result = await callGameSecureAuthed('worldboss_ticket_buy', {}, true)
       if (!result.ok) {
         pushLog(state.eventLog, result.error || 'Failed to buy World Boss ticket.')
+        applyShopLimitsFromResult(result)
         syncHud()
         return
       }
@@ -5195,6 +5250,7 @@ function App() {
       if (typeof result.worldBossTickets === 'number') {
         state.worldBossTickets = Math.max(0, Math.floor(result.worldBossTickets))
       }
+      applyShopLimitsFromResult(result)
       pushLog(state.eventLog, 'World Boss ticket purchased.')
       syncHud()
       void saveGameState()
@@ -6631,10 +6687,13 @@ function App() {
                 <button
                   type="button"
                   onClick={buyDungeonTicket}
-                  disabled={dungeonKeyBuyLoading || hud.gold < SHOP_DUNGEON_KEY_COST}
+                  disabled={dungeonKeyBuyLoading || hud.gold < SHOP_DUNGEON_KEY_COST || shopDungeonKeysLeftToday <= 0}
                 >
                   {dungeonKeyBuyLoading ? 'Processing...' : 'Buy'}
                 </button>
+                <div className="withdraw-note">
+                  {Math.max(0, shopDungeonKeysLeftToday)}/{Math.max(0, shopDungeonKeyDailyLimit)} осталось сегодня
+                </div>
               </div>
               <div className="shop-card">
                 <div className="shop-title">World Boss Ticket</div>
@@ -6647,10 +6706,13 @@ function App() {
                 <button
                   type="button"
                   onClick={buyWorldBossTicket}
-                  disabled={worldBossTicketBuyLoading || hud.gold < WORLD_BOSS_TICKET_COST}
+                  disabled={worldBossTicketBuyLoading || hud.gold < WORLD_BOSS_TICKET_COST || shopWorldBossTicketsLeftToday <= 0}
                 >
                   {worldBossTicketBuyLoading ? 'Processing...' : 'Buy'}
                 </button>
+                <div className="withdraw-note">
+                  {Math.max(0, shopWorldBossTicketsLeftToday)}/{Math.max(0, shopWorldBossTicketDailyLimit)} осталось сегодня
+                </div>
               </div>
             </div>
           </div>

@@ -34,6 +34,12 @@ const PREMIUM_PAYMENT_WALLET = "9a5GXRjX6HKh9Yjc9d7gp9RFmuRvMQAcV1VJ9WV7LU8c";
 const SOL_LAMPORTS = 1_000_000_000;
 const PREMIUM_TX_MAX_AGE_SECONDS = 2 * 60 * 60;
 const BLOCKED_ERROR_MESSAGE = "You have been banned for cheating.";
+const GOLD_PACKS = [
+  { id: "gold-50k", gold: 50000, lamports: Math.round(0.05 * SOL_LAMPORTS) },
+  { id: "gold-100k", gold: 100000, lamports: Math.round(0.1 * SOL_LAMPORTS) },
+  { id: "gold-500k", gold: 500000, lamports: Math.round(0.4 * SOL_LAMPORTS) },
+  { id: "gold-1200k", gold: 1200000, lamports: Math.round(0.63 * SOL_LAMPORTS) },
+] as const;
 const FORTUNE_SPIN_PACKS = [1, 10] as const;
 const FORTUNE_SPIN_PRICES_LAMPORTS: Record<(typeof FORTUNE_SPIN_PACKS)[number], number> = {
   1: Math.round(0.007 * SOL_LAMPORTS),
@@ -340,6 +346,12 @@ const getPremiumPlan = (planIdRaw: unknown, daysRaw: unknown) => {
   return null;
 };
 
+const getGoldPack = (packIdRaw: unknown) => {
+  const packId = String(packIdRaw ?? "").trim();
+  if (!packId) return null;
+  return GOLD_PACKS.find((entry) => entry.id === packId) ?? null;
+};
+
 const wasTxAlreadyProcessed = async (
   supabase: ReturnType<typeof createClient>,
   wallet: string,
@@ -375,6 +387,12 @@ const wasFortuneTxAlreadyProcessed = async (
   wallet: string,
   txSignature: string,
 ) => wasTxAlreadyProcessed(supabase, wallet, ["fortune_buy"], txSignature);
+
+const wasGoldTxAlreadyProcessed = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  txSignature: string,
+) => wasTxAlreadyProcessed(supabase, wallet, ["buy_gold"], txSignature);
 
 const verifySolTransferTx = async (
   wallet: string,
@@ -463,6 +481,21 @@ const verifyFortunePaymentTx = async (
     now,
   );
 
+const verifyGoldPaymentTx = async (
+  wallet: string,
+  txSignature: string,
+  lamportsRequired: number,
+  now: Date,
+) =>
+  verifySolTransferTx(
+    wallet,
+    txSignature,
+    lamportsRequired,
+    PREMIUM_PAYMENT_WALLET,
+    "Payment transfer mismatch for selected gold package.",
+    now,
+  );
+
 const normalizeConsumables = (raw: unknown) => {
   if (!Array.isArray(raw)) return { rows: [] as ConsumableRow[], maxId: 0 };
 
@@ -506,6 +539,9 @@ const addConsumableToState = (state: Record<string, unknown>, type: ConsumableTy
   state.consumableId = nextId;
   state.consumables = nextRows;
 };
+
+const countConsumablesByType = (state: Record<string, unknown>, type: ConsumableType) =>
+  normalizeConsumables(state.consumables).rows.filter((entry) => entry.type === type).length;
 
 const normalizeStakes = (raw: unknown, fallbackId = 1): StakeEntryState[] => {
   if (Array.isArray(raw)) {
@@ -923,6 +959,12 @@ const validateStateTransition = (
 
   const maxGoldGain = Math.floor(safeElapsed / 60) * 15000 + killsDelta * 150 + dungeonDelta * 20000 + 100000;
   if (goldDelta > maxGoldGain) return "Suspicious gold gain detected.";
+
+  const prevKeyItems = countConsumablesByType(prevState, "key");
+  const nextKeyItems = countConsumablesByType(nextState, "key");
+  if (nextKeyItems > prevKeyItems) {
+    return "Dungeon key items can only be granted by secure server actions.";
+  }
 
   if (next.level === MAX_LEVEL && next.monsterKills < 20000 && next.dungeonRuns < 150) {
     return "Max level reached too early.";
@@ -2568,6 +2610,64 @@ serve(async (req) => {
     });
   }
 
+  if (action === "buy_gold") {
+    const pack = getGoldPack(body.packId);
+    if (!pack) {
+      return json({ ok: false, error: "Invalid gold package." });
+    }
+
+    const txSignature = String(body.txSignature ?? "").trim().slice(0, 120);
+    if (!isTxSignatureLike(txSignature)) {
+      return json({ ok: false, error: "Invalid payment transaction signature." });
+    }
+
+    const alreadyProcessed = await wasGoldTxAlreadyProcessed(supabase, auth.wallet, txSignature);
+    if (alreadyProcessed) {
+      const { data: profileRow } = await supabase
+        .from("profiles")
+        .select("state, updated_at")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+      const state = normalizeState(profileRow?.state ?? null);
+      if (!state) return json({ ok: false, error: "Profile not found." });
+      return json({
+        ok: true,
+        buyGoldAlreadyProcessed: true,
+        gold: Math.max(0, asInt(state.gold, 0)),
+        savedAt: String(profileRow?.updated_at ?? ""),
+      });
+    }
+
+    const txCheck = await verifyGoldPaymentTx(auth.wallet, txSignature, pack.lamports, now);
+    if (!txCheck.ok) {
+      return json({ ok: false, error: txCheck.error });
+    }
+
+    const creditResult = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
+      state.gold = Math.max(0, asInt(state.gold, 0)) + pack.gold;
+    });
+    if (!creditResult.ok || !creditResult.state) {
+      return json({ ok: false, error: "Failed to credit gold package, retry." });
+    }
+
+    await auditEvent(supabase, auth.wallet, "buy_gold", {
+      packId: pack.id,
+      packGold: pack.gold,
+      lamports: pack.lamports,
+      txSignature,
+      txBlockTime: txCheck.blockTime,
+      txSlot: txCheck.slot,
+      gold: Math.max(0, asInt(creditResult.state.gold, 0)),
+    });
+
+    return json({
+      ok: true,
+      buyGoldAlreadyProcessed: false,
+      gold: Math.max(0, asInt(creditResult.state.gold, 0)),
+      savedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
+    });
+  }
+
   if (action === "premium_buy") {
     const plan = getPremiumPlan(body.planId, body.days);
     if (!plan) {
@@ -3267,10 +3367,39 @@ serve(async (req) => {
         savedAt: nowIso,
         gold: Math.max(0, asInt(state.gold, 0)),
         consumables: normalizeConsumables(state.consumables).rows,
+        shopDungeonKeyDailyLimit: SHOP_DUNGEON_KEY_DAILY_LIMIT,
+        shopDungeonKeyBuysToday: Math.max(0, asInt(limitUpdate.state.shop_key_buys, 0)),
+        shopDungeonKeysLeftToday: Math.max(0, SHOP_DUNGEON_KEY_DAILY_LIMIT - Math.max(0, asInt(limitUpdate.state.shop_key_buys, 0))),
       });
     }
 
     return json({ ok: false, error: "Profile changed concurrently, retry key purchase." });
+  }
+
+  if (action === "shop_limits_status") {
+    const dayKey = todayKeyUtc(now);
+    const dungeon = await ensureDungeonTicketState(supabase, auth.wallet, now);
+    if (!dungeon.ok || !dungeon.state) {
+      return json({ ok: false, error: dungeon.error || "Failed to load dungeon shop limits." });
+    }
+    const worldBoss = await ensureWorldBossTicketState(supabase, auth.wallet, now);
+    if (!worldBoss.ok || !worldBoss.state) {
+      return json({ ok: false, error: worldBoss.error || "Failed to load world boss shop limits." });
+    }
+    const dungeonBuysToday = dungeon.state.shop_key_day === dayKey ? Math.max(0, asInt(dungeon.state.shop_key_buys, 0)) : 0;
+    const worldBossBuysToday = worldBoss.state.shop_ticket_day === dayKey
+      ? Math.max(0, asInt(worldBoss.state.shop_ticket_buys, 0))
+      : 0;
+    return json({
+      ok: true,
+      shopDayKey: dayKey,
+      shopDungeonKeyDailyLimit: SHOP_DUNGEON_KEY_DAILY_LIMIT,
+      shopDungeonKeyBuysToday: dungeonBuysToday,
+      shopDungeonKeysLeftToday: Math.max(0, SHOP_DUNGEON_KEY_DAILY_LIMIT - dungeonBuysToday),
+      shopWorldBossTicketDailyLimit: SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT,
+      shopWorldBossTicketBuysToday: worldBossBuysToday,
+      shopWorldBossTicketsLeftToday: Math.max(0, SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT - worldBossBuysToday),
+    });
   }
 
   if (action === "worldboss_ticket_status") {
@@ -3278,9 +3407,16 @@ serve(async (req) => {
     if (!ticketState.ok) {
       return json({ ok: false, error: ticketState.error });
     }
+    const dayKey = todayKeyUtc(now);
+    const worldBossBuysToday = ticketState.state.shop_ticket_day === dayKey
+      ? Math.max(0, asInt(ticketState.state.shop_ticket_buys, 0))
+      : 0;
     return json({
       ok: true,
       worldBossTickets: Math.max(0, asInt(ticketState.state.tickets, 0)),
+      shopWorldBossTicketDailyLimit: SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT,
+      shopWorldBossTicketBuysToday: worldBossBuysToday,
+      shopWorldBossTicketsLeftToday: Math.max(0, SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT - worldBossBuysToday),
     });
   }
 
@@ -3358,6 +3494,9 @@ serve(async (req) => {
         savedAt: now.toISOString(),
         gold: Math.max(0, asInt(state.gold, 0)),
         worldBossTickets: Math.max(0, asInt(ticketUpdate.state.tickets, 0)),
+        shopWorldBossTicketDailyLimit: SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT,
+        shopWorldBossTicketBuysToday: Math.max(0, asInt(ticketUpdate.state.shop_ticket_buys, 0)),
+        shopWorldBossTicketsLeftToday: Math.max(0, SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT - Math.max(0, asInt(ticketUpdate.state.shop_ticket_buys, 0))),
       });
     }
 
