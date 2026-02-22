@@ -6692,7 +6692,7 @@ function App() {
                   {dungeonKeyBuyLoading ? 'Processing...' : 'Buy'}
                 </button>
                 <div className="withdraw-note">
-                  {Math.max(0, shopDungeonKeysLeftToday)}/{Math.max(0, shopDungeonKeyDailyLimit)} осталось сегодня
+                  {Math.max(0, shopDungeonKeysLeftToday)}/{Math.max(0, shopDungeonKeyDailyLimit)} left today
                 </div>
               </div>
               <div className="shop-card">
@@ -6711,7 +6711,7 @@ function App() {
                   {worldBossTicketBuyLoading ? 'Processing...' : 'Buy'}
                 </button>
                 <div className="withdraw-note">
-                  {Math.max(0, shopWorldBossTicketsLeftToday)}/{Math.max(0, shopWorldBossTicketDailyLimit)} осталось сегодня
+                  {Math.max(0, shopWorldBossTicketsLeftToday)}/{Math.max(0, shopWorldBossTicketDailyLimit)} left today
                 </div>
               </div>
             </div>
