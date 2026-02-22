@@ -1024,6 +1024,7 @@ const FORTUNE_WHEEL_SEGMENT_ANGLE = 360 / FORTUNE_REWARDS.length
 
 const VILLAGE_CASTLE_MAX_LEVEL = 3
 const VILLAGE_OTHER_MAX_LEVEL = 25
+const VILLAGE_PREMIUM_UPGRADE_TIME_MULTIPLIER = 0.5
 const VILLAGE_CASTLE_LEVEL2_REQUIREMENT = 10
 const VILLAGE_CASTLE_LEVEL3_REQUIREMENT = 25
 const VILLAGE_CASTLE_LEVEL2_PLAYER_LEVEL = 50
@@ -1200,13 +1201,15 @@ const getVillageUpgradeCost = (buildingId: VillageBuildingId, currentLevel: numb
     return Math.max(0, Math.round(getVillageTableValue(byLevel, targetLevel)))
   })()
 
-const getVillageUpgradeDurationSec = (buildingId: VillageBuildingId, currentLevel: number) =>
+const getVillageUpgradeDurationSec = (buildingId: VillageBuildingId, currentLevel: number, premiumActive = false) =>
   (() => {
     const maxLevel = getVillageBuildingMaxLevel(buildingId)
     const targetLevel = Math.min(maxLevel, Math.max(1, Math.floor(currentLevel) + 1))
     const byLevel = VILLAGE_UPGRADE_HOURS_BY_TARGET_LEVEL[buildingId]
     const hours = getVillageTableValue(byLevel, targetLevel)
-    return Math.max(5, Math.round(hours * 3600))
+    const baseDurationSec = Math.max(5, Math.round(hours * 3600))
+    if (!premiumActive) return baseDurationSec
+    return Math.max(5, Math.round(baseDurationSec * VILLAGE_PREMIUM_UPGRADE_TIME_MULTIPLIER))
   })()
 
 const getVillageStorageCapHours = (storageLevel: number) =>
@@ -7033,6 +7036,7 @@ function App() {
             </div>
             {(() => {
               const villageNowMs = Date.now()
+              const villagePremiumActive = isPremiumActiveAt(hud.premiumEndsAt, villageNowMs)
               const pending = villagePending ?? { elapsedSec: 0, effectiveSec: 0, capSec: 0, gold: 0, crystals: 0 }
               const rates = villageRates ?? { goldPerHour: 0, crystalsPerHour: 0, capHours: 0, castleMultiplier: 1 }
               const activeVillageUpgrade = getVillageActiveUpgrade(hud.village, villageNowMs)
@@ -7043,7 +7047,7 @@ function App() {
                 const upgrading = building.upgradingTo > building.level && building.upgradeEndsAt > villageNowMs
                 const upgradeRemainingSec = upgrading ? Math.max(0, Math.ceil((building.upgradeEndsAt - villageNowMs) / 1000)) : 0
                 const cost = building.level >= maxLevel ? 0 : getVillageUpgradeCost(buildingId, building.level)
-                const durationSec = building.level >= maxLevel ? 0 : getVillageUpgradeDurationSec(buildingId, building.level)
+                const durationSec = building.level >= maxLevel ? 0 : getVillageUpgradeDurationSec(buildingId, building.level, villagePremiumActive)
 
                 let requirementText = ''
                 let requirementFailed = false

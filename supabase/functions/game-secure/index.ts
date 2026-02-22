@@ -43,6 +43,7 @@ const PREMIUM_PLANS = [
 ] as const;
 const VILLAGE_CASTLE_MAX_LEVEL = 3;
 const VILLAGE_OTHER_MAX_LEVEL = 25;
+const VILLAGE_PREMIUM_UPGRADE_TIME_MULTIPLIER = 0.5;
 const VILLAGE_CASTLE_LEVEL2_REQUIREMENT = 10;
 const VILLAGE_CASTLE_LEVEL3_REQUIREMENT = 25;
 const VILLAGE_CASTLE_LEVEL2_PLAYER_LEVEL = 50;
@@ -607,12 +608,18 @@ const getVillageUpgradeCost = (buildingId: VillageBuildingId, currentLevelRaw: n
   return Math.max(0, Math.round(getVillageTableValue(byLevel, targetLevel)));
 };
 
-const getVillageUpgradeDurationSec = (buildingId: VillageBuildingId, currentLevelRaw: number) => {
+const getVillageUpgradeDurationSec = (
+  buildingId: VillageBuildingId,
+  currentLevelRaw: number,
+  premiumActive = false,
+) => {
   const maxLevel = getVillageBuildingMaxLevel(buildingId);
   const targetLevel = Math.min(maxLevel, Math.max(1, Math.floor(currentLevelRaw) + 1));
   const byLevel = VILLAGE_UPGRADE_HOURS_BY_TARGET_LEVEL[buildingId];
   const hours = getVillageTableValue(byLevel, targetLevel);
-  return Math.max(5, Math.round(hours * 3600));
+  const baseDurationSec = Math.max(5, Math.round(hours * 3600));
+  if (!premiumActive) return baseDurationSec;
+  return Math.max(5, Math.round(baseDurationSec * VILLAGE_PREMIUM_UPGRADE_TIME_MULTIPLIER));
 };
 
 const getVillageStorageCapHours = (storageLevelRaw: number) =>
@@ -2791,7 +2798,8 @@ serve(async (req) => {
         return json({ ok: false, error: `Not enough gold. Need ${cost}.` });
       }
 
-      const durationSec = getVillageUpgradeDurationSec(buildingId, building.level);
+      const premiumActive = Math.max(0, asInt(state.premiumEndsAt, 0)) > nowMs;
+      const durationSec = getVillageUpgradeDurationSec(buildingId, building.level, premiumActive);
       building.upgradingTo = nextLevel;
       building.upgradeEndsAt = nowMs + durationSec * 1000;
       state.gold = gold - cost;
