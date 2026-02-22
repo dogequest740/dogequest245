@@ -1038,6 +1038,7 @@ const FORTUNE_WHEEL_SEGMENT_ANGLE = 360 / FORTUNE_REWARDS.length
 const VILLAGE_CASTLE_MAX_LEVEL = 3
 const VILLAGE_OTHER_MAX_LEVEL = 25
 const VILLAGE_PREMIUM_UPGRADE_TIME_MULTIPLIER = 0.5
+const VILLAGE_UPGRADE_COST_MULTIPLIER = 0.7
 const VILLAGE_CASTLE_LEVEL2_REQUIREMENT = 10
 const VILLAGE_CASTLE_LEVEL3_REQUIREMENT = 25
 const VILLAGE_CASTLE_LEVEL2_PLAYER_LEVEL = 50
@@ -1211,7 +1212,8 @@ const getVillageUpgradeCost = (buildingId: VillageBuildingId, currentLevel: numb
     const maxLevel = getVillageBuildingMaxLevel(buildingId)
     const targetLevel = Math.min(maxLevel, Math.max(1, Math.floor(currentLevel) + 1))
     const byLevel = VILLAGE_UPGRADE_COST_BY_TARGET_LEVEL[buildingId]
-    return Math.max(0, Math.round(getVillageTableValue(byLevel, targetLevel)))
+    const baseCost = getVillageTableValue(byLevel, targetLevel)
+    return Math.max(0, Math.round(baseCost * VILLAGE_UPGRADE_COST_MULTIPLIER))
   })()
 
 const getVillageUpgradeDurationSec = (buildingId: VillageBuildingId, currentLevel: number, premiumActive = false) =>
