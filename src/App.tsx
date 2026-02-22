@@ -990,13 +990,6 @@ const SHOP_DUNGEON_KEY_COST = 50000
 const SHOP_DUNGEON_KEY_DAILY_LIMIT = 10
 const WORLD_BOSS_TICKET_COST = 7000
 const SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT = 2
-const STARTER_PACK_ITEMS: { type: ConsumableType; qty: number }[] = [
-  { type: 'energy-small', qty: 20 },
-  { type: 'energy-full', qty: 5 },
-  { type: 'speed', qty: 10 },
-  { type: 'attack', qty: 10 },
-  { type: 'key', qty: 20 },
-]
 const CONTRACT_ADDRESS = 'soon'
 const PREMIUM_PLANS = [
   { id: 'premium-30', days: 30, sol: 0.5 },
