@@ -1656,6 +1656,40 @@ const applyFortuneReward = async (
   wallet: string,
   reward: FortuneRewardDef,
 ) => {
+  if (reward.kind === "keys") {
+    const { data: profileRow, error: profileError } = await supabase
+      .from("profiles")
+      .select("state")
+      .eq("wallet", wallet)
+      .maybeSingle();
+
+    if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+      return { ok: false as const };
+    }
+
+    const normalized = normalizeState(profileRow.state as unknown);
+    if (!normalized) return { ok: false as const };
+
+    const ticketGrant = await adjustDungeonTickets(
+      supabase,
+      wallet,
+      reward.amount,
+      new Date(),
+    );
+    if (!ticketGrant.ok || !ticketGrant.state) {
+      return { ok: false as const };
+    }
+
+    const responseState = structuredClone(normalized) as Record<string, unknown>;
+    responseState.tickets = Math.max(0, asInt(ticketGrant.state.tickets, 0));
+
+    return {
+      ok: true as const,
+      state: responseState,
+      updatedAt: String(ticketGrant.state.updated_at ?? new Date().toISOString()),
+    };
+  }
+
   return updateProfileWithRetry(supabase, wallet, (state) => {
     if (reward.kind === "gold") {
       state.gold = Math.max(0, asInt(state.gold, 0)) + reward.amount;
@@ -1664,10 +1698,6 @@ const applyFortuneReward = async (
     if (reward.kind === "crystals") {
       state.crystals = Math.max(0, asInt(state.crystals, 0)) + reward.amount;
       state.crystalsEarned = Math.max(0, asInt(state.crystalsEarned ?? state.crystals, 0)) + reward.amount;
-      return;
-    }
-    if (reward.kind === "keys") {
-      state.tickets = Math.min(MAX_TICKETS, Math.max(0, asInt(state.tickets, 0)) + reward.amount);
       return;
     }
     if (reward.kind === "consumable" && reward.consumableType) {
