@@ -30,6 +30,7 @@ const PREMIUM_DAILY_KEYS = 5;
 const PREMIUM_DAILY_GOLD = 50000;
 const PREMIUM_DAILY_SMALL_POTIONS = 5;
 const PREMIUM_DAILY_BIG_POTIONS = 3;
+const SOL_LAMPORTS = 1_000_000_000;
 const STARTER_PACK_GOLD = 300000;
 const STARTER_PACK_PRICE_LAMPORTS = Math.round(0.35 * SOL_LAMPORTS);
 const STARTER_PACK_ITEMS: Array<{ type: ConsumableType; qty: number }> = [
@@ -40,7 +41,6 @@ const STARTER_PACK_ITEMS: Array<{ type: ConsumableType; qty: number }> = [
   { type: "key", qty: 20 },
 ];
 const PREMIUM_PAYMENT_WALLET = "9a5GXRjX6HKh9Yjc9d7gp9RFmuRvMQAcV1VJ9WV7LU8c";
-const SOL_LAMPORTS = 1_000_000_000;
 const PREMIUM_TX_MAX_AGE_SECONDS = 2 * 60 * 60;
 const BLOCKED_ERROR_MESSAGE = "You have been banned for cheating.";
 const GOLD_PACKS = [
