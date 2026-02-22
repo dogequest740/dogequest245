@@ -30,6 +30,15 @@ const PREMIUM_DAILY_KEYS = 5;
 const PREMIUM_DAILY_GOLD = 50000;
 const PREMIUM_DAILY_SMALL_POTIONS = 5;
 const PREMIUM_DAILY_BIG_POTIONS = 3;
+const STARTER_PACK_GOLD = 300000;
+const STARTER_PACK_PRICE_LAMPORTS = Math.round(0.35 * SOL_LAMPORTS);
+const STARTER_PACK_ITEMS: Array<{ type: ConsumableType; qty: number }> = [
+  { type: "energy-small", qty: 20 },
+  { type: "energy-full", qty: 5 },
+  { type: "speed", qty: 10 },
+  { type: "attack", qty: 10 },
+  { type: "key", qty: 20 },
+];
 const PREMIUM_PAYMENT_WALLET = "9a5GXRjX6HKh9Yjc9d7gp9RFmuRvMQAcV1VJ9WV7LU8c";
 const SOL_LAMPORTS = 1_000_000_000;
 const PREMIUM_TX_MAX_AGE_SECONDS = 2 * 60 * 60;
@@ -395,6 +404,12 @@ const wasGoldTxAlreadyProcessed = async (
   txSignature: string,
 ) => wasTxAlreadyProcessed(supabase, wallet, ["buy_gold"], txSignature);
 
+const wasStarterPackTxAlreadyProcessed = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  txSignature: string,
+) => wasTxAlreadyProcessed(supabase, wallet, ["starter_pack_buy"], txSignature);
+
 const verifySolTransferTx = async (
   wallet: string,
   txSignature: string,
@@ -494,6 +509,20 @@ const verifyGoldPaymentTx = async (
     lamportsRequired,
     PREMIUM_PAYMENT_WALLET,
     "Payment transfer mismatch for selected gold package.",
+    now,
+  );
+
+const verifyStarterPackPaymentTx = async (
+  wallet: string,
+  txSignature: string,
+  now: Date,
+) =>
+  verifySolTransferTx(
+    wallet,
+    txSignature,
+    STARTER_PACK_PRICE_LAMPORTS,
+    PREMIUM_PAYMENT_WALLET,
+    "Payment transfer mismatch for Starter Pack.",
     now,
   );
 
@@ -2062,30 +2091,73 @@ serve(async (req) => {
   }
 
   if (action === "profile_load") {
-    const { data: profileRow, error: profileError } = await supabase
-      .from("profiles")
-      .select("state, updated_at")
-      .eq("wallet", auth.wallet)
-      .maybeSingle();
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const attemptNow = new Date();
+      const attemptNowIso = attemptNow.toISOString();
+      const { data: profileRow, error: profileError } = await supabase
+        .from("profiles")
+        .select("state, updated_at")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
 
-    if (profileError) {
-      return json({ ok: false, error: "Failed to load profile." });
-    }
-    if (!profileRow || !profileRow.state || typeof profileRow.state !== "object") {
-      return json({ ok: true, profile: null });
+      if (profileError) {
+        return json({ ok: false, error: "Failed to load profile." });
+      }
+      if (!profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+        return json({ ok: true, profile: null });
+      }
+
+      const state = normalizeState(profileRow.state as unknown);
+      if (!state) {
+        return json({ ok: false, error: "Invalid profile state." });
+      }
+
+      const updatedAtMs = profileRow.updated_at ? new Date(String(profileRow.updated_at)).getTime() : Number.NaN;
+      const elapsedSec = Number.isFinite(updatedAtMs)
+        ? Math.max(0, Math.floor((attemptNow.getTime() - updatedAtMs) / 1000))
+        : 0;
+      const changed = applyOfflineEnergyRegen(state, elapsedSec);
+
+      if (!changed) {
+        return json({
+          ok: true,
+          profile: {
+            state,
+            updated_at: String(profileRow.updated_at ?? attemptNowIso),
+          },
+        });
+      }
+
+      const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+      const { data: updated, error: updateError } = await supabase
+        .from("profiles")
+        .update({
+          state,
+          updated_at: attemptNowIso,
+        })
+        .eq("wallet", auth.wallet)
+        .eq("updated_at", expectedUpdatedAt)
+        .select("wallet")
+        .maybeSingle();
+
+      if (!updateError && updated) {
+        await auditEvent(supabase, auth.wallet, "energy_offline_regen", {
+          elapsedSec,
+          energy: Math.max(0, asInt(state.energy, 0)),
+          energyTimer: clampInt(state.energyTimer, 1, ENERGY_REGEN_SECONDS),
+          source: "profile_load",
+        });
+        return json({
+          ok: true,
+          profile: {
+            state,
+            updated_at: attemptNowIso,
+          },
+        });
+      }
     }
 
-    const state = normalizeState(profileRow.state as unknown);
-    if (!state) {
-      return json({ ok: false, error: "Invalid profile state." });
-    }
-    return json({
-      ok: true,
-      profile: {
-        state,
-        updated_at: String(profileRow.updated_at ?? ""),
-      },
-    });
+    return json({ ok: false, error: "Profile changed concurrently, retry load." });
   }
 
   if (action === "profile_save") {
@@ -2194,7 +2266,7 @@ serve(async (req) => {
         });
       if (insertError) return json({ ok: false, error: "Failed to save profile." });
     } else {
-      const expectedUpdatedAt = clientUpdatedAt;
+      const expectedUpdatedAt = String(existing.updated_at ?? "");
       const { data: updated, error: updateError } = await supabase
         .from("profiles")
         .update({
@@ -2683,6 +2755,104 @@ serve(async (req) => {
       gold: Math.max(0, asInt(creditResult.state.gold, 0)),
       savedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
     });
+  }
+
+  if (action === "starter_pack_buy") {
+    const txSignature = String(body.txSignature ?? "").trim().slice(0, 120);
+    if (!isTxSignatureLike(txSignature)) {
+      return json({ ok: false, error: "Invalid payment transaction signature." });
+    }
+
+    const alreadyProcessed = await wasStarterPackTxAlreadyProcessed(supabase, auth.wallet, txSignature);
+    if (alreadyProcessed) {
+      const { data: profileRow } = await supabase
+        .from("profiles")
+        .select("state, updated_at")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+      const state = normalizeState(profileRow?.state ?? null);
+      if (!state) return json({ ok: false, error: "Profile not found." });
+      return json({
+        ok: true,
+        starterPackAlreadyProcessed: true,
+        starterPackPurchased: Boolean(state.starterPackPurchased),
+        gold: Math.max(0, asInt(state.gold, 0)),
+        consumables: normalizeConsumables(state.consumables).rows,
+        savedAt: String(profileRow?.updated_at ?? ""),
+      });
+    }
+
+    const txCheck = await verifyStarterPackPaymentTx(auth.wallet, txSignature, now);
+    if (!txCheck.ok) {
+      return json({ ok: false, error: txCheck.error });
+    }
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const { data: profileRow, error: profileError } = await supabase
+        .from("profiles")
+        .select("state, updated_at")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+
+      if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+        return json({ ok: false, error: "Profile not found." });
+      }
+
+      const state = normalizeState(profileRow.state as unknown);
+      if (!state) return json({ ok: false, error: "Invalid profile state." });
+      if (Boolean(state.starterPackPurchased)) {
+        return json({
+          ok: true,
+          starterPackAlreadyProcessed: true,
+          starterPackPurchased: true,
+          gold: Math.max(0, asInt(state.gold, 0)),
+          consumables: normalizeConsumables(state.consumables).rows,
+          savedAt: String(profileRow.updated_at ?? ""),
+        });
+      }
+
+      state.gold = Math.max(0, asInt(state.gold, 0)) + STARTER_PACK_GOLD;
+      for (const entry of STARTER_PACK_ITEMS) {
+        for (let i = 0; i < entry.qty; i += 1) {
+          addConsumableToState(state, entry.type);
+        }
+      }
+      state.starterPackPurchased = true;
+
+      const nowIso = new Date().toISOString();
+      const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+      const { data: updated, error: updateError } = await supabase
+        .from("profiles")
+        .update({
+          state,
+          updated_at: nowIso,
+        })
+        .eq("wallet", auth.wallet)
+        .eq("updated_at", expectedUpdatedAt)
+        .select("wallet")
+        .maybeSingle();
+
+      if (updateError || !updated) continue;
+
+      await auditEvent(supabase, auth.wallet, "starter_pack_buy", {
+        txSignature,
+        lamports: STARTER_PACK_PRICE_LAMPORTS,
+        txBlockTime: txCheck.blockTime,
+        txSlot: txCheck.slot,
+        gold: Math.max(0, asInt(state.gold, 0)),
+      });
+
+      return json({
+        ok: true,
+        starterPackAlreadyProcessed: false,
+        starterPackPurchased: true,
+        gold: Math.max(0, asInt(state.gold, 0)),
+        consumables: normalizeConsumables(state.consumables).rows,
+        savedAt: nowIso,
+      });
+    }
+
+    return json({ ok: false, error: "Profile changed concurrently, retry starter pack activation." });
   }
 
   if (action === "premium_buy") {

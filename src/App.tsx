@@ -378,6 +378,8 @@ type GameSecureResponse = {
   error?: string
   savedAt?: string
   buyGoldAlreadyProcessed?: boolean
+  starterPackAlreadyProcessed?: boolean
+  starterPackPurchased?: boolean
   profile?: {
     state?: PersistedState
     updated_at?: string
@@ -1439,53 +1441,7 @@ const buildPersistedState = (state: GameState): PersistedState => ({
   stakeId: state.stakeId,
 })
 
-const applyOfflineEnergyRegenLocal = (state: GameState, elapsedSecRaw: number) => {
-  const energyMax = Math.max(1, state.energyMax)
-  let energy = clamp(state.energy, 0, energyMax)
-  let timer = clamp(state.energyTimer, 1, ENERGY_REGEN_SECONDS)
-  const elapsedSec = Math.max(0, Math.floor(elapsedSecRaw))
-
-  const prevEnergy = energy
-  const prevTimer = timer
-
-  if (energy >= energyMax) {
-    state.energy = energyMax
-    state.energyTimer = ENERGY_REGEN_SECONDS
-    return prevEnergy !== state.energy || prevTimer !== state.energyTimer
-  }
-  if (elapsedSec <= 0) return false
-
-  let remaining = elapsedSec
-  if (remaining < timer) {
-    timer -= remaining
-    remaining = 0
-  } else {
-    remaining -= timer
-    energy += 1
-    timer = ENERGY_REGEN_SECONDS
-  }
-
-  if (energy >= energyMax) {
-    energy = energyMax
-    timer = ENERGY_REGEN_SECONDS
-    remaining = 0
-  }
-
-  if (remaining > 0 && energy < energyMax) {
-    const passiveTicks = Math.floor(remaining / ENERGY_REGEN_SECONDS)
-    if (passiveTicks > 0) {
-      energy = Math.min(energyMax, energy + passiveTicks)
-      remaining -= passiveTicks * ENERGY_REGEN_SECONDS
-    }
-    timer = energy >= energyMax ? ENERGY_REGEN_SECONDS : Math.max(1, ENERGY_REGEN_SECONDS - remaining)
-  }
-
-  state.energy = clamp(energy, 0, energyMax)
-  state.energyTimer = clamp(timer, 1, ENERGY_REGEN_SECONDS)
-  return prevEnergy !== state.energy || prevTimer !== state.energyTimer
-}
-
-const applyPersistedState = (state: GameState, saved: PersistedState, savedUpdatedAt?: string) => {
+const applyPersistedState = (state: GameState, saved: PersistedState, _savedUpdatedAt?: string) => {
   if (!saved || saved.version !== PERSIST_VERSION) return
 
   const classMatch = CHARACTER_CLASSES.find((entry) => entry.id === saved.classId)
@@ -1513,12 +1469,7 @@ const applyPersistedState = (state: GameState, saved: PersistedState, savedUpdat
   state.energyMax = Math.max(1, saved.energyMax ?? state.energyMax)
   state.energy = clamp(saved.energy ?? state.energy, 0, state.energyMax)
   state.energyTimer = clamp(saved.energyTimer ?? state.energyTimer, 1, ENERGY_REGEN_SECONDS)
-
-  const savedAtMs = savedUpdatedAt ? new Date(savedUpdatedAt).getTime() : Number.NaN
-  const offlineSeconds = Number.isFinite(savedAtMs) ? Math.max(0, Math.floor((Date.now() - savedAtMs) / 1000)) : 0
-  if (offlineSeconds > 0) {
-    applyOfflineEnergyRegenLocal(state, offlineSeconds)
-  } else if (state.energy >= state.energyMax) {
+  if (state.energy >= state.energyMax) {
     state.energyTimer = ENERGY_REGEN_SECONDS
   }
 
@@ -3645,6 +3596,13 @@ function App() {
     setFortuneBuyLoading(spins)
     setFortuneError('')
     try {
+      const secureToken = await ensureDungeonSession(true)
+      if (!secureToken) {
+        setFortuneError('Wallet signature required before payment.')
+        setFortuneBuyLoading(null)
+        return
+      }
+
       const lamports = Math.round(price * LAMPORTS_PER_SOL)
       const balance = await connection.getBalance(publicKey)
       const feeBuffer = 5000
@@ -4072,15 +4030,7 @@ function App() {
         return
       }
 
-      const now = Date.now()
-      const elapsedSec = Math.max(0, Math.floor((now - lastActiveAtRef.current) / 1000))
-      lastActiveAtRef.current = now
-
-      const state = gameStateRef.current
-      if (state && elapsedSec > 0) {
-        const changed = applyOfflineEnergyRegenLocal(state, elapsedSec)
-        if (changed) syncHud()
-      }
+      lastActiveAtRef.current = Date.now()
       void refreshOfflineEnergyFromServer(false)
     }
 
@@ -4841,6 +4791,13 @@ function App() {
     setBuyGoldLoading(packId)
     setBuyGoldError('')
     try {
+      const secureToken = await ensureDungeonSession(true)
+      if (!secureToken) {
+        setBuyGoldError('Wallet signature required before payment.')
+        setBuyGoldLoading(null)
+        return
+      }
+
       const lamports = Math.round(pack.sol * LAMPORTS_PER_SOL)
       const balance = await connection.getBalance(publicKey)
       const feeBuffer = 5000
@@ -4898,6 +4855,13 @@ function App() {
     setStarterPackLoading(true)
     setStarterPackError('')
     try {
+      const secureToken = await ensureDungeonSession(true)
+      if (!secureToken) {
+        setStarterPackError('Wallet signature required before payment.')
+        setStarterPackLoading(false)
+        return
+      }
+
       const lamports = Math.round(STARTER_PACK_PRICE * LAMPORTS_PER_SOL)
       const balance = await connection.getBalance(publicKey)
       const feeBuffer = 5000
@@ -4920,16 +4884,33 @@ function App() {
       const signature = await sendTransaction(tx, connection)
       await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
 
-      state.gold += STARTER_PACK_GOLD
-      STARTER_PACK_ITEMS.forEach((entry) => {
-        for (let i = 0; i < entry.qty; i += 1) {
-          addConsumable(state, entry.type)
-        }
-      })
-      state.starterPackPurchased = true
-      pushLog(state.eventLog, 'Starter Pack purchased.')
+      const result = await callGameSecureAuthed(
+        'starter_pack_buy',
+        { txSignature: signature },
+        true,
+      )
+      if (!result.ok) {
+        setStarterPackError(
+          `Payment sent (${signature.slice(0, 8)}...), but Starter Pack credit failed: ${result.error || 'unknown error'}. Contact support.`,
+        )
+        setStarterPackLoading(false)
+        return
+      }
+
+      if (typeof result.gold === 'number') {
+        state.gold = Math.max(0, Math.floor(Number(result.gold)))
+      } else {
+        state.gold += STARTER_PACK_GOLD
+      }
+      applyServerConsumables(state, result.consumables)
+      state.starterPackPurchased = typeof result.starterPackPurchased === 'boolean'
+        ? result.starterPackPurchased
+        : true
+      pushLog(
+        state.eventLog,
+        result.starterPackAlreadyProcessed ? 'Starter Pack purchase already processed.' : 'Starter Pack purchased.',
+      )
       syncHud()
-      void saveGameState()
       void syncWorldBossFromServer(false)
       setActivePanel(null)
     } catch (error) {
