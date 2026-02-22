@@ -6807,7 +6807,7 @@ function App() {
                 </div>
                 <div className="starterpack-item">
                   <img className="icon-img" src={iconPremium} alt="" />
-                  <span>Village upgrades complete 50% faster</span>
+                  <span>-50% Village upgrade time</span>
                 </div>
                 <div className="starterpack-item">
                   <img className="icon-img" src={iconWorldBossTicket} alt="" />
