@@ -976,6 +976,7 @@ const GOLD_PACKAGES = [
 const STARTER_PACK_PRICE = 0.35
 const STARTER_PACK_GOLD = 300000
 const STARTER_PACK_WORLD_BOSS_TICKETS = 5
+const SHOP_DUNGEON_KEY_COST = 50000
 const WORLD_BOSS_TICKET_COST = 7000
 const STARTER_PACK_ITEMS: { type: ConsumableType; qty: number }[] = [
   { type: 'energy-small', qty: 20 },
@@ -3109,6 +3110,7 @@ function App() {
   const [buyGoldLoading, setBuyGoldLoading] = useState<string | null>(null)
   const [starterPackError, setStarterPackError] = useState('')
   const [starterPackLoading, setStarterPackLoading] = useState(false)
+  const [dungeonKeyBuyLoading, setDungeonKeyBuyLoading] = useState(false)
   const [worldBossTicketBuyLoading, setWorldBossTicketBuyLoading] = useState(false)
   const [premiumError, setPremiumError] = useState('')
   const [premiumLoading, setPremiumLoading] = useState<string | null>(null)
@@ -4222,6 +4224,7 @@ function App() {
       setStarterPackLoading(false)
     }
     if (activePanel !== 'shop') {
+      setDungeonKeyBuyLoading(false)
       setWorldBossTicketBuyLoading(false)
     }
     if (activePanel !== 'premium') {
@@ -5131,19 +5134,38 @@ function App() {
     void saveGameState()
   }
 
-  const buyDungeonTicket = (cost: number) => {
+  const buyDungeonTicket = async () => {
     const state = gameStateRef.current
     if (!state) return
-    if (state.gold < cost) {
-      pushLog(state.eventLog, 'Not enough gold.')
+    if (dungeonKeyBuyLoading) return
+    const wallet = publicKey?.toBase58()
+    if (!wallet) {
+      pushLog(state.eventLog, 'Connect wallet to buy dungeon keys.')
       syncHud()
       return
     }
-    state.gold -= cost
-    addConsumable(state, 'key')
-    pushLog(state.eventLog, 'Dungeon key added to consumables.')
-    syncHud()
-    void saveGameState()
+    if (state.gold < SHOP_DUNGEON_KEY_COST) {
+      pushLog(state.eventLog, `Not enough gold. Need ${SHOP_DUNGEON_KEY_COST}.`)
+      syncHud()
+      return
+    }
+
+    setDungeonKeyBuyLoading(true)
+    try {
+      const result = await callGameSecureAuthed('shop_buy_dungeon_key', {}, true)
+      if (!result.ok) {
+        pushLog(state.eventLog, result.error || 'Failed to buy dungeon key.')
+        syncHud()
+        return
+      }
+      state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
+      applyServerConsumables(state, result.consumables)
+      pushLog(state.eventLog, 'Dungeon key purchased.')
+      syncHud()
+      void saveGameState()
+    } finally {
+      setDungeonKeyBuyLoading(false)
+    }
   }
 
   const buyWorldBossTicket = async () => {
@@ -6600,19 +6622,23 @@ function App() {
               </div>
               <div className="shop-card">
                 <div className="shop-title">Dungeon Key</div>
-                <div className="shop-desc">+1 dungeon entry.</div>
+                <div className="shop-desc">+1 dungeon entry. Daily limit: 10.</div>
                 <div className="shop-meta">
                   <img className="icon-img small" src={iconGold} alt="" />
-                  Cost: 50000
+                  Cost: {SHOP_DUNGEON_KEY_COST}
                 </div>
                 <img className="shop-icon" src={iconKey} alt="Dungeon key" />
-                <button type="button" onClick={() => buyDungeonTicket(50000)}>
-                  Buy
+                <button
+                  type="button"
+                  onClick={buyDungeonTicket}
+                  disabled={dungeonKeyBuyLoading || hud.gold < SHOP_DUNGEON_KEY_COST}
+                >
+                  {dungeonKeyBuyLoading ? 'Processing...' : 'Buy'}
                 </button>
               </div>
               <div className="shop-card">
                 <div className="shop-title">World Boss Ticket</div>
-                <div className="shop-desc">1 ticket = 1 world boss entry.</div>
+                <div className="shop-desc">1 ticket = 1 world boss entry. Daily limit: 2.</div>
                 <div className="shop-meta">
                   <img className="icon-img small" src={iconGold} alt="" />
                   Cost: {WORLD_BOSS_TICKET_COST}

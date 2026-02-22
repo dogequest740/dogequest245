@@ -44,6 +44,8 @@ create table if not exists public.world_boss_tickets (
   tickets int not null default 0,
   premium_ticket_day text not null default '',
   starter_ticket_granted boolean not null default false,
+  shop_ticket_day text not null default '',
+  shop_ticket_buys int not null default 0,
   updated_at timestamptz default now()
 );
 
@@ -163,10 +165,16 @@ create table if not exists public.dungeon_state (
   tickets int not null default 5,
   ticket_day text not null,
   dungeon_runs bigint not null default 0,
+  shop_key_day text not null default '',
+  shop_key_buys int not null default 0,
   updated_at timestamptz default now()
 );
 
 alter table public.dungeon_state alter column tickets set default 5;
+alter table public.world_boss_tickets add column if not exists shop_ticket_day text not null default '';
+alter table public.world_boss_tickets add column if not exists shop_ticket_buys int not null default 0;
+alter table public.dungeon_state add column if not exists shop_key_day text not null default '';
+alter table public.dungeon_state add column if not exists shop_key_buys int not null default 0;
 
 create table if not exists public.fortune_state (
   wallet text primary key,

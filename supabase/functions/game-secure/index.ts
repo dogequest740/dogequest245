@@ -13,6 +13,9 @@ const WORLD_BOSS_DAMAGE_PER_SEC_CAP = 5000;
 const WORLD_BOSS_TICKET_COST_GOLD = 7000;
 const WORLD_BOSS_PREMIUM_DAILY_TICKETS = 2;
 const WORLD_BOSS_STARTER_TICKETS = 5;
+const SHOP_DUNGEON_KEY_COST_GOLD = 50000;
+const SHOP_DUNGEON_KEY_DAILY_LIMIT = 10;
+const SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT = 2;
 const REFERRAL_LEVEL_TARGET = 15;
 const REFERRAL_KEY_BONUS = 3;
 const REFERRAL_CRYSTAL_RATE = 0.05;
@@ -176,6 +179,8 @@ type WorldBossTicketRow = {
   tickets: number;
   premium_ticket_day: string;
   starter_ticket_granted: boolean;
+  shop_ticket_day: string;
+  shop_ticket_buys: number;
   updated_at?: string;
 };
 
@@ -184,6 +189,8 @@ type DungeonStateRow = {
   tickets: number;
   ticket_day: string;
   dungeon_runs: number;
+  shop_key_day: string;
+  shop_key_buys: number;
   updated_at?: string;
 };
 
@@ -1160,6 +1167,8 @@ const toWorldBossTicketState = (
   tickets: Math.max(0, asInt(row.tickets, 0)),
   premium_ticket_day: String(row.premium_ticket_day ?? ""),
   starter_ticket_granted: Boolean(row.starter_ticket_granted),
+  shop_ticket_day: String(row.shop_ticket_day ?? ""),
+  shop_ticket_buys: Math.max(0, asInt(row.shop_ticket_buys, 0)),
   updated_at: String(row.updated_at ?? fallbackIso),
 });
 
@@ -1172,6 +1181,8 @@ const toDungeonState = (
   tickets: Math.max(0, asInt(row.tickets, 0)),
   ticket_day: String(row.ticket_day ?? ""),
   dungeon_runs: Math.max(0, asInt(row.dungeon_runs, 0)),
+  shop_key_day: String(row.shop_key_day ?? ""),
+  shop_key_buys: Math.max(0, asInt(row.shop_key_buys, 0)),
   updated_at: String(row.updated_at ?? fallbackIso),
 });
 
@@ -1186,7 +1197,7 @@ const ensureDungeonTicketState = async (
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const { data, error } = await supabase
       .from("dungeon_state")
-      .select("wallet, tickets, ticket_day, dungeon_runs, updated_at")
+      .select("wallet, tickets, ticket_day, dungeon_runs, shop_key_day, shop_key_buys, updated_at")
       .eq("wallet", wallet)
       .maybeSingle();
     if (error) return { ok: false as const, error: "Failed to load dungeon state." };
@@ -1200,6 +1211,8 @@ const ensureDungeonTicketState = async (
         tickets: DUNGEON_DAILY_TICKETS,
         ticket_day: dayKey,
         dungeon_runs: 0,
+        shop_key_day: dayKey,
+        shop_key_buys: 0,
         updated_at: nowIso,
       };
       const { error: insertError } = await supabase
@@ -1218,13 +1231,17 @@ const ensureDungeonTicketState = async (
       .update({
         tickets: DUNGEON_DAILY_TICKETS,
         ticket_day: dayKey,
+        shop_key_day: dayKey,
+        shop_key_buys: 0,
         updated_at: nowIso,
       })
       .eq("wallet", wallet)
       .eq("ticket_day", current.ticket_day)
       .eq("tickets", current.tickets)
       .eq("dungeon_runs", current.dungeon_runs)
-      .select("wallet, tickets, ticket_day, dungeon_runs, updated_at")
+      .eq("shop_key_day", current.shop_key_day)
+      .eq("shop_key_buys", current.shop_key_buys)
+      .select("wallet, tickets, ticket_day, dungeon_runs, shop_key_day, shop_key_buys, updated_at")
       .maybeSingle();
 
     if (!updateError && updated) {
@@ -1268,7 +1285,9 @@ const adjustDungeonTickets = async (
       .eq("ticket_day", current.ticket_day)
       .eq("tickets", current.tickets)
       .eq("dungeon_runs", current.dungeon_runs)
-      .select("wallet, tickets, ticket_day, dungeon_runs, updated_at")
+      .eq("shop_key_day", current.shop_key_day)
+      .eq("shop_key_buys", current.shop_key_buys)
+      .select("wallet, tickets, ticket_day, dungeon_runs, shop_key_day, shop_key_buys, updated_at")
       .maybeSingle();
 
     if (!updateError && updated) {
@@ -1277,6 +1296,53 @@ const adjustDungeonTickets = async (
   }
 
   return { ok: false as const, error: "Dungeon key conflict, retry." };
+};
+
+const incrementDungeonShopKeyBuys = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  now: Date,
+) => {
+  const dayKey = todayKeyUtc(now);
+  const nowIso = now.toISOString();
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const ensured = await ensureDungeonTicketState(supabase, wallet, now);
+    if (!ensured.ok || !ensured.state) {
+      return { ok: false as const, error: ensured.error || "Failed to load dungeon state." };
+    }
+    const current = ensured.state;
+    const currentBuys = current.shop_key_day === dayKey ? current.shop_key_buys : 0;
+    if (currentBuys >= SHOP_DUNGEON_KEY_DAILY_LIMIT) {
+      return {
+        ok: false as const,
+        error: `Daily limit reached: max ${SHOP_DUNGEON_KEY_DAILY_LIMIT} dungeon keys.`,
+        state: current,
+      };
+    }
+
+    const { data: updated, error: updateError } = await supabase
+      .from("dungeon_state")
+      .update({
+        shop_key_day: dayKey,
+        shop_key_buys: currentBuys + 1,
+        updated_at: nowIso,
+      })
+      .eq("wallet", wallet)
+      .eq("ticket_day", current.ticket_day)
+      .eq("tickets", current.tickets)
+      .eq("dungeon_runs", current.dungeon_runs)
+      .eq("shop_key_day", current.shop_key_day)
+      .eq("shop_key_buys", current.shop_key_buys)
+      .select("wallet, tickets, ticket_day, dungeon_runs, shop_key_day, shop_key_buys, updated_at")
+      .maybeSingle();
+
+    if (!updateError && updated) {
+      return { ok: true as const, state: toDungeonState(wallet, updated as Record<string, unknown>, nowIso) };
+    }
+  }
+
+  return { ok: false as const, error: "Dungeon key purchase limit conflict, retry." };
 };
 
 const getWorldBossTicketProfileFlags = async (
@@ -1325,7 +1391,7 @@ const ensureWorldBossTicketState = async (
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const { data, error } = await supabase
       .from("world_boss_tickets")
-      .select("wallet, tickets, premium_ticket_day, starter_ticket_granted, updated_at")
+      .select("wallet, tickets, premium_ticket_day, starter_ticket_granted, shop_ticket_day, shop_ticket_buys, updated_at")
       .eq("wallet", wallet)
       .maybeSingle();
     if (error) return { ok: false as const, error: "Failed to load world boss tickets." };
@@ -1339,6 +1405,8 @@ const ensureWorldBossTicketState = async (
         tickets: 0,
         premium_ticket_day: "",
         starter_ticket_granted: false,
+        shop_ticket_day: dayKey,
+        shop_ticket_buys: 0,
         updated_at: nowIso,
       };
       const { error: insertError } = await supabase
@@ -1369,13 +1437,17 @@ const ensureWorldBossTicketState = async (
         tickets: nextTickets,
         premium_ticket_day: current.premium_ticket_day,
         starter_ticket_granted: nextStarterGranted,
+        shop_ticket_day: current.shop_ticket_day,
+        shop_ticket_buys: current.shop_ticket_buys,
         updated_at: nowIso,
       })
       .eq("wallet", wallet)
       .eq("tickets", current.tickets)
       .eq("premium_ticket_day", current.premium_ticket_day)
       .eq("starter_ticket_granted", current.starter_ticket_granted)
-      .select("wallet, tickets, premium_ticket_day, starter_ticket_granted, updated_at")
+      .eq("shop_ticket_day", current.shop_ticket_day)
+      .eq("shop_ticket_buys", current.shop_ticket_buys)
+      .select("wallet, tickets, premium_ticket_day, starter_ticket_granted, shop_ticket_day, shop_ticket_buys, updated_at")
       .maybeSingle();
 
     if (!updateError && updated) {
@@ -1414,13 +1486,17 @@ const adjustWorldBossTickets = async (
       .from("world_boss_tickets")
       .update({
         tickets: nextTickets,
+        shop_ticket_day: current.shop_ticket_day,
+        shop_ticket_buys: current.shop_ticket_buys,
         updated_at: nowIso,
       })
       .eq("wallet", wallet)
       .eq("tickets", current.tickets)
       .eq("premium_ticket_day", current.premium_ticket_day)
       .eq("starter_ticket_granted", current.starter_ticket_granted)
-      .select("wallet, tickets, premium_ticket_day, starter_ticket_granted, updated_at")
+      .eq("shop_ticket_day", current.shop_ticket_day)
+      .eq("shop_ticket_buys", current.shop_ticket_buys)
+      .select("wallet, tickets, premium_ticket_day, starter_ticket_granted, shop_ticket_day, shop_ticket_buys, updated_at")
       .maybeSingle();
 
     if (!error && updated) {
@@ -1432,6 +1508,58 @@ const adjustWorldBossTickets = async (
   }
 
   return { ok: false as const, error: "World Boss ticket conflict, retry." };
+};
+
+const buyWorldBossTicketWithShopLimit = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  now: Date,
+) => {
+  const dayKey = todayKeyUtc(now);
+  const nowIso = now.toISOString();
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const ensured = await ensureWorldBossTicketState(supabase, wallet, now);
+    if (!ensured.ok || !ensured.state) {
+      return { ok: false as const, error: ensured.error || "Failed to load world boss tickets." };
+    }
+
+    const current = ensured.state;
+    const currentBuys = current.shop_ticket_day === dayKey ? current.shop_ticket_buys : 0;
+    if (currentBuys >= SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT) {
+      return {
+        ok: false as const,
+        error: `Daily limit reached: max ${SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT} World Boss tickets.`,
+        state: current,
+      };
+    }
+
+    const { data: updated, error } = await supabase
+      .from("world_boss_tickets")
+      .update({
+        tickets: current.tickets + 1,
+        shop_ticket_day: dayKey,
+        shop_ticket_buys: currentBuys + 1,
+        updated_at: nowIso,
+      })
+      .eq("wallet", wallet)
+      .eq("tickets", current.tickets)
+      .eq("premium_ticket_day", current.premium_ticket_day)
+      .eq("starter_ticket_granted", current.starter_ticket_granted)
+      .eq("shop_ticket_day", current.shop_ticket_day)
+      .eq("shop_ticket_buys", current.shop_ticket_buys)
+      .select("wallet, tickets, premium_ticket_day, starter_ticket_granted, shop_ticket_day, shop_ticket_buys, updated_at")
+      .maybeSingle();
+
+    if (!error && updated) {
+      return {
+        ok: true as const,
+        state: toWorldBossTicketState(wallet, updated as Record<string, unknown>, nowIso),
+      };
+    }
+  }
+
+  return { ok: false as const, error: "World Boss ticket purchase conflict, retry." };
 };
 
 const applyFortuneReward = async (
@@ -3068,6 +3196,83 @@ serve(async (req) => {
     return json({ ok: false, error: "Profile changed concurrently, retry claim." });
   }
 
+  if (action === "shop_buy_dungeon_key") {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const nowIso = new Date().toISOString();
+      const { data: profileRow, error: profileError } = await supabase
+        .from("profiles")
+        .select("state, updated_at")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+
+      if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+        return json({ ok: false, error: "Profile not found." });
+      }
+
+      const state = normalizeState(profileRow.state as unknown);
+      if (!state) return json({ ok: false, error: "Invalid profile state." });
+
+      const gold = Math.max(0, asInt(state.gold, 0));
+      if (gold < SHOP_DUNGEON_KEY_COST_GOLD) {
+        return json({ ok: false, error: `Not enough gold. Need ${SHOP_DUNGEON_KEY_COST_GOLD}.` });
+      }
+
+      state.gold = gold - SHOP_DUNGEON_KEY_COST_GOLD;
+      addConsumableToState(state, "key");
+      const addedConsumableId = Math.max(0, asInt(state.consumableId, 0));
+
+      const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+      const { data: updatedProfile, error: updateError } = await supabase
+        .from("profiles")
+        .update({
+          state,
+          updated_at: nowIso,
+        })
+        .eq("wallet", auth.wallet)
+        .eq("updated_at", expectedUpdatedAt)
+        .select("wallet")
+        .maybeSingle();
+
+      if (updateError || !updatedProfile) continue;
+
+      const limitUpdate = await incrementDungeonShopKeyBuys(supabase, auth.wallet, now);
+      if (!limitUpdate.ok || !limitUpdate.state) {
+        await updateProfileWithRetry(supabase, auth.wallet, (rollbackState) => {
+          const normalized = normalizeConsumables(rollbackState.consumables);
+          const hadAdded = normalized.rows.some((entry) => entry.id === addedConsumableId);
+          rollbackState.consumables = hadAdded
+            ? normalized.rows.filter((entry) => entry.id !== addedConsumableId)
+            : normalized.rows;
+          const maxId = normalized.rows.reduce((max, entry) => Math.max(max, entry.id), 0);
+          rollbackState.consumableId = Math.max(asInt(rollbackState.consumableId, 0), maxId);
+          if (hadAdded) {
+            rollbackState.gold = Math.max(0, asInt(rollbackState.gold, 0)) + SHOP_DUNGEON_KEY_COST_GOLD;
+          }
+        });
+        await auditEvent(supabase, auth.wallet, "shop_dungeon_key_buy_rejected", {
+          reason: limitUpdate.error || "counter_update_failed",
+          cost: SHOP_DUNGEON_KEY_COST_GOLD,
+        });
+        return json({ ok: false, error: limitUpdate.error || "Failed to buy dungeon key." });
+      }
+
+      await auditEvent(supabase, auth.wallet, "shop_dungeon_key_buy", {
+        cost: SHOP_DUNGEON_KEY_COST_GOLD,
+        gold: Math.max(0, asInt(state.gold, 0)),
+        shopBuysToday: Math.max(0, asInt(limitUpdate.state.shop_key_buys, 0)),
+      });
+
+      return json({
+        ok: true,
+        savedAt: nowIso,
+        gold: Math.max(0, asInt(state.gold, 0)),
+        consumables: normalizeConsumables(state.consumables).rows,
+      });
+    }
+
+    return json({ ok: false, error: "Profile changed concurrently, retry key purchase." });
+  }
+
   if (action === "worldboss_ticket_status") {
     const ticketState = await ensureWorldBossTicketState(supabase, auth.wallet, now);
     if (!ticketState.ok) {
@@ -3130,7 +3335,7 @@ serve(async (req) => {
 
       if (updateError || !updatedProfile) continue;
 
-      const ticketUpdate = await adjustWorldBossTickets(supabase, auth.wallet, 1, now);
+      const ticketUpdate = await buyWorldBossTicketWithShopLimit(supabase, auth.wallet, now);
       if (!ticketUpdate.ok || !ticketUpdate.state) {
         await updateProfileWithRetry(supabase, auth.wallet, (rollbackState) => {
           rollbackState.gold = Math.max(0, asInt(rollbackState.gold, 0)) + WORLD_BOSS_TICKET_COST_GOLD;
@@ -3144,6 +3349,7 @@ serve(async (req) => {
       await auditEvent(supabase, auth.wallet, "worldboss_ticket_buy", {
         cost: WORLD_BOSS_TICKET_COST_GOLD,
         worldBossTickets: Math.max(0, asInt(ticketUpdate.state.tickets, 0)),
+        shopBuysToday: Math.max(0, asInt(ticketUpdate.state.shop_ticket_buys, 0)),
         gold: Math.max(0, asInt(state.gold, 0)),
       });
 
