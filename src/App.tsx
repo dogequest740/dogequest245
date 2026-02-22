@@ -970,6 +970,7 @@ const GOLD_PACKAGES = [
   { id: 'gold-50k', gold: 50000, sol: 0.05, image: goldSmallImage },
   { id: 'gold-100k', gold: 100000, sol: 0.1, image: goldMiddleImage },
   { id: 'gold-500k', gold: 500000, sol: 0.4, image: goldLargeImage },
+  { id: 'gold-1200k', gold: 1200000, sol: 0.63, image: goldLargeImage },
 ]
 const STARTER_PACK_PRICE = 0.35
 const STARTER_PACK_GOLD = 300000
