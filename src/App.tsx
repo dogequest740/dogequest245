@@ -6806,6 +6806,10 @@ function App() {
                   <span>+{Math.round((PREMIUM_DUNGEON_CRYSTAL_MULTIPLIER - 1) * 100)}% crystals from dungeons</span>
                 </div>
                 <div className="starterpack-item">
+                  <img className="icon-img" src={iconPremium} alt="" />
+                  <span>Village upgrades complete 50% faster</span>
+                </div>
+                <div className="starterpack-item">
                   <img className="icon-img" src={iconWorldBossTicket} alt="" />
                   <span>+2 World Boss tickets daily</span>
                 </div>
