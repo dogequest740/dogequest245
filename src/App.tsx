@@ -1233,8 +1233,13 @@ const getVillageMineGoldPerHour = (mineLevel: number, castleLevel: number) =>
   getVillageCastleMultiplier(castleLevel)
 
 const getVillageLabCrystalsPerHour = (labLevel: number, castleLevel: number) =>
-  (getVillageTableValue(VILLAGE_LAB_CRYSTALS_PER_HOUR_BY_LEVEL, labLevel) / 24) *
-  getVillageCastleMultiplier(castleLevel)
+  Math.max(
+    0,
+    Math.ceil(
+      (getVillageTableValue(VILLAGE_LAB_CRYSTALS_PER_HOUR_BY_LEVEL, labLevel) / 24) *
+      getVillageCastleMultiplier(castleLevel),
+    ),
+  )
 
 const getVillageProductionRates = (village: VillageState) => {
   const castleLevel = village.buildings.castle.level
@@ -7227,8 +7232,8 @@ function App() {
                   statNext = formatNumber(Math.round(getVillageMineGoldPerHour(nextLevel, hud.village.buildings.castle.level)))
                 } else if (buildingId === 'lab') {
                   statLabel = 'Crystals / hour'
-                  statCurrent = getVillageLabCrystalsPerHour(building.level, hud.village.buildings.castle.level).toFixed(2)
-                  statNext = getVillageLabCrystalsPerHour(nextLevel, hud.village.buildings.castle.level).toFixed(2)
+                  statCurrent = formatNumber(getVillageLabCrystalsPerHour(building.level, hud.village.buildings.castle.level))
+                  statNext = formatNumber(getVillageLabCrystalsPerHour(nextLevel, hud.village.buildings.castle.level))
                 } else {
                   statLabel = 'Storage cap'
                   statCurrent = `${getVillageStorageCapHours(building.level).toFixed(1)}h`
@@ -7308,7 +7313,7 @@ function App() {
                                     <img className="icon-img small" src={iconCrystals} alt="" />
                                     Crystals / hour
                                   </span>
-                                  <strong>{rates.crystalsPerHour.toFixed(2)}</strong>
+                                  <strong>{formatNumber(Math.max(0, Math.ceil(rates.crystalsPerHour)))}</strong>
                                 </div>
                                 <div className="withdraw-info">
                                   <span className="withdraw-info-label">

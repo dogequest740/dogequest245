@@ -718,8 +718,13 @@ const getVillageMineGoldPerHour = (mineLevelRaw: number, castleLevelRaw: number)
   getVillageCastleMultiplier(castleLevelRaw);
 
 const getVillageLabCrystalsPerHour = (labLevelRaw: number, castleLevelRaw: number) =>
-  (getVillageTableValue(VILLAGE_LAB_CRYSTALS_PER_HOUR_BY_LEVEL, labLevelRaw) / 24) *
-  getVillageCastleMultiplier(castleLevelRaw);
+  Math.max(
+    0,
+    Math.ceil(
+      (getVillageTableValue(VILLAGE_LAB_CRYSTALS_PER_HOUR_BY_LEVEL, labLevelRaw) / 24) *
+      getVillageCastleMultiplier(castleLevelRaw),
+    ),
+  );
 
 const getVillageProductionRates = (village: VillageState) => {
   const castleLevel = village.buildings.castle.level;
