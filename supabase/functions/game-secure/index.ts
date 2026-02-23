@@ -233,6 +233,8 @@ type VillageBuildingState = {
 type VillageState = {
   settlementName: string;
   lastClaimAt: number;
+  carryGold: number;
+  carryCrystals: number;
   buildings: Record<VillageBuildingId, VillageBuildingState>;
 };
 
@@ -630,6 +632,8 @@ const serializeStakeEntries = (state: Record<string, unknown>) =>
 const createVillageState = (nowMs = Date.now()): VillageState => ({
   settlementName: "",
   lastClaimAt: nowMs,
+  carryGold: 0,
+  carryCrystals: 0,
   buildings: {
     castle: { level: 1, upgradingTo: 0, upgradeEndsAt: 0 },
     mine: { level: 1, upgradingTo: 0, upgradeEndsAt: 0 },
@@ -667,12 +671,22 @@ const normalizeVillageState = (raw: unknown, nowMs = Date.now()): VillageState =
   const settlementName = sanitizeSettlementName(row.settlementName ?? "");
   const lastClaimAtRaw = asInt(row.lastClaimAt, nowMs);
   const lastClaimAt = Math.max(0, Math.min(nowMs, lastClaimAtRaw));
+  const carryGoldRaw = Number(row.carryGold ?? 0);
+  const carryCrystalsRaw = Number(row.carryCrystals ?? 0);
+  const carryGold = Number.isFinite(carryGoldRaw)
+    ? Math.max(0, Math.min(carryGoldRaw, 0.999999))
+    : 0;
+  const carryCrystals = Number.isFinite(carryCrystalsRaw)
+    ? Math.max(0, Math.min(carryCrystalsRaw, 0.999999))
+    : 0;
   const buildingsRaw = (row.buildings && typeof row.buildings === "object")
     ? row.buildings as Record<string, unknown>
     : {};
   return {
     settlementName,
     lastClaimAt,
+    carryGold,
+    carryCrystals,
     buildings: {
       castle: normalizeVillageBuilding("castle", buildingsRaw.castle),
       mine: normalizeVillageBuilding("mine", buildingsRaw.mine),
@@ -783,10 +797,10 @@ const getCastleUpgradeRequirement = (village: VillageState, playerLevelRaw: numb
   };
 };
 
-const getVillagePendingRewards = (villageRaw: VillageState, nowMs = Date.now()) => {
+const getVillagePendingRewardsRaw = (villageRaw: VillageState, nowMs = Date.now()) => {
   const village = normalizeVillageState(villageRaw, nowMs);
   if (!village.settlementName) {
-    return { elapsedSec: 0, effectiveSec: 0, capSec: 0, gold: 0, crystals: 0 };
+    return { elapsedSec: 0, effectiveSec: 0, capSec: 0, goldExact: 0, crystalsExact: 0 };
   }
 
   const startMs = village.lastClaimAt;
@@ -795,8 +809,8 @@ const getVillagePendingRewards = (villageRaw: VillageState, nowMs = Date.now()) 
   const working = cloneVillageState(village);
   let cursorMs = startMs;
   let effectiveSec = 0;
-  let goldAcc = 0;
-  let crystalsAcc = 0;
+  let goldAcc = Math.max(0, Number(village.carryGold ?? 0));
+  let crystalsAcc = Math.max(0, Number(village.carryCrystals ?? 0));
 
   const consumeSegment = (endMs: number) => {
     if (endMs <= cursorMs) return;
@@ -851,8 +865,19 @@ const getVillagePendingRewards = (villageRaw: VillageState, nowMs = Date.now()) 
     elapsedSec,
     effectiveSec: Math.max(0, effectiveSec),
     capSec,
-    gold: Math.max(0, Math.floor(goldAcc)),
-    crystals: Math.max(0, Math.floor(crystalsAcc)),
+    goldExact: Math.max(0, goldAcc),
+    crystalsExact: Math.max(0, crystalsAcc),
+  };
+};
+
+const getVillagePendingRewards = (villageRaw: VillageState, nowMs = Date.now()) => {
+  const raw = getVillagePendingRewardsRaw(villageRaw, nowMs);
+  return {
+    elapsedSec: raw.elapsedSec,
+    effectiveSec: raw.effectiveSec,
+    capSec: raw.capSec,
+    gold: Math.max(0, Math.floor(raw.goldExact)),
+    crystals: Math.max(0, Math.floor(raw.crystalsExact)),
   };
 };
 
@@ -3168,6 +3193,8 @@ serve(async (req) => {
 
       village.settlementName = name;
       village.lastClaimAt = nowMs;
+      village.carryGold = 0;
+      village.carryCrystals = 0;
       state.village = village;
 
       const expectedUpdatedAt = String(profileRow.updated_at ?? "");
@@ -3327,7 +3354,11 @@ serve(async (req) => {
         return json({ ok: false, error: "Set village name first." });
       }
 
-      const pending = getVillagePendingRewards(village, nowMs);
+      const pendingRaw = getVillagePendingRewardsRaw(village, nowMs);
+      const pending = {
+        gold: Math.max(0, Math.floor(pendingRaw.goldExact)),
+        crystals: Math.max(0, Math.floor(pendingRaw.crystalsExact)),
+      };
       if (pending.gold <= 0 && pending.crystals <= 0) {
         return json({ ok: false, error: "No rewards to claim yet." });
       }
@@ -3335,6 +3366,8 @@ serve(async (req) => {
       state.gold = Math.max(0, asInt(state.gold, 0)) + pending.gold;
       state.crystals = Math.max(0, asInt(state.crystals, 0)) + pending.crystals;
       state.crystalsEarned = Math.max(0, asInt(state.crystalsEarned ?? state.crystals, 0)) + pending.crystals;
+      village.carryGold = Math.max(0, Math.min(0.999999, pendingRaw.goldExact - pending.gold));
+      village.carryCrystals = Math.max(0, Math.min(0.999999, pendingRaw.crystalsExact - pending.crystals));
       village.lastClaimAt = nowMs;
       state.village = village;
 

@@ -233,6 +233,8 @@ type VillageBuildingState = {
 type VillageState = {
   settlementName: string
   lastClaimAt: number
+  carryGold: number
+  carryCrystals: number
   buildings: Record<VillageBuildingId, VillageBuildingState>
 }
 
@@ -1127,6 +1129,8 @@ const VILLAGE_PREVIEW_VISUAL_TIER: 0 | 2 | 3 = (() => {
 const createVillageState = (nowMs = Date.now()): VillageState => ({
   settlementName: '',
   lastClaimAt: nowMs,
+  carryGold: 0,
+  carryCrystals: 0,
   buildings: {
     castle: { level: 1, upgradingTo: 0, upgradeEndsAt: 0 },
     mine: { level: 1, upgradingTo: 0, upgradeEndsAt: 0 },
@@ -1154,9 +1158,13 @@ const normalizeVillageState = (raw: unknown, nowMs = Date.now()): VillageState =
   const base = createVillageState(nowMs)
   if (!raw || typeof raw !== 'object') return base
   const row = raw as Partial<VillageState>
+  const carryGoldRaw = Number((row as Record<string, unknown>).carryGold ?? 0)
+  const carryCrystalsRaw = Number((row as Record<string, unknown>).carryCrystals ?? 0)
   return {
     settlementName: String(row.settlementName ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 24),
     lastClaimAt: Math.max(0, Math.floor(Number(row.lastClaimAt ?? nowMs))),
+    carryGold: Number.isFinite(carryGoldRaw) ? Math.max(0, Math.min(carryGoldRaw, 0.999999)) : 0,
+    carryCrystals: Number.isFinite(carryCrystalsRaw) ? Math.max(0, Math.min(carryCrystalsRaw, 0.999999)) : 0,
     buildings: {
       castle: normalizeVillageBuilding('castle', row.buildings?.castle),
       mine: normalizeVillageBuilding('mine', row.buildings?.mine),
@@ -1268,8 +1276,8 @@ const getVillagePendingRewards = (village: VillageState, nowMs = Date.now()) => 
 
   let cursorMs = startMs
   let effectiveSec = 0
-  let goldAcc = 0
-  let crystalsAcc = 0
+  let goldAcc = Math.max(0, Number(workingVillage.carryGold ?? 0))
+  let crystalsAcc = Math.max(0, Number(workingVillage.carryCrystals ?? 0))
 
   const consumeSegment = (endMs: number) => {
     if (endMs <= cursorMs) return
