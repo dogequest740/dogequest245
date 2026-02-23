@@ -533,7 +533,7 @@
 
 .resources {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: nowrap;
   justify-content: center;
   max-width: 100%;
@@ -550,8 +550,8 @@
 
 .resource-gold-crystal-group {
   display: inline-grid;
-  grid-template-columns: minmax(0, auto) 60px minmax(0, auto);
-  gap: 8px;
+  grid-template-columns: minmax(0, auto) 56px minmax(0, auto);
+  gap: 6px;
   align-items: stretch;
   flex: 0 0 auto;
 }
@@ -561,8 +561,8 @@
   border-radius: 12px;
   background: linear-gradient(160deg, rgba(18, 30, 24, 0.95), rgba(10, 16, 14, 0.95));
   color: #9be6b1;
-  min-width: 58px;
-  padding: 8px 6px;
+  min-width: 54px;
+  padding: 7px 5px;
   cursor: pointer;
   display: inline-flex;
   flex-direction: column;
@@ -591,7 +591,7 @@
   background: linear-gradient(160deg, rgba(20, 28, 40, 0.98), rgba(10, 14, 20, 0.98));
   border: 1px solid rgba(214, 178, 95, 0.25);
   border-radius: 14px;
-  padding: 12px 20px;
+  padding: 10px 14px;
   font-size: 16px;
   font-family: 'Cinzel Decorative', 'Uncial Antiqua', 'Cinzel', system-ui, sans-serif;
   letter-spacing: 0.4px;
@@ -651,7 +651,7 @@
 .resource-chip.with-action .resource-text {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .resource-chip.with-action .resource-main {
@@ -2639,6 +2639,7 @@
   gap: 10px;
   justify-content: center;
   flex-wrap: wrap;
+  margin-top: -6px;
 }
 
 .battle-btn {
