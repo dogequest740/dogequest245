@@ -41,6 +41,7 @@ import iconWithdraw from './assets/icons/withdraw.png'
 import iconSolana from './assets/icons/solana.png'
 import iconStacking from './assets/icons/stacking.png'
 import iconBuyGold from './assets/icons/buy-gold.png'
+import iconCrystalGoldSwap from './assets/icons/crystal-gold-swap.png'
 import iconStarterPack from './assets/icons/starter-pack.png'
 import iconPremium from './assets/icons/premium.png'
 import iconReferrals from './assets/icons/referrals.png'
@@ -394,6 +395,8 @@ type GameSecureResponse = {
   ok: boolean
   error?: string
   savedAt?: string
+  swappedCrystals?: number
+  swappedGold?: number
   buyGoldAlreadyProcessed?: boolean
   starterPackAlreadyProcessed?: boolean
   starterPackPurchased?: boolean
@@ -990,6 +993,7 @@ const WORLD_BOSS_DURATION = 12 * 60 * 60
 const WORLD_BOSS_REWARD = 500
 const WITHDRAW_RATE = 15000
 const WITHDRAW_MIN = 2000
+const CRYSTAL_TO_GOLD_SWAP_RATE = 75
 const STAKE_BONUS = 0.05
 const STAKE_MIN = 50
 const STAKE_LOCK_HOURS = 24
@@ -3073,6 +3077,7 @@ function App() {
     | 'village'
     | 'admin'
     | 'withdraw'
+    | 'swap'
     | 'stake'
     | 'buygold'
     | 'starterpack'
@@ -3093,6 +3098,9 @@ function App() {
   const [adminStatsView, setAdminStatsView] = useState<'players' | 'villages'>('players')
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [withdrawError, setWithdrawError] = useState('')
+  const [swapCrystalsAmount, setSwapCrystalsAmount] = useState('')
+  const [swapLoading, setSwapLoading] = useState(false)
+  const [swapError, setSwapError] = useState('')
   const [playerWithdrawals, setPlayerWithdrawals] = useState<WithdrawalRow[]>([])
   const [playerWithdrawalsLoading, setPlayerWithdrawalsLoading] = useState(false)
   const [playerWithdrawalsError, setPlayerWithdrawalsError] = useState('')
@@ -4323,6 +4331,10 @@ function App() {
       setWithdrawError('')
       setPlayerWithdrawalsError('')
     }
+    if (activePanel !== 'swap') {
+      setSwapError('')
+      setSwapLoading(false)
+    }
     if (activePanel !== 'buygold') {
       setBuyGoldError('')
       setBuyGoldLoading(null)
@@ -4899,6 +4911,46 @@ function App() {
     syncHud()
     void saveGameState()
     setActivePanel(null)
+  }
+
+  const submitCrystalGoldSwap = async () => {
+    const state = gameStateRef.current
+    const wallet = publicKey?.toBase58()
+    if (!state || !wallet) return
+
+    const crystalsAmount = Math.floor(Number(swapCrystalsAmount))
+    if (!Number.isFinite(crystalsAmount) || crystalsAmount <= 0) {
+      setSwapError('Enter a valid amount.')
+      return
+    }
+    if (crystalsAmount > state.crystals) {
+      setSwapError('Not enough crystals.')
+      return
+    }
+
+    setSwapLoading(true)
+    setSwapError('')
+    try {
+      const result = await callGameSecureAuthed('swap_crystals_to_gold', { crystalsAmount }, true)
+      if (!result.ok) {
+        setSwapError(result.error || 'Swap failed.')
+        return
+      }
+      const swappedCrystals = Math.max(0, Math.floor(Number(result.swappedCrystals ?? crystalsAmount)))
+      const swappedGold = Math.max(
+        0,
+        Math.floor(Number(result.swappedGold ?? (swappedCrystals * CRYSTAL_TO_GOLD_SWAP_RATE))),
+      )
+      state.crystals = Math.max(0, Math.floor(Number(result.crystals ?? (state.crystals - swappedCrystals))))
+      state.gold = Math.max(0, Math.floor(Number(result.gold ?? (state.gold + swappedGold))))
+      pushLog(state.eventLog, `Swap completed: -${formatNumber(swappedCrystals)} crystals, +${formatNumber(swappedGold)} gold.`)
+      setSwapCrystalsAmount('')
+      syncHud()
+      void saveGameState()
+      setActivePanel(null)
+    } finally {
+      setSwapLoading(false)
+    }
   }
 
   const buyGoldPackage = async (packId: string) => {
@@ -5719,37 +5771,49 @@ function App() {
   const topbarClass = stage === 'select' ? 'topbar centered' : 'topbar'
   const resourceChips = hud ? (
     <>
-      <div className="resource-chip gold with-action">
-        <img className="icon-img" src={iconGold} alt="" />
-        <div className="resource-text">
-          <div className="resource-main">
-            <span>Gold</span>
-            <strong>{hud.gold}</strong>
-          </div>
-          <div className="resource-actions">
-            <button type="button" className="resource-action buy-gold" onClick={() => setActivePanel('buygold')}>
-              <img className="icon-img tiny" src={iconBuyGold} alt="" />
-              Buy Gold
-            </button>
+      <div className="resource-gold-crystal-group">
+        <div className="resource-chip gold with-action">
+          <img className="icon-img" src={iconGold} alt="" />
+          <div className="resource-text">
+            <div className="resource-main">
+              <span>Gold</span>
+              <strong>{hud.gold}</strong>
+            </div>
+            <div className="resource-actions">
+              <button type="button" className="resource-action buy-gold" onClick={() => setActivePanel('buygold')}>
+                <img className="icon-img tiny" src={iconBuyGold} alt="" />
+                Buy Gold
+              </button>
+            </div>
           </div>
         </div>
-      </div>
-      <div className="resource-chip crystals with-action">
-        <img className="icon-img" src={iconCrystals} alt="" />
-        <div className="resource-text">
-          <div className="resource-main">
-            <span>Crystals</span>
-            <strong>{hud.crystals}</strong>
-          </div>
-          <div className="resource-actions">
-            <button type="button" className="resource-action" onClick={() => setActivePanel('withdraw')}>
-              <img className="icon-img tiny" src={iconWithdraw} alt="" />
-              Withdraw
-            </button>
-            <button type="button" className="resource-action secondary" onClick={() => setActivePanel('stake')}>
-              <img className="icon-img tiny" src={iconStacking} alt="" />
-              Staking
-            </button>
+        <button
+          type="button"
+          className="resource-swap-trigger"
+          onClick={() => setActivePanel('swap')}
+          title="Swap crystals to gold"
+          aria-label="Swap crystals to gold"
+        >
+          <img className="icon-img" src={iconCrystalGoldSwap} alt="" />
+          <span>Swap</span>
+        </button>
+        <div className="resource-chip crystals with-action">
+          <img className="icon-img" src={iconCrystals} alt="" />
+          <div className="resource-text">
+            <div className="resource-main">
+              <span>Crystals</span>
+              <strong>{hud.crystals}</strong>
+            </div>
+            <div className="resource-actions">
+              <button type="button" className="resource-action" onClick={() => setActivePanel('withdraw')}>
+                <img className="icon-img tiny" src={iconWithdraw} alt="" />
+                Withdraw
+              </button>
+              <button type="button" className="resource-action secondary" onClick={() => setActivePanel('stake')}>
+                <img className="icon-img tiny" src={iconStacking} alt="" />
+                Staking
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -7588,6 +7652,68 @@ function App() {
                 </div>
               )
             })()}
+          </div>
+        </div>
+      )}
+
+      {activePanel === 'swap' && hud && (
+        <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Swap Crystals to Gold</h3>
+              <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
+                Close
+              </button>
+            </div>
+            <div className="withdraw-body">
+              <div className="withdraw-info">
+                <span className="withdraw-info-label">
+                  <img className="icon-img small" src={iconCrystalGoldSwap} alt="" />
+                  Exchange rate
+                </span>
+                <strong>
+                  1 <img className="icon-img small" src={iconCrystals} alt="" /> = {formatNumber(CRYSTAL_TO_GOLD_SWAP_RATE)}{' '}
+                  <img className="icon-img small" src={iconGold} alt="" />
+                </strong>
+              </div>
+              <div className="withdraw-info">
+                <span className="withdraw-info-label">
+                  <img className="icon-img small" src={iconCrystals} alt="" />
+                  Available crystals
+                </span>
+                <strong>
+                  {formatNumber(hud.crystals)} <img className="icon-img small" src={iconCrystals} alt="" />
+                </strong>
+              </div>
+              <label className="withdraw-label">
+                Amount (crystals)
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={swapCrystalsAmount}
+                  onChange={(event) => setSwapCrystalsAmount(event.target.value.replace(/[^0-9]/g, ''))}
+                  placeholder="100"
+                />
+              </label>
+              {(() => {
+                const amount = Math.floor(Number(swapCrystalsAmount))
+                if (!Number.isFinite(amount) || amount <= 0) return null
+                const goldValue = amount * CRYSTAL_TO_GOLD_SWAP_RATE
+                return (
+                  <div className="withdraw-convert">
+                    <img className="icon-img small" src={iconCrystals} alt="" />
+                    {formatNumber(amount)} =
+                    <img className="icon-img small" src={iconGold} alt="" />
+                    {formatNumber(goldValue)} gold
+                  </div>
+                )
+              })()}
+              {swapError && <div className="withdraw-error">{swapError}</div>}
+              <button type="button" className="withdraw-submit" disabled={swapLoading} onClick={submitCrystalGoldSwap}>
+                {swapLoading ? 'Swapping...' : 'Swap'}
+              </button>
+            </div>
           </div>
         </div>
       )}

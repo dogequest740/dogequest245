@@ -5,6 +5,7 @@ import { clusterApiUrl, Connection } from "https://esm.sh/@solana/web3.js@1.98.4
 const MAX_LEVEL = 255;
 const WITHDRAW_RATE = 15000;
 const WITHDRAW_MIN = 2000;
+const CRYSTAL_TO_GOLD_SWAP_RATE = 75;
 const MAX_TICKETS = 30;
 const DUNGEON_DAILY_TICKETS = 5;
 const WORLD_BOSS_DURATION_SECONDS = 12 * 60 * 60;
@@ -3560,6 +3561,77 @@ serve(async (req) => {
     }
 
     return json({ ok: false, error: "Profile changed concurrently, retry claim." });
+  }
+
+  if (action === "swap_crystals_to_gold") {
+    const crystalsAmount = asInt(body.crystalsAmount, 0);
+    if (!Number.isFinite(crystalsAmount) || crystalsAmount <= 0) {
+      return json({ ok: false, error: "Enter a valid amount." });
+    }
+    if (crystalsAmount > 10_000_000_000) {
+      return json({ ok: false, error: "Swap amount is too high." });
+    }
+
+    const goldAmount = crystalsAmount * CRYSTAL_TO_GOLD_SWAP_RATE;
+    if (!Number.isSafeInteger(goldAmount) || goldAmount <= 0) {
+      return json({ ok: false, error: "Invalid swap amount." });
+    }
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const nowIso = new Date().toISOString();
+      const { data: profileRow, error: profileError } = await supabase
+        .from("profiles")
+        .select("state, updated_at")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+
+      if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+        return json({ ok: false, error: "Profile not found." });
+      }
+
+      const state = normalizeState(profileRow.state as unknown);
+      if (!state) return json({ ok: false, error: "Invalid profile state." });
+
+      const crystals = Math.max(0, asInt(state.crystals, 0));
+      if (crystalsAmount > crystals) {
+        return json({ ok: false, error: "Not enough crystals." });
+      }
+
+      state.crystals = crystals - crystalsAmount;
+      state.gold = Math.max(0, asInt(state.gold, 0)) + goldAmount;
+
+      const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+      const { data: updated, error: updateError } = await supabase
+        .from("profiles")
+        .update({
+          state,
+          updated_at: nowIso,
+        })
+        .eq("wallet", auth.wallet)
+        .eq("updated_at", expectedUpdatedAt)
+        .select("wallet")
+        .maybeSingle();
+
+      if (updateError || !updated) continue;
+
+      await auditEvent(supabase, auth.wallet, "swap_crystals_to_gold", {
+        swappedCrystals: crystalsAmount,
+        swappedGold: goldAmount,
+        crystalsLeft: Math.max(0, asInt(state.crystals, 0)),
+        gold: Math.max(0, asInt(state.gold, 0)),
+      });
+
+      return json({
+        ok: true,
+        savedAt: nowIso,
+        swappedCrystals: crystalsAmount,
+        swappedGold: goldAmount,
+        crystals: Math.max(0, asInt(state.crystals, 0)),
+        gold: Math.max(0, asInt(state.gold, 0)),
+      });
+    }
+
+    return json({ ok: false, error: "Profile changed concurrently, retry swap." });
   }
 
   if (action === "shop_buy_dungeon_key") {
