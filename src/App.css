@@ -369,7 +369,7 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   overflow: visible;
-  margin: 0 0 8px;
+  margin: -6px 0 8px;
   padding-bottom: 0;
 }
 
@@ -2287,34 +2287,34 @@
 .starter-pack-float {
   position: absolute;
   left: 18px;
-  top: 18px;
+  top: 6px;
   transform: none;
   z-index: 3;
   width: auto;
 }
 
 .premium-float {
-  top: 18px;
+  top: 6px;
 }
 
 .premium-float.with-starterpack {
-  top: 176px;
+  top: 154px;
 }
 
 .referral-float {
-  top: 176px;
+  top: 154px;
 }
 
 .referral-float.with-starterpack {
-  top: 334px;
+  top: 302px;
 }
 
 .village-float {
-  top: 334px;
+  top: 302px;
 }
 
 .village-float.with-starterpack {
-  top: 492px;
+  top: 450px;
 }
 
 .referral-float .starter-pack-icon {
