@@ -72,6 +72,11 @@ import villageCrystalLabLv3Png from './assets/village/crystal-lab-lv3.png'
 import villageStorageLv1Png from './assets/village/storage-lv1.png'
 import villageStorageLv2Png from './assets/village/storage-lv2.png'
 import villageStorageLv3Png from './assets/village/storage-lv3.png'
+import landingBanner1Png from './assets/landing-banners/banner-1.png'
+import landingBanner2Png from './assets/landing-banners/banner-2.png'
+import landingBanner3Png from './assets/landing-banners/banner-3.png'
+import landingBanner4Png from './assets/landing-banners/banner-4.png'
+import landingBanner5Png from './assets/landing-banners/banner-5.png'
 import { supabase } from './lib/supabase'
 import './App.css'
 
@@ -89,6 +94,13 @@ const villageCrystalLabLv3Image = villageCrystalLabLv3Png
 const villageStorageLv1Image = villageStorageLv1Png
 const villageStorageLv2Image = villageStorageLv2Png
 const villageStorageLv3Image = villageStorageLv3Png
+const LANDING_BANNERS = [
+  { src: landingBanner1Png, alt: 'Doge Quest banner 1' },
+  { src: landingBanner2Png, alt: 'Doge Quest banner 2' },
+  { src: landingBanner3Png, alt: 'Doge Quest banner 3' },
+  { src: landingBanner4Png, alt: 'Doge Quest banner 4' },
+  { src: landingBanner5Png, alt: 'Doge Quest banner 5' },
+] as const
 
 type CharacterClass = {
   id: string
@@ -5856,11 +5868,11 @@ function App() {
               <h1 className="auth-title">DOGE QUEST</h1>
               <p className="auth-lead">
                 A living pixel realm where your gear, Tier Score, and timing decide the outcome. Battle on demand,
-                conquer dungeons, and share World Boss rewards.
+                conquer dungeons, build your own village, and share World Boss rewards.
               </p>
               <p className="auth-sublead highlight">
-                Earn real SOL by playing: farm crystals in dungeons and World Boss raids, then convert rewards to SOL.
-                The deeper you push, the larger the payouts.
+                Earn real SOL by playing: farm crystals in dungeons and World Boss raids, build your own village and
+                earn passive income, then convert rewards to SOL. The deeper you push, the larger the payouts.
               </p>
               <div className="auth-cta">
                 <div className="auth-cta-row">
@@ -5899,6 +5911,16 @@ function App() {
             </div>
           </div>
 
+          <div className="auth-section auth-banner-section reveal delay-2">
+            <div className="auth-banner-strip">
+              {LANDING_BANNERS.map((banner) => (
+                <div key={banner.src} className="auth-banner-card">
+                  <img src={banner.src} alt={banner.alt} />
+                </div>
+              ))}
+            </div>
+          </div>
+
           <div className="auth-section reveal delay-2">
             <h2>Core gameplay</h2>
             <div className="feature-grid">
@@ -5921,6 +5943,13 @@ function App() {
                 <div>
                   <h3>Dungeon tiers</h3>
                   <p>Keys unlock tougher crypts with higher crystal rewards.</p>
+                </div>
+              </div>
+              <div className="feature-card">
+                <img src={villageCastleLv1Image} alt="" />
+                <div>
+                  <h3>Your Village</h3>
+                  <p>Build and upgrade your village to generate passive gold and crystals over time.</p>
                 </div>
               </div>
               <div className="feature-card">
@@ -6060,11 +6089,16 @@ function App() {
               </div>
               <div className="earn-card">
                 <div className="earn-number">03</div>
+                <h3>Build your village</h3>
+                <p>Upgrade your Crystal Lab and Castle to stack passive crystal income.</p>
+              </div>
+              <div className="earn-card">
+                <div className="earn-number">04</div>
                 <h3>Boost Tier Score</h3>
                 <p>Better gear unlocks tougher content with higher rewards.</p>
               </div>
               <div className="earn-card">
-                <div className="earn-number">04</div>
+                <div className="earn-number">05</div>
                 <h3>Convert crystals</h3>
                 <p>Exchange your crystal balance into SOL at a fixed rate.</p>
               </div>
