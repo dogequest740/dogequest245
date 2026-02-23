@@ -1599,7 +1599,9 @@
   display: block;
   width: 100%;
   aspect-ratio: 16 / 9;
-  object-fit: cover;
+  object-fit: contain;
+  object-position: center;
+  background: rgba(7, 10, 16, 0.9);
 }
 
 .feature-grid,
