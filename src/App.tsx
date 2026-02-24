@@ -4654,168 +4654,171 @@ function App() {
     }
     setAdminLoading(true)
     setAdminError('')
-    const profilesResult = await callGameSecureAuthed('admin_profiles', { limit: 250 }, true)
-    if (!profilesResult.ok) {
-      setAdminError(profilesResult.error || 'Failed to load players.')
-      setAdminLoading(false)
-      return
-    }
-    const profileRows = profilesResult.profiles ?? []
+    try {
+      const profilesResult = await callGameSecureAuthed('admin_profiles', { limit: 250 }, true)
+      if (!profilesResult.ok) {
+        setAdminError(profilesResult.error || 'Failed to load players.')
+        return
+      }
+      const profileRows = profilesResult.profiles ?? []
 
-    const { data: withdrawalsData, error: withdrawalsError } = await supabase
-      .from('withdrawals')
-      .select('id, wallet, name, crystals, sol_amount, status, created_at')
-      .order('created_at', { ascending: false })
-      .limit(200)
-    if (withdrawalsError) {
-      setAdminError('Failed to load withdrawals.')
-      setAdminLoading(false)
-      return
-    }
+      const warnings: string[] = []
+      const eventLimitRaw = Math.floor(Number(adminEventLimit))
+      const eventLimit = Number.isFinite(eventLimitRaw) ? Math.min(1000, Math.max(20, eventLimitRaw)) : 300
 
-    const eventLimitRaw = Math.floor(Number(adminEventLimit))
-    const eventLimit = Number.isFinite(eventLimitRaw) ? Math.min(1000, Math.max(20, eventLimitRaw)) : 300
-    const eventsResult = await callGameSecureAuthed(
-      'admin_events',
-      {
-        walletFilter: adminEventWalletFilter.trim(),
-        kindFilter: adminEventKindFilter.trim(),
-        limit: eventLimit,
-      },
-      true,
-    )
-    if (!eventsResult.ok) {
-      setAdminError(eventsResult.error || 'Failed to load security events.')
-      setAdminLoading(false)
-      return
-    }
+      const { data: withdrawalsData, error: withdrawalsError } = await supabase
+        .from('withdrawals')
+        .select('id, wallet, name, crystals, sol_amount, status, created_at')
+        .order('created_at', { ascending: false })
+        .limit(200)
+      if (withdrawalsError) {
+        warnings.push('Failed to load withdrawals.')
+      }
 
-    const events: AdminEventRow[] = (eventsResult.events ?? []).map((row, index) => ({
-      id: String(row.id ?? `event-${index}`),
-      wallet: String(row.wallet ?? ''),
-      kind: String(row.kind ?? 'unknown'),
-      details: normalizeEventDetails(row.details),
-      created_at: String(row.created_at ?? new Date(0).toISOString()),
-    }))
+      const eventsResult = await callGameSecureAuthed(
+        'admin_events',
+        {
+          walletFilter: adminEventWalletFilter.trim(),
+          kindFilter: adminEventKindFilter.trim(),
+          limit: eventLimit,
+        },
+        true,
+      )
+      if (!eventsResult.ok) {
+        warnings.push(eventsResult.error || 'Failed to load security events.')
+      }
 
-    const blockedResult = await callGameSecureAuthed('admin_blocked_list', {}, true)
-    if (!blockedResult.ok) {
-      setAdminError(blockedResult.error || 'Failed to load blocked players.')
-      setAdminLoading(false)
-      return
-    }
-
-    const blockedMap = new Map<string, BlockedWalletRow>()
-    ;(blockedResult.blockedWallets ?? []).forEach((row) => {
-      const wallet = String(row.wallet ?? '')
-      if (!wallet) return
-      blockedMap.set(wallet, {
-        wallet,
-        reason: String(row.reason ?? 'Cheating'),
-        blocked_by: String(row.blocked_by ?? ''),
+      const events: AdminEventRow[] = (eventsResult.ok ? (eventsResult.events ?? []) : []).map((row, index) => ({
+        id: String(row.id ?? `event-${index}`),
+        wallet: String(row.wallet ?? ''),
+        kind: String(row.kind ?? 'unknown'),
+        details: normalizeEventDetails(row.details),
         created_at: String(row.created_at ?? new Date(0).toISOString()),
-        updated_at: typeof row.updated_at === 'string' ? row.updated_at : undefined,
+      }))
+
+      const blockedResult = await callGameSecureAuthed('admin_blocked_list', {}, true)
+      if (!blockedResult.ok) {
+        warnings.push(blockedResult.error || 'Failed to load blocked players.')
+      }
+
+      const blockedMap = new Map<string, BlockedWalletRow>()
+      ;((blockedResult.ok ? blockedResult.blockedWallets : []) ?? []).forEach((row) => {
+        const wallet = String(row.wallet ?? '')
+        if (!wallet) return
+        blockedMap.set(wallet, {
+          wallet,
+          reason: String(row.reason ?? 'Cheating'),
+          blocked_by: String(row.blocked_by ?? ''),
+          created_at: String(row.created_at ?? new Date(0).toISOString()),
+          updated_at: typeof row.updated_at === 'string' ? row.updated_at : undefined,
+        })
       })
-    })
 
-    const now = Date.now()
-    const players: AdminPlayerRow[] = profileRows.map((row) => {
-      const saved = (row.state as PersistedState | null) ?? null
-      const wallet = String(row.wallet ?? '')
-      const blocked = blockedMap.get(wallet)
-      const equipment = normalizeEquipment(saved?.equipment)
-      const tierScore = getTierScore(equipment)
-      const level = saved?.player?.level ?? 1
-      const gold = saved?.gold ?? 0
-      const crystals = saved?.crystals ?? 0
-      const kills = saved?.monsterKills ?? 0
-      const dungeons = saved?.dungeonRuns ?? 0
-      const name = saved?.name || 'Unknown'
-      return {
-        wallet,
-        name,
-        level,
-        tierScore,
-        gold,
-        crystals,
-        kills,
-        dungeons,
-        updatedAt: String(row.updated_at || new Date(0).toISOString()),
-        blocked: Boolean(blocked),
-        blockedReason: blocked?.reason || '',
-        blockedAt: blocked?.created_at || '',
-      }
-    })
-
-    const villages: AdminVillageRow[] = profileRows.map((row) => {
-      const saved = (row.state as PersistedState | null) ?? null
-      const wallet = String(row.wallet ?? '')
-      const blocked = blockedMap.get(wallet)
-      const village = normalizeVillageState(saved?.village, now)
-      const hasVillage = village.settlementName.length > 0
-      return {
-        wallet,
-        name: saved?.name || 'Unknown',
-        villageName: hasVillage ? village.settlementName : 'Not founded',
-        castleLevel: hasVillage ? village.buildings.castle.level : 0,
-        mineLevel: hasVillage ? village.buildings.mine.level : 0,
-        labLevel: hasVillage ? village.buildings.lab.level : 0,
-        storageLevel: hasVillage ? village.buildings.storage.level : 0,
-        updatedAt: String(row.updated_at || new Date(0).toISOString()),
-        blocked: Boolean(blocked),
-        blockedReason: blocked?.reason || '',
-      }
-    })
-
-    const totalPlayers = players.length
-    const totals = players.reduce(
-      (acc, player) => {
-        acc.level += player.level
-        acc.tier += player.tierScore
-        acc.gold += player.gold
-        acc.crystals += player.crystals
-        acc.kills += player.kills
-        acc.dungeons += player.dungeons
-        acc.maxLevel = Math.max(acc.maxLevel, player.level)
-        const lastSeen = new Date(player.updatedAt).getTime()
-        if (!Number.isNaN(lastSeen) && now - lastSeen <= 24 * 60 * 60 * 1000) {
-          acc.active += 1
+      const now = Date.now()
+      const players: AdminPlayerRow[] = profileRows.map((row) => {
+        const saved = (row.state as PersistedState | null) ?? null
+        const wallet = String(row.wallet ?? '')
+        const blocked = blockedMap.get(wallet)
+        const equipment = normalizeEquipment(saved?.equipment)
+        const tierScore = getTierScore(equipment)
+        const level = saved?.player?.level ?? 1
+        const gold = saved?.gold ?? 0
+        const crystals = saved?.crystals ?? 0
+        const kills = saved?.monsterKills ?? 0
+        const dungeons = saved?.dungeonRuns ?? 0
+        const name = saved?.name || 'Unknown'
+        return {
+          wallet,
+          name,
+          level,
+          tierScore,
+          gold,
+          crystals,
+          kills,
+          dungeons,
+          updatedAt: String(row.updated_at || new Date(0).toISOString()),
+          blocked: Boolean(blocked),
+          blockedReason: blocked?.reason || '',
+          blockedAt: blocked?.created_at || '',
         }
-        return acc
-      },
-      { level: 0, tier: 0, gold: 0, crystals: 0, kills: 0, dungeons: 0, active: 0, maxLevel: 0 },
-    )
+      })
 
-    const withdrawals: WithdrawalRow[] = (withdrawalsData ?? []).map((row) => ({
-      id: String(row.id),
-      wallet: row.wallet as string,
-      name: (row.name as string) || 'Unknown',
-      crystals: Number(row.crystals ?? 0),
-      sol_amount: Number(row.sol_amount ?? 0),
-      status: (row.status as string) || 'pending',
-      created_at: (row.created_at as string) || new Date(0).toISOString(),
-    }))
+      const villages: AdminVillageRow[] = profileRows.map((row) => {
+        const saved = (row.state as PersistedState | null) ?? null
+        const wallet = String(row.wallet ?? '')
+        const blocked = blockedMap.get(wallet)
+        const village = normalizeVillageState(saved?.village, now)
+        const hasVillage = village.settlementName.length > 0
+        return {
+          wallet,
+          name: saved?.name || 'Unknown',
+          villageName: hasVillage ? village.settlementName : 'Not founded',
+          castleLevel: hasVillage ? village.buildings.castle.level : 0,
+          mineLevel: hasVillage ? village.buildings.mine.level : 0,
+          labLevel: hasVillage ? village.buildings.lab.level : 0,
+          storageLevel: hasVillage ? village.buildings.storage.level : 0,
+          updatedAt: String(row.updated_at || new Date(0).toISOString()),
+          blocked: Boolean(blocked),
+          blockedReason: blocked?.reason || '',
+        }
+      })
 
-    const pending = withdrawals.filter((entry) => entry.status === 'pending')
-    const pendingCrystals = pending.reduce((sum, entry) => sum + entry.crystals, 0)
+      const totalPlayers = players.length
+      const totals = players.reduce(
+        (acc, player) => {
+          acc.level += player.level
+          acc.tier += player.tierScore
+          acc.gold += player.gold
+          acc.crystals += player.crystals
+          acc.kills += player.kills
+          acc.dungeons += player.dungeons
+          acc.maxLevel = Math.max(acc.maxLevel, player.level)
+          const lastSeen = new Date(player.updatedAt).getTime()
+          if (!Number.isNaN(lastSeen) && now - lastSeen <= 24 * 60 * 60 * 1000) {
+            acc.active += 1
+          }
+          return acc
+        },
+        { level: 0, tier: 0, gold: 0, crystals: 0, kills: 0, dungeons: 0, active: 0, maxLevel: 0 },
+      )
 
-    const summary: AdminSummary = {
-      totalPlayers,
-      active24h: totals.active,
-      avgLevel: totalPlayers ? Math.round(totals.level / totalPlayers) : 0,
-      avgTierScore: totalPlayers ? Math.round(totals.tier / totalPlayers) : 0,
-      totalGold: totals.gold,
-      totalCrystals: totals.crystals,
-      totalKills: totals.kills,
-      totalDungeons: totals.dungeons,
-      maxLevel: totals.maxLevel,
-      pendingWithdrawals: pending.length,
-      pendingCrystals,
+      const withdrawals: WithdrawalRow[] = ((withdrawalsError ? [] : withdrawalsData) ?? []).map((row) => ({
+        id: String(row.id),
+        wallet: row.wallet as string,
+        name: (row.name as string) || 'Unknown',
+        crystals: Number(row.crystals ?? 0),
+        sol_amount: Number(row.sol_amount ?? 0),
+        status: (row.status as string) || 'pending',
+        created_at: (row.created_at as string) || new Date(0).toISOString(),
+      }))
+
+      const pending = withdrawals.filter((entry) => entry.status === 'pending')
+      const pendingCrystals = pending.reduce((sum, entry) => sum + entry.crystals, 0)
+
+      const summary: AdminSummary = {
+        totalPlayers,
+        active24h: totals.active,
+        avgLevel: totalPlayers ? Math.round(totals.level / totalPlayers) : 0,
+        avgTierScore: totalPlayers ? Math.round(totals.tier / totalPlayers) : 0,
+        totalGold: totals.gold,
+        totalCrystals: totals.crystals,
+        totalKills: totals.kills,
+        totalDungeons: totals.dungeons,
+        maxLevel: totals.maxLevel,
+        pendingWithdrawals: pending.length,
+        pendingCrystals,
+      }
+
+      setAdminData({ summary, players, villages, withdrawals, events })
+      setAdminEventLimit(String(eventLimit))
+      setAdminError(warnings.join(' '))
+    } catch (error) {
+      console.warn('Admin data load failed', error)
+      const message = error instanceof Error ? error.message : String(error)
+      setAdminError(`Failed to load admin data: ${message}`)
+    } finally {
+      setAdminLoading(false)
     }
-
-    setAdminData({ summary, players, villages, withdrawals, events })
-    setAdminEventLimit(String(eventLimit))
-    setAdminLoading(false)
   }
 
   const markWithdrawalPaid = async (withdrawalId: string) => {
