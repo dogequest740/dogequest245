@@ -3609,29 +3609,17 @@ function App() {
     }
   }
 
-  const getCurrentEmailAccessToken = async () => {
-    if (!supabase || !usingEmailAuth) return ''
-    const { data, error } = await supabase.auth.getSession()
-    if (error) return ''
-    return data.session?.access_token ?? ''
-  }
-
   const callDungeonSecureAuthed = async (
     action: string,
     payload: Record<string, unknown> = {},
     interactive = true,
   ): Promise<DungeonSecureResponse> => {
     let token = await ensureDungeonSession(interactive)
-    const emailAccessToken = await getCurrentEmailAccessToken()
-    if (!token && !emailAccessToken) {
+    if (!token) {
       return { ok: false, error: 'Sign-in required for dungeon actions.' }
     }
     const secureHeaders: Record<string, string> = {}
-    if (token) {
-      secureHeaders['x-session-token'] = token
-    } else if (emailAccessToken) {
-      secureHeaders.authorization = `Bearer ${emailAccessToken}`
-    }
+    secureHeaders['x-session-token'] = token
     let result = await callDungeonSecure(
       { action, ...payload },
       secureHeaders,
@@ -3640,14 +3628,10 @@ function App() {
       dungeonSessionRef.current = null
       if (interactive) {
         const refreshed = await ensureDungeonSession(true)
-        if (refreshed || emailAccessToken) {
+        if (refreshed) {
           token = refreshed
           const retryHeaders: Record<string, string> = {}
-          if (token) {
-            retryHeaders['x-session-token'] = token
-          } else if (emailAccessToken) {
-            retryHeaders.authorization = `Bearer ${emailAccessToken}`
-          }
+          retryHeaders['x-session-token'] = token
           result = await callDungeonSecure(
             { action, ...payload },
             retryHeaders,
@@ -3710,16 +3694,11 @@ function App() {
     interactive = true,
   ): Promise<GameSecureResponse> => {
     let token = await ensureDungeonSession(interactive)
-    const emailAccessToken = await getCurrentEmailAccessToken()
-    if (!token && !emailAccessToken) {
+    if (!token) {
       return { ok: false, error: 'Sign-in required for secure actions.' }
     }
     const secureHeaders: Record<string, string> = {}
-    if (token) {
-      secureHeaders['x-session-token'] = token
-    } else if (emailAccessToken) {
-      secureHeaders.authorization = `Bearer ${emailAccessToken}`
-    }
+    secureHeaders['x-session-token'] = token
     let result = await callGameSecure(
       { action, ...payload },
       secureHeaders,
@@ -3728,14 +3707,10 @@ function App() {
       dungeonSessionRef.current = null
       if (interactive) {
         const refreshed = await ensureDungeonSession(true)
-        if (refreshed || emailAccessToken) {
+        if (refreshed) {
           token = refreshed
           const retryHeaders: Record<string, string> = {}
-          if (token) {
-            retryHeaders['x-session-token'] = token
-          } else if (emailAccessToken) {
-            retryHeaders.authorization = `Bearer ${emailAccessToken}`
-          }
+          retryHeaders['x-session-token'] = token
           result = await callGameSecure(
             { action, ...payload },
             retryHeaders,
