@@ -3322,7 +3322,7 @@ serve(async (req) => {
     if (!isNowpayKind(rawKind)) {
       return json({ ok: false, error: "Invalid payment kind." });
     }
-    const payCurrency = normalizeNowpaymentsStatus(body.payCurrency);
+    let payCurrency = normalizeNowpaymentsStatus(body.payCurrency);
     if (!isNowpaymentsCurrency(payCurrency)) {
       return json({ ok: false, error: "Unsupported USDT network." });
     }
@@ -3396,10 +3396,10 @@ serve(async (req) => {
     }
 
     const orderId = createNowpaymentsOrderId(auth.wallet, rawKind, productRef);
-    const createBody: Record<string, unknown> = {
-      price_amount: usdtAmount < 1 ? Number(usdtAmount.toFixed(3)) : Number(usdtAmount.toFixed(2)),
+    const priceAmount = usdtAmount < 1 ? Number(usdtAmount.toFixed(3)) : Number(usdtAmount.toFixed(2));
+    const createBodyBase: Record<string, unknown> = {
+      price_amount: priceAmount,
       price_currency: "usd",
-      pay_currency: payCurrency,
       order_id: orderId,
       order_description: orderDescription,
       is_fixed_rate: true,
@@ -3407,10 +3407,38 @@ serve(async (req) => {
     };
     const callbackUrl = String(Deno.env.get("NOWPAYMENTS_IPN_CALLBACK_URL") ?? "").trim();
     if (callbackUrl) {
-      createBody.ipn_callback_url = callbackUrl;
+      createBodyBase.ipn_callback_url = callbackUrl;
     }
 
-    const createResult = await nowpaymentsFetch("POST", "/payment", createBody, NOWPAYMENTS_CREATE_TIMEOUT_MS);
+    const createPayment = (currency: string) =>
+      nowpaymentsFetch(
+        "POST",
+        "/payment",
+        {
+          ...createBodyBase,
+          pay_currency: currency,
+        },
+        NOWPAYMENTS_CREATE_TIMEOUT_MS,
+      );
+
+    let createResult = await createPayment(payCurrency);
+    if (!createResult.ok) {
+      const normalizedError = String(createResult.error ?? "").toLowerCase();
+      const isTooSmall = normalizedError.includes("amountto is too small");
+      if (isTooSmall && payCurrency !== "usdttrc20") {
+        const retryResult = await createPayment("usdttrc20");
+        if (retryResult.ok) {
+          auditDetails.payCurrencyFallbackFrom = payCurrency;
+          payCurrency = "usdttrc20";
+          createResult = retryResult;
+        } else {
+          return json({
+            ok: false,
+            error: `${createResult.error}. Try USDT TRC20 network for small payments.`,
+          });
+        }
+      }
+    }
     if (!createResult.ok) {
       return json({ ok: false, error: createResult.error });
     }

@@ -102,6 +102,8 @@ const LANDING_BANNERS = [
   { src: landingBanner4Png, alt: 'Doge Quest banner 4' },
   { src: landingBanner5Png, alt: 'Doge Quest banner 5' },
 ] as const
+const EDGE_BASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || ''
+const EDGE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() || ''
 
 type CharacterClass = {
   id: string
@@ -414,6 +416,7 @@ type DungeonSecureResponse = {
 type GameSecureResponse = {
   ok: boolean
   error?: string
+  message?: string
   savedAt?: string
   swappedCrystals?: number
   swappedGold?: number
@@ -1935,8 +1938,6 @@ const toConfirmedEmailUser = (
   user: { id?: string; email?: string | null; email_confirmed_at?: string | null; confirmed_at?: string | null } | null | undefined,
 ) => {
   if (!user?.id) return null
-  const confirmed = Boolean(user.email_confirmed_at ?? user.confirmed_at)
-  if (!confirmed) return null
   return {
     id: String(user.id),
     email: String(user.email ?? ''),
@@ -3453,22 +3454,40 @@ function App() {
     payload: Record<string, unknown>,
     headers?: Record<string, string>,
   ): Promise<DungeonSecureResponse> => {
-    if (!supabase) return { ok: false, error: 'Supabase not configured.' }
-    const { data, error } = await supabase.functions.invoke('dungeon-secure', {
-      body: payload,
-      headers,
-    })
-    if (error) {
+    if (!EDGE_BASE_URL || !EDGE_ANON_KEY) return { ok: false, error: 'Supabase not configured.' }
+    try {
+      const mergedHeaders: Record<string, string> = {
+        'content-type': 'application/json',
+        apikey: EDGE_ANON_KEY,
+        authorization: `Bearer ${EDGE_ANON_KEY}`,
+        ...(headers ?? {}),
+      }
+      const response = await fetch(`${EDGE_BASE_URL}/functions/v1/dungeon-secure`, {
+        method: 'POST',
+        headers: mergedHeaders,
+        body: JSON.stringify(payload),
+      })
+      const rawText = await response.text()
+      let data: DungeonSecureResponse | null = null
+      try {
+        data = rawText ? (JSON.parse(rawText) as DungeonSecureResponse) : null
+      } catch {
+        data = null
+      }
+      if (!response.ok) {
+        const message =
+          (data && typeof data.error === 'string' && data.error) ||
+          (data && typeof data.message === 'string' && data.message) ||
+          rawText ||
+          `${response.status} ${response.statusText}`
+        return { ok: false, error: `Dungeon service unavailable. ${message}` }
+      }
+      return data ?? { ok: false, error: 'Empty dungeon service response.' }
+    } catch (error) {
       console.warn('Dungeon secure call failed', error)
-      const errorText =
-        error instanceof Error
-          ? error.message
-          : typeof (error as { message?: unknown })?.message === 'string'
-            ? String((error as { message: string }).message)
-            : ''
+      const errorText = error instanceof Error ? error.message : String(error)
       return { ok: false, error: errorText ? `Dungeon service unavailable. ${errorText}` : 'Dungeon service unavailable.' }
     }
-    return (data as DungeonSecureResponse | null) ?? { ok: false, error: 'Empty dungeon service response.' }
   }
 
   const handleSecurityAuthFailure = (message: string, interactive = false) => {
@@ -3649,23 +3668,40 @@ function App() {
     payload: Record<string, unknown>,
     headers?: Record<string, string>,
   ): Promise<GameSecureResponse> => {
-    if (!supabase) return { ok: false, error: 'Supabase not configured.' }
-    const sb = supabase
-    const { data, error } = await sb.functions.invoke('game-secure', {
-      body: payload,
-      headers,
-    })
-    if (error) {
+    if (!EDGE_BASE_URL || !EDGE_ANON_KEY) return { ok: false, error: 'Supabase not configured.' }
+    try {
+      const mergedHeaders: Record<string, string> = {
+        'content-type': 'application/json',
+        apikey: EDGE_ANON_KEY,
+        authorization: `Bearer ${EDGE_ANON_KEY}`,
+        ...(headers ?? {}),
+      }
+      const response = await fetch(`${EDGE_BASE_URL}/functions/v1/game-secure`, {
+        method: 'POST',
+        headers: mergedHeaders,
+        body: JSON.stringify(payload),
+      })
+      const rawText = await response.text()
+      let data: GameSecureResponse | null = null
+      try {
+        data = rawText ? (JSON.parse(rawText) as GameSecureResponse) : null
+      } catch {
+        data = null
+      }
+      if (!response.ok) {
+        const message =
+          (data && typeof data.error === 'string' && data.error) ||
+          (data && typeof data.message === 'string' && data.message) ||
+          rawText ||
+          `${response.status} ${response.statusText}`
+        return { ok: false, error: `Secure service unavailable. ${message}` }
+      }
+      return data ?? { ok: false, error: 'Empty secure service response.' }
+    } catch (error) {
       console.warn('Game secure call failed', error)
-      const errorText =
-        error instanceof Error
-          ? error.message
-          : typeof (error as { message?: unknown })?.message === 'string'
-            ? String((error as { message: string }).message)
-            : ''
+      const errorText = error instanceof Error ? error.message : String(error)
       return { ok: false, error: errorText ? `Secure service unavailable. ${errorText}` : 'Secure service unavailable.' }
     }
-    return (data as GameSecureResponse | null) ?? { ok: false, error: 'Empty secure service response.' }
   }
 
   const callGameSecureAuthed = async (
