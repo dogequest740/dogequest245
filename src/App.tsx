@@ -1028,12 +1028,17 @@ const STAKE_BONUS = 0.05
 const STAKE_MIN = 50
 const STAKE_LOCK_HOURS = 24
 const GOLD_STORE_WALLET = new PublicKey('9a5GXRjX6HKh9Yjc9d7gp9RFmuRvMQAcV1VJ9WV7LU8c')
-const GOLD_PACKAGES = [
-  { id: 'gold-50k', gold: 50000, sol: 0.05, usdt: 4.25, image: goldSmallImage },
-  { id: 'gold-100k', gold: 100000, sol: 0.1, usdt: 8.5, image: goldMiddleImage },
-  { id: 'gold-500k', gold: 500000, sol: 0.4, usdt: 34, image: goldLargeImage },
-  { id: 'gold-1200k', gold: 1200000, sol: 0.63, usdt: 53.55, image: gold1200kImage },
-]
+const GOLD_PACKAGES_SOL = [
+  { id: 'gold-50k', gold: 50000, sol: 0.05, image: goldSmallImage },
+  { id: 'gold-100k', gold: 100000, sol: 0.1, image: goldMiddleImage },
+  { id: 'gold-500k', gold: 500000, sol: 0.4, image: goldLargeImage },
+  { id: 'gold-1200k', gold: 1200000, sol: 0.63, image: gold1200kImage },
+] as const
+const GOLD_PACKAGES_USDT = [
+  { id: 'gold-150k', gold: 150000, usdt: 10, image: goldMiddleImage },
+  { id: 'gold-500k', gold: 500000, usdt: 34, image: goldLargeImage },
+  { id: 'gold-1200k', gold: 1200000, usdt: 53.55, image: gold1200kImage },
+] as const
 const NOWPAY_USDT_NETWORKS = [
   { id: 'usdttrc20', label: 'USDT TRC20' },
   { id: 'usdtbsc', label: 'USDT BSC' },
@@ -1041,6 +1046,7 @@ const NOWPAY_USDT_NETWORKS = [
   { id: 'usdtmatic', label: 'USDT Polygon' },
   { id: 'usdtsol', label: 'USDT Solana' },
 ] as const
+const NOWPAY_MIN_USDT = 10
 type NowpayNetworkId = (typeof NOWPAY_USDT_NETWORKS)[number]['id']
 type BuyGoldMethod = 'sol' | 'usdt'
 type NowpayKind = 'buy_gold' | 'starter_pack_buy' | 'premium_buy' | 'fortune_buy'
@@ -1070,11 +1076,14 @@ const FORTUNE_SPIN_PRICES = {
   1: 0.007,
   10: 0.06,
 } as const
+const FORTUNE_SPIN_PACKS_SOL = [1, 10] as const
 const FORTUNE_SPIN_PRICES_USDT = {
-  1: 0.595,
-  10: 5.1,
+  20: 10,
+  50: 17,
 } as const
+const FORTUNE_SPIN_PACKS_USDT = [20, 50] as const
 type FortunePackId = keyof typeof FORTUNE_SPIN_PRICES
+type FortuneUsdtPackId = keyof typeof FORTUNE_SPIN_PRICES_USDT
 const FORTUNE_REWARDS: FortuneReward[] = [
   { id: 'speed_draught', label: 'Swift Draught', kind: 'consumable', consumableType: 'speed', amount: 1, chance: 24.915 },
   { id: 'battle_tonic', label: 'Battle Tonic', kind: 'consumable', consumableType: 'attack', amount: 1, chance: 24.915 },
@@ -5593,8 +5602,17 @@ function App() {
     }
   }
 
-  const createNowpayGoldPayment = async (packId: string) =>
-    createNowpayPayment(
+  const createNowpayGoldPayment = async (packId: string) => {
+    const pack = GOLD_PACKAGES_USDT.find((entry) => entry.id === packId)
+    if (!pack) {
+      setBuyGoldError('Invalid gold package.')
+      return null
+    }
+    if (pack.usdt < NOWPAY_MIN_USDT) {
+      setBuyGoldError(`NOWPayments minimum is ${NOWPAY_MIN_USDT} USDT. Use SOL or a larger package.`)
+      return null
+    }
+    return createNowpayPayment(
       'buy_gold',
       { packId },
       setNowpayLoading,
@@ -5602,6 +5620,7 @@ function App() {
       setNowpayPayment,
       'Failed to create USDT payment.',
     )
+  }
 
   const checkNowpayGoldPayment = async (providerPaymentIdRaw?: string, interactive = true) =>
     checkNowpayPayment(
@@ -5650,8 +5669,13 @@ function App() {
       interactive,
     )
 
-  const createNowpayFortunePayment = async (spins: FortunePackId) =>
-    createNowpayPayment(
+  const createNowpayFortunePayment = async (spins: FortuneUsdtPackId) => {
+    const usdtPrice = Number(FORTUNE_SPIN_PRICES_USDT[spins] ?? 0)
+    if (usdtPrice < NOWPAY_MIN_USDT) {
+      setFortuneError(`NOWPayments minimum is ${NOWPAY_MIN_USDT} USDT. Use SOL for this pack.`)
+      return null
+    }
+    return createNowpayPayment(
       'fortune_buy',
       { spins },
       setFortuneNowpayLoading,
@@ -5659,6 +5683,7 @@ function App() {
       setFortuneNowpayPayment,
       'Failed to create USDT payment.',
     )
+  }
 
   const checkNowpayFortunePayment = async (providerPaymentIdRaw?: string, interactive = true) =>
     checkNowpayPayment(
@@ -5675,7 +5700,7 @@ function App() {
       setBuyGoldError('Connect your wallet to buy gold.')
       return
     }
-    const pack = GOLD_PACKAGES.find((entry) => entry.id === packId)
+    const pack = GOLD_PACKAGES_SOL.find((entry) => entry.id === packId)
     if (!pack) return
     setBuyGoldLoading(packId)
     setBuyGoldError('')
@@ -7790,33 +7815,45 @@ function App() {
                 </label>
               )}
               <div className="buygold-grid">
-                {GOLD_PACKAGES.map((pack) => (
-                  <div key={pack.id} className="shop-card buygold-card">
-                    <img className="shop-icon" src={pack.image} alt="Gold pack" />
-                    <div className="shop-title">{formatNumber(pack.gold)} Gold</div>
-                    <div className="shop-desc">Instant delivery</div>
-                    <div className="shop-meta">
-                      <img className="icon-img small" src={iconSolana} alt="" />
-                      Price: {pack.sol} SOL
+                {(buyGoldMethod === 'sol' ? GOLD_PACKAGES_SOL : GOLD_PACKAGES_USDT).map((pack) => {
+                  const usdtPrice = buyGoldMethod === 'usdt' ? Number('usdt' in pack ? pack.usdt : 0) : 0
+                  const usdtUnavailable = buyGoldMethod === 'usdt' && usdtPrice < NOWPAY_MIN_USDT
+                  return (
+                    <div key={pack.id} className="shop-card buygold-card">
+                      <img className="shop-icon" src={pack.image} alt="Gold pack" />
+                      <div className="shop-title">{formatNumber(pack.gold)} Gold</div>
+                      <div className="shop-desc">Instant delivery</div>
+                      {buyGoldMethod === 'sol' ? (
+                        <div className="shop-meta">
+                          <img className="icon-img small" src={iconSolana} alt="" />
+                          Price: {'sol' in pack ? pack.sol : 0} SOL
+                        </div>
+                      ) : (
+                        <div className="shop-meta buygold-usdt-meta">Price: {formatUsdt(usdtPrice)} USDT</div>
+                      )}
+                      {buyGoldMethod === 'usdt' && usdtUnavailable && (
+                        <div className="withdraw-note">USDT unavailable (min {NOWPAY_MIN_USDT} USDT)</div>
+                      )}
+                      <button
+                        type="button"
+                        disabled={buyGoldMethod === 'sol'
+                          ? buyGoldLoading === pack.id
+                          : nowpayLoading || nowpayStatusLoading || usdtUnavailable}
+                        onClick={() => {
+                          if (buyGoldMethod === 'sol') {
+                            void buyGoldPackage(pack.id)
+                            return
+                          }
+                          void createNowpayGoldPayment(pack.id)
+                        }}
+                      >
+                        {buyGoldMethod === 'sol'
+                          ? (buyGoldLoading === pack.id ? 'Processing...' : 'Buy with SOL')
+                          : (usdtUnavailable ? 'Use SOL' : (nowpayLoading ? 'Creating...' : 'Buy with USDT'))}
+                      </button>
                     </div>
-                    <div className="shop-meta buygold-usdt-meta">Price: {formatUsdt(pack.usdt)} USDT</div>
-                    <button
-                      type="button"
-                      disabled={buyGoldMethod === 'sol' ? buyGoldLoading === pack.id : nowpayLoading || nowpayStatusLoading}
-                      onClick={() => {
-                        if (buyGoldMethod === 'sol') {
-                          void buyGoldPackage(pack.id)
-                          return
-                        }
-                        void createNowpayGoldPayment(pack.id)
-                      }}
-                    >
-                      {buyGoldMethod === 'sol'
-                        ? (buyGoldLoading === pack.id ? 'Processing...' : 'Buy with SOL')
-                        : (nowpayLoading ? 'Creating...' : 'Buy with USDT')}
-                    </button>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
               {buyGoldMethod === 'usdt' && nowpayPayment && (
                 <div className="withdraw-info buygold-nowpay-box">
@@ -8384,68 +8421,52 @@ function App() {
               </button>
 
               <div className="fortune-buy-row">
-                <button
-                  type="button"
-                  className="fortune-buy-btn"
-                  disabled={fortunePayMethod === 'sol' ? fortuneBuyLoading !== null : fortuneNowpayLoading || fortuneNowpayStatusLoading}
-                  onClick={() => {
-                    if (fortunePayMethod === 'sol') {
-                      void buyFortuneSpins(1)
-                      return
-                    }
-                    void createNowpayFortunePayment(1)
-                  }}
-                >
-                  {fortunePayMethod === 'sol' ? (
-                    fortuneBuyLoading === 1 ? (
-                      'Processing...'
-                    ) : (
-                      <>
-                        <span className="fortune-buy-title">Buy 1 Spin</span>
-                        <span className="fortune-buy-price">
-                          <img className="icon-img tiny" src={iconSolana} alt="" />
-                          {FORTUNE_SPIN_PRICES[1]} SOL
-                        </span>
-                      </>
-                    )
-                  ) : (
-                    fortuneNowpayLoading ? 'Creating...' : <>
-                      <span className="fortune-buy-title">Buy 1 Spin</span>
-                      <span className="fortune-buy-price">{formatUsdt(FORTUNE_SPIN_PRICES_USDT[1])} USDT</span>
-                    </>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  className="fortune-buy-btn"
-                  disabled={fortunePayMethod === 'sol' ? fortuneBuyLoading !== null : fortuneNowpayLoading || fortuneNowpayStatusLoading}
-                  onClick={() => {
-                    if (fortunePayMethod === 'sol') {
-                      void buyFortuneSpins(10)
-                      return
-                    }
-                    void createNowpayFortunePayment(10)
-                  }}
-                >
-                  {fortunePayMethod === 'sol' ? (
-                    fortuneBuyLoading === 10 ? (
-                      'Processing...'
-                    ) : (
-                      <>
-                        <span className="fortune-buy-title">Buy 10 Spins</span>
-                        <span className="fortune-buy-price">
-                          <img className="icon-img tiny" src={iconSolana} alt="" />
-                          {FORTUNE_SPIN_PRICES[10]} SOL
-                        </span>
-                      </>
-                    )
-                  ) : (
-                    fortuneNowpayLoading ? 'Creating...' : <>
-                      <span className="fortune-buy-title">Buy 10 Spins</span>
-                      <span className="fortune-buy-price">{formatUsdt(FORTUNE_SPIN_PRICES_USDT[10])} USDT</span>
-                    </>
-                  )}
-                </button>
+                {fortunePayMethod === 'usdt' && <div className="withdraw-note">NOWPayments minimum: {NOWPAY_MIN_USDT} USDT.</div>}
+                {(fortunePayMethod === 'sol' ? FORTUNE_SPIN_PACKS_SOL : FORTUNE_SPIN_PACKS_USDT).map((spins) => {
+                  const isSolPack = fortunePayMethod === 'sol'
+                  const usdtPrice = isSolPack ? 0 : Number(FORTUNE_SPIN_PRICES_USDT[spins as FortuneUsdtPackId] ?? 0)
+                  const usdtUnavailable = !isSolPack && usdtPrice < NOWPAY_MIN_USDT
+                  return (
+                    <button
+                      key={`${fortunePayMethod}-${spins}`}
+                      type="button"
+                      className="fortune-buy-btn"
+                      disabled={isSolPack
+                        ? fortuneBuyLoading !== null
+                        : fortuneNowpayLoading || fortuneNowpayStatusLoading || usdtUnavailable}
+                      onClick={() => {
+                        if (isSolPack) {
+                          void buyFortuneSpins(spins as FortunePackId)
+                          return
+                        }
+                        void createNowpayFortunePayment(spins as FortuneUsdtPackId)
+                      }}
+                    >
+                      {isSolPack ? (
+                        fortuneBuyLoading === spins ? (
+                          'Processing...'
+                        ) : (
+                          <>
+                            <span className="fortune-buy-title">Buy {spins} {spins === 1 ? 'Spin' : 'Spins'}</span>
+                            <span className="fortune-buy-price">
+                              <img className="icon-img tiny" src={iconSolana} alt="" />
+                              {FORTUNE_SPIN_PRICES[spins as FortunePackId]} SOL
+                            </span>
+                          </>
+                        )
+                      ) : (
+                        usdtUnavailable
+                          ? 'Use SOL'
+                          : fortuneNowpayLoading
+                            ? 'Creating...'
+                            : <>
+                              <span className="fortune-buy-title">Buy {spins} Spins</span>
+                              <span className="fortune-buy-price">{formatUsdt(usdtPrice)} USDT</span>
+                            </>
+                      )}
+                    </button>
+                  )
+                })}
               </div>
               {fortunePayMethod === 'usdt' && fortuneNowpayPayment && (
                 <div className="withdraw-info buygold-nowpay-box">

@@ -63,20 +63,28 @@ const NOWPAYMENTS_ALLOWED_USDT_NETWORKS = [
   "usdtsol",
 ] as const;
 const NOWPAYMENTS_PENDING_REUSE_MS = 30 * 60 * 1000;
-const GOLD_PACKS = [
-  { id: "gold-50k", gold: 50000, lamports: Math.round(0.05 * SOL_LAMPORTS), usdt: 4.25 },
-  { id: "gold-100k", gold: 100000, lamports: Math.round(0.1 * SOL_LAMPORTS), usdt: 8.5 },
-  { id: "gold-500k", gold: 500000, lamports: Math.round(0.4 * SOL_LAMPORTS), usdt: 34 },
-  { id: "gold-1200k", gold: 1200000, lamports: Math.round(0.63 * SOL_LAMPORTS), usdt: 53.55 },
+const NOWPAYMENTS_MIN_USDT = 10;
+const GOLD_PACKS_SOL = [
+  { id: "gold-50k", gold: 50000, lamports: Math.round(0.05 * SOL_LAMPORTS) },
+  { id: "gold-100k", gold: 100000, lamports: Math.round(0.1 * SOL_LAMPORTS) },
+  { id: "gold-500k", gold: 500000, lamports: Math.round(0.4 * SOL_LAMPORTS) },
+  { id: "gold-1200k", gold: 1200000, lamports: Math.round(0.63 * SOL_LAMPORTS) },
 ] as const;
-const FORTUNE_SPIN_PACKS = [1, 10] as const;
-const FORTUNE_SPIN_PRICES_LAMPORTS: Record<(typeof FORTUNE_SPIN_PACKS)[number], number> = {
+const GOLD_PACKS_USDT = [
+  { id: "gold-150k", gold: 150000, usdt: 10 },
+  { id: "gold-500k", gold: 500000, usdt: 34 },
+  { id: "gold-1200k", gold: 1200000, usdt: 53.55 },
+] as const;
+const FORTUNE_SPIN_PACKS_SOL = [1, 10] as const;
+const FORTUNE_SPIN_PACKS_USDT = [20, 50] as const;
+const FORTUNE_SPIN_PACKS_CREDIT = [1, 10, 20, 50] as const;
+const FORTUNE_SPIN_PRICES_LAMPORTS: Record<(typeof FORTUNE_SPIN_PACKS_SOL)[number], number> = {
   1: Math.round(0.007 * SOL_LAMPORTS),
   10: Math.round(0.06 * SOL_LAMPORTS),
 };
-const FORTUNE_SPIN_PRICES_USDT: Record<(typeof FORTUNE_SPIN_PACKS)[number], number> = {
-  1: 0.595,
-  10: 5.1,
+const FORTUNE_SPIN_PRICES_USDT: Record<(typeof FORTUNE_SPIN_PACKS_USDT)[number], number> = {
+  20: 10,
+  50: 17,
 };
 const ENERGY_REGEN_SECONDS = 420;
 const PREMIUM_PLANS = [
@@ -423,10 +431,16 @@ const getPremiumPlan = (planIdRaw: unknown, daysRaw: unknown) => {
   return null;
 };
 
-const getGoldPack = (packIdRaw: unknown) => {
+const getGoldPackSol = (packIdRaw: unknown) => {
   const packId = String(packIdRaw ?? "").trim();
   if (!packId) return null;
-  return GOLD_PACKS.find((entry) => entry.id === packId) ?? null;
+  return GOLD_PACKS_SOL.find((entry) => entry.id === packId) ?? null;
+};
+
+const getGoldPackUsdt = (packIdRaw: unknown) => {
+  const packId = String(packIdRaw ?? "").trim();
+  if (!packId) return null;
+  return GOLD_PACKS_USDT.find((entry) => entry.id === packId) ?? null;
 };
 
 const isNowpayKind = (value: string): value is "buy_gold" | "starter_pack_buy" | "premium_buy" | "fortune_buy" =>
@@ -2270,7 +2284,7 @@ const creditNowpaymentIfNeeded = async (
     }
   } else if (locked.kind === "fortune_buy") {
     const spins = Math.max(0, asInt(reward.spins, 0));
-    if (!(FORTUNE_SPIN_PACKS as readonly number[]).includes(spins)) {
+    if (!(FORTUNE_SPIN_PACKS_CREDIT as readonly number[]).includes(spins)) {
       creditError = "Invalid fortune payment reward.";
     } else {
       const dayKey = todayKeyUtc(new Date());
@@ -2934,7 +2948,7 @@ serve(async (req) => {
 
   if (action === "fortune_buy") {
     const spins = asInt(body.spins, 0);
-    if (!(FORTUNE_SPIN_PACKS as readonly number[]).includes(spins)) {
+    if (!(FORTUNE_SPIN_PACKS_SOL as readonly number[]).includes(spins)) {
       return json({ ok: false, error: "Invalid fortune spin pack." });
     }
 
@@ -3226,7 +3240,7 @@ serve(async (req) => {
   }
 
   if (action === "buy_gold") {
-    const pack = getGoldPack(body.packId);
+    const pack = getGoldPackSol(body.packId);
     if (!pack) {
       return json({ ok: false, error: "Invalid gold package." });
     }
@@ -3334,7 +3348,7 @@ serve(async (req) => {
     const auditDetails: Record<string, unknown> = { kind: rawKind };
 
     if (rawKind === "buy_gold") {
-      const pack = getGoldPack(body.packId);
+      const pack = getGoldPackUsdt(body.packId);
       if (!pack) {
         return json({ ok: false, error: "Invalid gold package." });
       }
@@ -3372,7 +3386,7 @@ serve(async (req) => {
       auditDetails.days = plan.days;
     } else if (rawKind === "fortune_buy") {
       const spins = asInt(body.spins, 0);
-      if (!(FORTUNE_SPIN_PACKS as readonly number[]).includes(spins)) {
+      if (!(FORTUNE_SPIN_PACKS_USDT as readonly number[]).includes(spins)) {
         return json({ ok: false, error: "Invalid fortune spin pack." });
       }
       productRef = `fortune-${spins}`;
@@ -3384,6 +3398,12 @@ serve(async (req) => {
 
     if (!productRef || !Number.isFinite(usdtAmount) || usdtAmount <= 0) {
       return json({ ok: false, error: "Invalid payment configuration." });
+    }
+    if (usdtAmount < NOWPAYMENTS_MIN_USDT) {
+      return json({
+        ok: false,
+        error: `NOWPayments minimum is ${NOWPAYMENTS_MIN_USDT} USDT for this method. Use SOL or a larger package.`,
+      });
     }
 
     const existingPending = await loadRecentPendingNowpayPayment(supabase, auth.wallet, rawKind, productRef, now);
