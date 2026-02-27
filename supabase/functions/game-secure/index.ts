@@ -3424,7 +3424,8 @@ serve(async (req) => {
     let createResult = await createPayment(payCurrency);
     if (!createResult.ok) {
       const normalizedError = String(createResult.error ?? "").toLowerCase();
-      const isTooSmall = normalizedError.includes("amountto is too small");
+      const isTooSmall = normalizedError.includes("too small") &&
+        (normalizedError.includes("amountto") || normalizedError.includes("amount_to") || normalizedError.includes("amount"));
       if (isTooSmall && payCurrency !== "usdttrc20") {
         const retryResult = await createPayment("usdttrc20");
         if (retryResult.ok) {

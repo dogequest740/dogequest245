@@ -3574,17 +3574,43 @@ function App() {
       }
 
       if (!supabase || !emailAuthUser) return null
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
-      const accessToken = sessionData.session?.access_token
-      if (sessionError || !accessToken) {
+      const sb = supabase
+      const getFreshEmailAccessToken = async (forceRefresh = false) => {
+        if (forceRefresh) {
+          const { data: refreshedData, error: refreshError } = await sb.auth.refreshSession()
+          if (refreshError || !refreshedData.session?.access_token) return ''
+          return refreshedData.session.access_token
+        }
+        const { data: sessionData, error: sessionError } = await sb.auth.getSession()
+        if (sessionError || !sessionData.session?.access_token) return ''
+        const expiresAtMs = sessionData.session.expires_at ? sessionData.session.expires_at * 1000 : 0
+        if (expiresAtMs > 0 && expiresAtMs <= Date.now() + 30_000) {
+          const { data: refreshedData, error: refreshError } = await sb.auth.refreshSession()
+          if (refreshError || !refreshedData.session?.access_token) return ''
+          return refreshedData.session.access_token
+        }
+        return sessionData.session.access_token
+      }
+
+      let accessToken = await getFreshEmailAccessToken(false)
+      if (!accessToken) {
         handleSecurityAuthFailure('Email session expired. Sign in again.', interactive)
         return null
       }
 
-      const login = await callDungeonSecure(
+      let login = await callDungeonSecure(
         { action: 'email_login' },
         { authorization: `Bearer ${accessToken}` },
       )
+      if (!login.ok && String(login.error ?? '').toLowerCase().includes('invalid jwt')) {
+        accessToken = await getFreshEmailAccessToken(true)
+        if (accessToken) {
+          login = await callDungeonSecure(
+            { action: 'email_login' },
+            { authorization: `Bearer ${accessToken}` },
+          )
+        }
+      }
       if (!login.ok || !login.token) {
         handleSecurityAuthFailure(login.error || 'Email login failed.', interactive)
         return null
@@ -3614,6 +3640,51 @@ function App() {
     payload: Record<string, unknown> = {},
     interactive = true,
   ): Promise<DungeonSecureResponse> => {
+    if (usingEmailAuth && supabase) {
+      const sb = supabase
+      const getFreshEmailAccessToken = async (forceRefresh = false) => {
+        if (forceRefresh) {
+          const { data: refreshedData, error: refreshError } = await sb.auth.refreshSession()
+          if (refreshError || !refreshedData.session?.access_token) return ''
+          return refreshedData.session.access_token
+        }
+        const { data: sessionData, error: sessionError } = await sb.auth.getSession()
+        if (sessionError || !sessionData.session?.access_token) return ''
+        const expiresAtMs = sessionData.session.expires_at ? sessionData.session.expires_at * 1000 : 0
+        if (expiresAtMs > 0 && expiresAtMs <= Date.now() + 30_000) {
+          const { data: refreshedData, error: refreshError } = await sb.auth.refreshSession()
+          if (refreshError || !refreshedData.session?.access_token) return ''
+          return refreshedData.session.access_token
+        }
+        return sessionData.session.access_token
+      }
+
+      let accessToken = await getFreshEmailAccessToken(false)
+      if (!accessToken) {
+        return { ok: false, error: 'Sign-in required for dungeon actions.' }
+      }
+      let result = await callDungeonSecure(
+        { action, ...payload },
+        { authorization: `Bearer ${accessToken}` },
+      )
+      if (!result.ok && String(result.error ?? '').toLowerCase().includes('invalid jwt')) {
+        accessToken = await getFreshEmailAccessToken(true)
+        if (accessToken) {
+          result = await callDungeonSecure(
+            { action, ...payload },
+            { authorization: `Bearer ${accessToken}` },
+          )
+        }
+      }
+      if (!result.ok && result.error) {
+        handleSecurityAuthFailure(result.error, interactive)
+      }
+      if (result.ok && typeof result.savedAt === 'string' && result.savedAt.trim()) {
+        profileUpdatedAtRef.current = result.savedAt
+      }
+      return result
+    }
+
     let token = await ensureDungeonSession(interactive)
     if (!token) {
       return { ok: false, error: 'Sign-in required for dungeon actions.' }
@@ -3693,6 +3764,54 @@ function App() {
     payload: Record<string, unknown> = {},
     interactive = true,
   ): Promise<GameSecureResponse> => {
+    if (usingEmailAuth && supabase) {
+      const sb = supabase
+      const getFreshEmailAccessToken = async (forceRefresh = false) => {
+        if (forceRefresh) {
+          const { data: refreshedData, error: refreshError } = await sb.auth.refreshSession()
+          if (refreshError || !refreshedData.session?.access_token) return ''
+          return refreshedData.session.access_token
+        }
+        const { data: sessionData, error: sessionError } = await sb.auth.getSession()
+        if (sessionError || !sessionData.session?.access_token) return ''
+        const expiresAtMs = sessionData.session.expires_at ? sessionData.session.expires_at * 1000 : 0
+        if (expiresAtMs > 0 && expiresAtMs <= Date.now() + 30_000) {
+          const { data: refreshedData, error: refreshError } = await sb.auth.refreshSession()
+          if (refreshError || !refreshedData.session?.access_token) return ''
+          return refreshedData.session.access_token
+        }
+        return sessionData.session.access_token
+      }
+
+      let accessToken = await getFreshEmailAccessToken(false)
+      if (!accessToken) {
+        return { ok: false, error: 'Sign-in required for secure actions.' }
+      }
+      let result = await callGameSecure(
+        { action, ...payload },
+        { authorization: `Bearer ${accessToken}` },
+      )
+      if (!result.ok && String(result.error ?? '').toLowerCase().includes('invalid jwt')) {
+        accessToken = await getFreshEmailAccessToken(true)
+        if (accessToken) {
+          result = await callGameSecure(
+            { action, ...payload },
+            { authorization: `Bearer ${accessToken}` },
+          )
+        }
+      }
+      if (!result.ok && result.error) {
+        handleSecurityAuthFailure(result.error, interactive)
+      }
+      if (result.ok && typeof result.savedAt === 'string' && result.savedAt.trim()) {
+        profileUpdatedAtRef.current = result.savedAt
+      }
+      if (result.ok && result.profile && typeof result.profile.updated_at === 'string' && result.profile.updated_at.trim()) {
+        profileUpdatedAtRef.current = result.profile.updated_at
+      }
+      return result
+    }
+
     let token = await ensureDungeonSession(interactive)
     if (!token) {
       return { ok: false, error: 'Sign-in required for secure actions.' }
