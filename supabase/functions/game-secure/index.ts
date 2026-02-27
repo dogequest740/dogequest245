@@ -62,8 +62,10 @@ const NOWPAYMENTS_ALLOWED_USDT_NETWORKS = [
   "usdtmatic",
   "usdtsol",
 ] as const;
+const NOWPAYMENTS_SMALL_USDT_PREFERRED_NETWORKS = ["usdtmatic", "usdterc20"] as const;
 const NOWPAYMENTS_PENDING_REUSE_MS = 30 * 60 * 1000;
 const NOWPAYMENTS_MIN_USDT = 10;
+const NOWPAYMENTS_SMALL_USDT_FORCE_LIMIT = 20;
 const GOLD_PACKS_SOL = [
   { id: "gold-50k", gold: 50000, lamports: Math.round(0.05 * SOL_LAMPORTS) },
   { id: "gold-100k", gold: 100000, lamports: Math.round(0.1 * SOL_LAMPORTS) },
@@ -2125,6 +2127,7 @@ const loadRecentPendingNowpayPayment = async (
   wallet: string,
   kind: string,
   productRef: string,
+  payCurrency: string,
   now: Date,
 ) => {
   const { data, error } = await supabase
@@ -2134,6 +2137,7 @@ const loadRecentPendingNowpayPayment = async (
     .eq("provider", "nowpayments")
     .eq("kind", kind)
     .eq("product_ref", productRef)
+    .eq("pay_currency", payCurrency)
     .order("created_at", { ascending: false })
     .limit(8);
 
@@ -3405,8 +3409,24 @@ serve(async (req) => {
         error: `NOWPayments minimum is ${NOWPAYMENTS_MIN_USDT} USDT for this method. Use SOL or a larger package.`,
       });
     }
+    const isSmallUsdtPayment = usdtAmount <= NOWPAYMENTS_SMALL_USDT_FORCE_LIMIT;
+    if (
+      isSmallUsdtPayment &&
+      !(NOWPAYMENTS_SMALL_USDT_PREFERRED_NETWORKS as readonly string[]).includes(payCurrency)
+    ) {
+      auditDetails.payCurrencyForcedFrom = payCurrency;
+      payCurrency = NOWPAYMENTS_SMALL_USDT_PREFERRED_NETWORKS[0];
+      auditDetails.payCurrencyForcedTo = payCurrency;
+    }
 
-    const existingPending = await loadRecentPendingNowpayPayment(supabase, auth.wallet, rawKind, productRef, now);
+    const existingPending = await loadRecentPendingNowpayPayment(
+      supabase,
+      auth.wallet,
+      rawKind,
+      productRef,
+      payCurrency,
+      now,
+    );
     if (existingPending) {
       return json({
         ok: true,
@@ -3446,16 +3466,23 @@ serve(async (req) => {
       const normalizedError = String(createResult.error ?? "").toLowerCase();
       const isTooSmall = normalizedError.includes("too small") &&
         (normalizedError.includes("amountto") || normalizedError.includes("amount_to") || normalizedError.includes("amount"));
-      if (isTooSmall && payCurrency !== "usdttrc20") {
-        const retryResult = await createPayment("usdttrc20");
-        if (retryResult.ok) {
+      const fallbackNetworks = (NOWPAYMENTS_SMALL_USDT_PREFERRED_NETWORKS as readonly string[]).filter((network) =>
+        network !== payCurrency
+      );
+      if (isSmallUsdtPayment || isTooSmall) {
+        for (const fallbackNetwork of fallbackNetworks) {
+          const retryResult = await createPayment(fallbackNetwork);
+          if (!retryResult.ok) continue;
           auditDetails.payCurrencyFallbackFrom = payCurrency;
-          payCurrency = "usdttrc20";
+          payCurrency = fallbackNetwork;
+          auditDetails.payCurrencyFallbackTo = payCurrency;
           createResult = retryResult;
-        } else {
+          break;
+        }
+        if (!createResult.ok && isTooSmall) {
           return json({
             ok: false,
-            error: `${createResult.error}. Try USDT TRC20 network for small payments.`,
+            error: `${createResult.error}. Try USDT Polygon or USDT ERC20 network for small payments.`,
           });
         }
       }
