@@ -3608,8 +3608,11 @@ function App() {
       return { ok: false, error: 'Sign-in required for dungeon actions.' }
     }
     const secureHeaders: Record<string, string> = {}
-    if (token) secureHeaders['x-session-token'] = token
-    if (emailAccessToken) secureHeaders.authorization = `Bearer ${emailAccessToken}`
+    if (token) {
+      secureHeaders['x-session-token'] = token
+    } else if (emailAccessToken) {
+      secureHeaders.authorization = `Bearer ${emailAccessToken}`
+    }
     let result = await callDungeonSecure(
       { action, ...payload },
       secureHeaders,
@@ -3621,8 +3624,11 @@ function App() {
         if (refreshed || emailAccessToken) {
           token = refreshed
           const retryHeaders: Record<string, string> = {}
-          if (token) retryHeaders['x-session-token'] = token
-          if (emailAccessToken) retryHeaders.authorization = `Bearer ${emailAccessToken}`
+          if (token) {
+            retryHeaders['x-session-token'] = token
+          } else if (emailAccessToken) {
+            retryHeaders.authorization = `Bearer ${emailAccessToken}`
+          }
           result = await callDungeonSecure(
             { action, ...payload },
             retryHeaders,
@@ -3673,8 +3679,11 @@ function App() {
       return { ok: false, error: 'Sign-in required for secure actions.' }
     }
     const secureHeaders: Record<string, string> = {}
-    if (token) secureHeaders['x-session-token'] = token
-    if (emailAccessToken) secureHeaders.authorization = `Bearer ${emailAccessToken}`
+    if (token) {
+      secureHeaders['x-session-token'] = token
+    } else if (emailAccessToken) {
+      secureHeaders.authorization = `Bearer ${emailAccessToken}`
+    }
     let result = await callGameSecure(
       { action, ...payload },
       secureHeaders,
@@ -3686,8 +3695,11 @@ function App() {
         if (refreshed || emailAccessToken) {
           token = refreshed
           const retryHeaders: Record<string, string> = {}
-          if (token) retryHeaders['x-session-token'] = token
-          if (emailAccessToken) retryHeaders.authorization = `Bearer ${emailAccessToken}`
+          if (token) {
+            retryHeaders['x-session-token'] = token
+          } else if (emailAccessToken) {
+            retryHeaders.authorization = `Bearer ${emailAccessToken}`
+          }
           result = await callGameSecure(
             { action, ...payload },
             retryHeaders,
