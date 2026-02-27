@@ -63,6 +63,14 @@ const decodeBase64 = (value: string) => {
   }
 };
 
+const getBearerToken = (req: Request) => {
+  const header = req.headers.get("authorization") ?? "";
+  if (!header) return "";
+  const [scheme, ...rest] = header.split(" ");
+  if (!scheme || scheme.toLowerCase() !== "bearer") return "";
+  return rest.join(" ").trim();
+};
+
 const auditEvent = async (
   supabase: ReturnType<typeof createClient>,
   wallet: string,
@@ -89,6 +97,38 @@ const getBlockedWallet = async (
   return {
     wallet: String(data.wallet),
     reason: String(data.reason ?? "Cheating"),
+  };
+};
+
+const getEmailIdentity = async (
+  supabase: ReturnType<typeof createClient>,
+  req: Request,
+) => {
+  const accessToken = getBearerToken(req);
+  if (!accessToken) {
+    return { ok: false as const, error: "Missing auth token." };
+  }
+
+  const { data, error } = await supabase.auth.getUser(accessToken);
+  if (error || !data?.user) {
+    return { ok: false as const, error: "Invalid auth token." };
+  }
+
+  const user = data.user as {
+    id: string;
+    email?: string | null;
+    email_confirmed_at?: string | null;
+    confirmed_at?: string | null;
+  };
+  const emailConfirmed = Boolean(user.email_confirmed_at ?? user.confirmed_at);
+  if (!emailConfirmed) {
+    return { ok: false as const, error: "Email is not confirmed. Check your inbox." };
+  }
+
+  return {
+    ok: true as const,
+    wallet: `email:${user.id}`,
+    email: String(user.email ?? ""),
   };
 };
 
@@ -509,6 +549,52 @@ serve(async (req) => {
   }
 
   const action = String(body.action ?? "");
+
+  if (action === "email_login") {
+    const identity = await getEmailIdentity(supabase, req);
+    if (!identity.ok) {
+      return json({ ok: false, error: identity.error });
+    }
+
+    const blocked = await getBlockedWallet(supabase, identity.wallet);
+    if (blocked) {
+      await supabase.from("wallet_sessions").delete().eq("wallet", identity.wallet);
+      await auditEvent(supabase, identity.wallet, "blocked_login_attempt", {
+        reason: blocked.reason,
+        action: "email_login",
+      });
+      return json({ ok: false, error: BLOCKED_ERROR_MESSAGE });
+    }
+
+    await supabase
+      .from("wallet_sessions")
+      .delete()
+      .eq("wallet", identity.wallet)
+      .lte("expires_at", now.toISOString());
+
+    const token = randomToken(32);
+    const expiresAt = new Date(now.getTime() + SESSION_TTL_SECONDS * 1000).toISOString();
+    const { error: sessionError } = await supabase.from("wallet_sessions").insert({
+      token,
+      wallet: identity.wallet,
+      expires_at: expiresAt,
+      updated_at: now.toISOString(),
+    });
+    if (sessionError) return json({ ok: false, error: "Failed to create session." });
+
+    await auditEvent(supabase, identity.wallet, "email_login_success", {
+      email: identity.email,
+    });
+
+    return json({
+      ok: true,
+      token,
+      expiresAt,
+      wallet: identity.wallet,
+      authType: "email",
+      email: identity.email,
+    });
+  }
 
   if (action === "challenge") {
     const wallet = String(body.wallet ?? "");
