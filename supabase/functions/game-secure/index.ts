@@ -4080,6 +4080,9 @@ serve(async (req) => {
     }
 
     const limit = clampInt(body.limit, 20, 1000);
+    const { count: totalProfilesCount } = await supabase
+      .from("profiles")
+      .select("wallet", { count: "exact", head: true });
     const { data, error } = await supabase
       .from("profiles")
       .select("wallet, state, updated_at")
@@ -4103,7 +4106,25 @@ serve(async (req) => {
     return json({
       ok: true,
       profiles,
+      profilesTotal: Math.max(0, asInt(totalProfilesCount, profiles.length)),
     });
+  }
+
+  if (action === "admin_withdrawals") {
+    const adminWallets = toWalletList(Deno.env.get("ADMIN_WALLETS"));
+    if (!adminWallets.includes(auth.wallet)) {
+      return json({ ok: false, error: "Admin access required." });
+    }
+
+    const limit = clampInt(body.limit, 20, 1000);
+    const { data, error } = await supabase
+      .from("withdrawals")
+      .select("id, wallet, name, crystals, sol_amount, status, created_at")
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (error) return json({ ok: false, error: "Failed to load withdrawals." });
+    return json({ ok: true, withdrawals: data ?? [] });
   }
 
   if (action === "admin_mark_paid") {

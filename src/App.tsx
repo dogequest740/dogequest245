@@ -405,6 +405,7 @@ type GameSecureResponse = {
     updated_at?: string
   } | null
   profiles?: SecureProfileRow[]
+  profilesTotal?: number
   energy?: number
   energyTimer?: number
   remainingCrystals?: number
@@ -4655,7 +4656,7 @@ function App() {
     setAdminLoading(true)
     setAdminError('')
     try {
-      const profilesResult = await callGameSecureAuthed('admin_profiles', { limit: 250 }, true)
+      const profilesResult = await callGameSecureAuthed('admin_profiles', { limit: 1000 }, true)
       if (!profilesResult.ok) {
         setAdminError(profilesResult.error || 'Failed to load players.')
         return
@@ -4666,13 +4667,9 @@ function App() {
       const eventLimitRaw = Math.floor(Number(adminEventLimit))
       const eventLimit = Number.isFinite(eventLimitRaw) ? Math.min(1000, Math.max(20, eventLimitRaw)) : 300
 
-      const { data: withdrawalsData, error: withdrawalsError } = await supabase
-        .from('withdrawals')
-        .select('id, wallet, name, crystals, sol_amount, status, created_at')
-        .order('created_at', { ascending: false })
-        .limit(200)
-      if (withdrawalsError) {
-        warnings.push('Failed to load withdrawals.')
+      const withdrawalsResult = await callGameSecureAuthed('admin_withdrawals', { limit: 500 }, true)
+      if (!withdrawalsResult.ok) {
+        warnings.push(withdrawalsResult.error || 'Failed to load withdrawals.')
       }
 
       const eventsResult = await callGameSecureAuthed(
@@ -4763,7 +4760,10 @@ function App() {
         }
       })
 
-      const totalPlayers = players.length
+      const totalPlayers = Math.max(
+        players.length,
+        Math.max(0, Math.floor(Number(profilesResult.profilesTotal ?? 0))),
+      )
       const totals = players.reduce(
         (acc, player) => {
           acc.level += player.level
@@ -4782,7 +4782,7 @@ function App() {
         { level: 0, tier: 0, gold: 0, crystals: 0, kills: 0, dungeons: 0, active: 0, maxLevel: 0 },
       )
 
-      const withdrawals: WithdrawalRow[] = ((withdrawalsError ? [] : withdrawalsData) ?? []).map((row) => ({
+      const withdrawals: WithdrawalRow[] = ((withdrawalsResult.ok ? withdrawalsResult.withdrawals : []) ?? []).map((row) => ({
         id: String(row.id),
         wallet: row.wallet as string,
         name: (row.name as string) || 'Unknown',
