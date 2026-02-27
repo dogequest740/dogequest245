@@ -3211,18 +3211,22 @@ function App() {
   const [buyGoldMethod, setBuyGoldMethod] = useState<BuyGoldMethod>('sol')
   const [nowpayNetwork, setNowpayNetwork] = useState<NowpayNetworkId>(NOWPAY_USDT_NETWORKS[0].id)
   const [nowpayPayment, setNowpayPayment] = useState<NowpayPayment | null>(null)
+  const [showNowpayGoldModal, setShowNowpayGoldModal] = useState(false)
   const [nowpayLoading, setNowpayLoading] = useState(false)
   const [nowpayStatusLoading, setNowpayStatusLoading] = useState(false)
   const [starterPayMethod, setStarterPayMethod] = useState<BuyGoldMethod>('sol')
   const [starterNowpayPayment, setStarterNowpayPayment] = useState<NowpayPayment | null>(null)
+  const [showNowpayStarterModal, setShowNowpayStarterModal] = useState(false)
   const [starterNowpayLoading, setStarterNowpayLoading] = useState(false)
   const [starterNowpayStatusLoading, setStarterNowpayStatusLoading] = useState(false)
   const [premiumPayMethod, setPremiumPayMethod] = useState<BuyGoldMethod>('sol')
   const [premiumNowpayPayment, setPremiumNowpayPayment] = useState<NowpayPayment | null>(null)
+  const [showNowpayPremiumModal, setShowNowpayPremiumModal] = useState(false)
   const [premiumNowpayLoading, setPremiumNowpayLoading] = useState(false)
   const [premiumNowpayStatusLoading, setPremiumNowpayStatusLoading] = useState(false)
   const [fortunePayMethod, setFortunePayMethod] = useState<BuyGoldMethod>('sol')
   const [fortuneNowpayPayment, setFortuneNowpayPayment] = useState<NowpayPayment | null>(null)
+  const [showNowpayFortuneModal, setShowNowpayFortuneModal] = useState(false)
   const [fortuneNowpayLoading, setFortuneNowpayLoading] = useState(false)
   const [fortuneNowpayStatusLoading, setFortuneNowpayStatusLoading] = useState(false)
   const [starterPackError, setStarterPackError] = useState('')
@@ -4790,6 +4794,7 @@ function App() {
       setNowpayLoading(false)
       setNowpayStatusLoading(false)
       setNowpayPayment(null)
+      setShowNowpayGoldModal(false)
     }
     if (activePanel !== 'starterpack') {
       setStarterPackError('')
@@ -4797,6 +4802,7 @@ function App() {
       setStarterNowpayLoading(false)
       setStarterNowpayStatusLoading(false)
       setStarterNowpayPayment(null)
+      setShowNowpayStarterModal(false)
     }
     if (activePanel !== 'shop') {
       setDungeonKeyBuyLoading(false)
@@ -4809,6 +4815,7 @@ function App() {
       setPremiumNowpayLoading(false)
       setPremiumNowpayStatusLoading(false)
       setPremiumNowpayPayment(null)
+      setShowNowpayPremiumModal(false)
     }
     if (activePanel !== 'stake') {
       setStakeError('')
@@ -4831,6 +4838,7 @@ function App() {
       setFortuneNowpayLoading(false)
       setFortuneNowpayStatusLoading(false)
       setFortuneNowpayPayment(null)
+      setShowNowpayFortuneModal(false)
     }
   }, [activePanel])
 
@@ -4910,6 +4918,7 @@ function App() {
     if (activePanel !== 'buygold') return
     if (!accountIdentity) {
       setNowpayPayment(null)
+      setShowNowpayGoldModal(false)
       return
     }
     void loadNowpayLatest('buy_gold').then((payment) => setNowpayPayment(payment))
@@ -4931,6 +4940,7 @@ function App() {
     if (activePanel !== 'starterpack') return
     if (!accountIdentity) {
       setStarterNowpayPayment(null)
+      setShowNowpayStarterModal(false)
       return
     }
     void loadNowpayLatest('starter_pack_buy').then((payment) => setStarterNowpayPayment(payment))
@@ -4952,6 +4962,7 @@ function App() {
     if (activePanel !== 'premium') return
     if (!accountIdentity) {
       setPremiumNowpayPayment(null)
+      setShowNowpayPremiumModal(false)
       return
     }
     void loadNowpayLatest('premium_buy').then((payment) => setPremiumNowpayPayment(payment))
@@ -4994,6 +5005,7 @@ function App() {
       setFortuneFreeSpinAvailable(false)
       setFortunePaidSpins(0)
       setFortuneNowpayPayment(null)
+      setShowNowpayFortuneModal(false)
       return
     }
     void loadFortuneStatus(true)
@@ -5639,7 +5651,7 @@ function App() {
       setBuyGoldError(`NOWPayments minimum is ${NOWPAY_MIN_USDT} USDT. Use SOL or a larger package.`)
       return null
     }
-    return createNowpayPayment(
+    const payment = await createNowpayPayment(
       'buy_gold',
       { packId },
       setNowpayLoading,
@@ -5647,6 +5659,10 @@ function App() {
       setNowpayPayment,
       'Failed to create USDT payment.',
     )
+    if (payment) {
+      setShowNowpayGoldModal(true)
+    }
+    return payment
   }
 
   const checkNowpayGoldPayment = async (providerPaymentIdRaw?: string, interactive = true) =>
@@ -5658,8 +5674,8 @@ function App() {
       interactive,
     )
 
-  const createNowpayStarterPayment = async () =>
-    createNowpayPayment(
+  const createNowpayStarterPayment = async () => {
+    const payment = await createNowpayPayment(
       'starter_pack_buy',
       {},
       setStarterNowpayLoading,
@@ -5667,6 +5683,11 @@ function App() {
       setStarterNowpayPayment,
       'Failed to create USDT payment.',
     )
+    if (payment) {
+      setShowNowpayStarterModal(true)
+    }
+    return payment
+  }
 
   const checkNowpayStarterPayment = async (providerPaymentIdRaw?: string, interactive = true) =>
     checkNowpayPayment(
@@ -5677,8 +5698,8 @@ function App() {
       interactive,
     )
 
-  const createNowpayPremiumPayment = async (planId: PremiumPlanId, days: number) =>
-    createNowpayPayment(
+  const createNowpayPremiumPayment = async (planId: PremiumPlanId, days: number) => {
+    const payment = await createNowpayPayment(
       'premium_buy',
       { planId, days },
       setPremiumNowpayLoading,
@@ -5686,6 +5707,11 @@ function App() {
       setPremiumNowpayPayment,
       'Failed to create USDT payment.',
     )
+    if (payment) {
+      setShowNowpayPremiumModal(true)
+    }
+    return payment
+  }
 
   const checkNowpayPremiumPayment = async (providerPaymentIdRaw?: string, interactive = true) =>
     checkNowpayPayment(
@@ -5702,7 +5728,7 @@ function App() {
       setFortuneError(`NOWPayments minimum is ${NOWPAY_MIN_USDT} USDT. Use SOL for this pack.`)
       return null
     }
-    return createNowpayPayment(
+    const payment = await createNowpayPayment(
       'fortune_buy',
       { spins },
       setFortuneNowpayLoading,
@@ -5710,6 +5736,10 @@ function App() {
       setFortuneNowpayPayment,
       'Failed to create USDT payment.',
     )
+    if (payment) {
+      setShowNowpayFortuneModal(true)
+    }
+    return payment
   }
 
   const checkNowpayFortunePayment = async (providerPaymentIdRaw?: string, interactive = true) =>
@@ -7882,12 +7912,12 @@ function App() {
                   )
                 })}
               </div>
-              {buyGoldMethod === 'usdt' && nowpayPayment && (
-                <div className="modal-backdrop modal-backdrop-top nowpay-modal-backdrop" onClick={() => setNowpayPayment(null)}>
+              {buyGoldMethod === 'usdt' && showNowpayGoldModal && nowpayPayment && (
+                <div className="modal-backdrop modal-backdrop-top nowpay-modal-backdrop" onClick={() => setShowNowpayGoldModal(false)}>
                   <div className="modal nowpay-modal" onClick={(event) => event.stopPropagation()}>
                     <div className="modal-header">
                       <h3>USDT Payment</h3>
-                      <button type="button" className="ghost" onClick={() => setNowpayPayment(null)}>
+                      <button type="button" className="ghost" onClick={() => setShowNowpayGoldModal(false)}>
                         Close
                       </button>
                     </div>
@@ -8046,12 +8076,12 @@ function App() {
                   ? (starterPackLoading ? 'Processing...' : 'Buy Starter Pack (SOL)')
                   : (starterNowpayLoading ? 'Creating...' : 'Buy Starter Pack (USDT)')}
               </button>
-              {starterPayMethod === 'usdt' && starterNowpayPayment && (
-                <div className="modal-backdrop modal-backdrop-top nowpay-modal-backdrop" onClick={() => setStarterNowpayPayment(null)}>
+              {starterPayMethod === 'usdt' && showNowpayStarterModal && starterNowpayPayment && (
+                <div className="modal-backdrop modal-backdrop-top nowpay-modal-backdrop" onClick={() => setShowNowpayStarterModal(false)}>
                   <div className="modal nowpay-modal" onClick={(event) => event.stopPropagation()}>
                     <div className="modal-header">
                       <h3>USDT Payment</h3>
-                      <button type="button" className="ghost" onClick={() => setStarterNowpayPayment(null)}>
+                      <button type="button" className="ghost" onClick={() => setShowNowpayStarterModal(false)}>
                         Close
                       </button>
                     </div>
@@ -8202,12 +8232,12 @@ function App() {
                   </div>
                 ))}
               </div>
-              {premiumPayMethod === 'usdt' && premiumNowpayPayment && (
-                <div className="modal-backdrop modal-backdrop-top nowpay-modal-backdrop" onClick={() => setPremiumNowpayPayment(null)}>
+              {premiumPayMethod === 'usdt' && showNowpayPremiumModal && premiumNowpayPayment && (
+                <div className="modal-backdrop modal-backdrop-top nowpay-modal-backdrop" onClick={() => setShowNowpayPremiumModal(false)}>
                   <div className="modal nowpay-modal" onClick={(event) => event.stopPropagation()}>
                     <div className="modal-header">
                       <h3>USDT Payment</h3>
-                      <button type="button" className="ghost" onClick={() => setPremiumNowpayPayment(null)}>
+                      <button type="button" className="ghost" onClick={() => setShowNowpayPremiumModal(false)}>
                         Close
                       </button>
                     </div>
@@ -8541,12 +8571,12 @@ function App() {
                   )
                 })}
               </div>
-              {fortunePayMethod === 'usdt' && fortuneNowpayPayment && (
-                <div className="modal-backdrop modal-backdrop-top nowpay-modal-backdrop" onClick={() => setFortuneNowpayPayment(null)}>
+              {fortunePayMethod === 'usdt' && showNowpayFortuneModal && fortuneNowpayPayment && (
+                <div className="modal-backdrop modal-backdrop-top nowpay-modal-backdrop" onClick={() => setShowNowpayFortuneModal(false)}>
                   <div className="modal nowpay-modal" onClick={(event) => event.stopPropagation()}>
                     <div className="modal-header">
                       <h3>USDT Payment</h3>
-                      <button type="button" className="ghost" onClick={() => setFortuneNowpayPayment(null)}>
+                      <button type="button" className="ghost" onClick={() => setShowNowpayFortuneModal(false)}>
                         Close
                       </button>
                     </div>
