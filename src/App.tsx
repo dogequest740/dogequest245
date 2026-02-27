@@ -3403,13 +3403,20 @@ function App() {
     headers?: Record<string, string>,
   ): Promise<GameSecureResponse> => {
     if (!supabase) return { ok: false, error: 'Supabase not configured.' }
-    const { data, error } = await supabase.functions.invoke('game-secure', {
+    const sb = supabase
+    const { data, error } = await sb.functions.invoke('game-secure', {
       body: payload,
       headers,
     })
     if (error) {
       console.warn('Game secure call failed', error)
-      return { ok: false, error: 'Secure service unavailable.' }
+      const errorText =
+        error instanceof Error
+          ? error.message
+          : typeof (error as { message?: unknown })?.message === 'string'
+            ? String((error as { message: string }).message)
+            : ''
+      return { ok: false, error: errorText ? `Secure service unavailable. ${errorText}` : 'Secure service unavailable.' }
     }
     return (data as GameSecureResponse | null) ?? { ok: false, error: 'Empty secure service response.' }
   }
@@ -3450,6 +3457,41 @@ function App() {
       profileUpdatedAtRef.current = result.profile.updated_at
     }
     return result
+  }
+
+  const isPaymentCreditRetryableError = (errorText: string) => {
+    const normalized = errorText.toLowerCase()
+    return (
+      normalized.includes('payment transaction not found yet') ||
+      normalized.includes('secure service unavailable') ||
+      normalized.includes('empty secure service response') ||
+      normalized.includes('failed to register fortune spin purchase') ||
+      normalized.includes('changed concurrently') ||
+      normalized.includes('retry')
+    )
+  }
+
+  const finalizePaymentCredit = async (
+    action: string,
+    payload: Record<string, unknown>,
+    attempts = 7,
+    baseDelayMs = 1200,
+  ): Promise<GameSecureResponse> => {
+    const totalAttempts = Math.max(1, Math.floor(attempts))
+    let delayMs = Math.max(400, Math.floor(baseDelayMs))
+    let lastResult: GameSecureResponse = { ok: false, error: 'Payment credit failed.' }
+    for (let attempt = 0; attempt < totalAttempts; attempt += 1) {
+      const result = await callGameSecureAuthed(action, payload, true)
+      if (result.ok) return result
+      lastResult = result
+      const errorText = String(result.error ?? '')
+      if (attempt >= totalAttempts - 1 || !isPaymentCreditRetryableError(errorText)) {
+        return result
+      }
+      await new Promise<void>((resolve) => window.setTimeout(resolve, delayMs))
+      delayMs = Math.min(5200, Math.round(delayMs * 1.45))
+    }
+    return lastResult
   }
 
   const refreshOfflineEnergyFromServer = async (interactive = false) => {
@@ -3706,13 +3748,17 @@ function App() {
       const signature = await sendTransaction(tx, connection)
       await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
 
-      const result = await callGameSecureAuthed(
+      setFortuneError('Payment confirmed. Finalizing spin credit...')
+      const result = await finalizePaymentCredit(
         'fortune_buy',
         { spins, txSignature: signature },
-        true,
+        7,
+        1200,
       )
       if (!result.ok) {
-        setFortuneError(`Payment sent (${signature.slice(0, 8)}...), but spin credit failed. Contact support.`)
+        setFortuneError(
+          `Payment sent (${signature.slice(0, 8)}...), but spin credit failed: ${result.error || 'unknown error'}.`,
+        )
         setFortuneBuyLoading(null)
         return
       }
@@ -4970,10 +5016,11 @@ function App() {
       )
       const signature = await sendTransaction(tx, connection)
       await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
-      const result = await callGameSecureAuthed('buy_gold', { packId: pack.id, txSignature: signature }, true)
+      setBuyGoldError('Payment confirmed. Finalizing gold credit...')
+      const result = await finalizePaymentCredit('buy_gold', { packId: pack.id, txSignature: signature }, 7, 1200)
       if (!result.ok) {
         setBuyGoldError(
-          `Payment sent (${signature.slice(0, 8)}...), but gold credit failed: ${result.error || 'unknown error'}. Contact support.`,
+          `Payment sent (${signature.slice(0, 8)}...), but gold credit failed: ${result.error || 'unknown error'}.`,
         )
         return
       }
@@ -5035,14 +5082,16 @@ function App() {
       const signature = await sendTransaction(tx, connection)
       await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
 
-      const result = await callGameSecureAuthed(
+      setStarterPackError('Payment confirmed. Finalizing Starter Pack...')
+      const result = await finalizePaymentCredit(
         'starter_pack_buy',
         { txSignature: signature },
-        true,
+        7,
+        1200,
       )
       if (!result.ok) {
         setStarterPackError(
-          `Payment sent (${signature.slice(0, 8)}...), but Starter Pack credit failed: ${result.error || 'unknown error'}. Contact support.`,
+          `Payment sent (${signature.slice(0, 8)}...), but Starter Pack credit failed: ${result.error || 'unknown error'}.`,
         )
         setStarterPackLoading(false)
         return
@@ -5112,14 +5161,16 @@ function App() {
       const signature = await sendTransaction(tx, connection)
       await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
 
-      const result = await callGameSecureAuthed(
+      setPremiumError('Payment confirmed. Finalizing Premium activation...')
+      const result = await finalizePaymentCredit(
         'premium_buy',
         { planId: plan.id, days: plan.days, txSignature: signature },
-        true,
+        7,
+        1200,
       )
       if (!result.ok) {
         setPremiumError(
-          `Payment sent (${signature.slice(0, 8)}...), but Premium activation failed: ${result.error || 'unknown error'}. Contact support.`,
+          `Payment sent (${signature.slice(0, 8)}...), but Premium activation failed: ${result.error || 'unknown error'}.`,
         )
         setPremiumLoading(null)
         return

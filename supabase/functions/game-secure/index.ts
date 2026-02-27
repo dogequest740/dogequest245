@@ -43,6 +43,9 @@ const STARTER_PACK_ITEMS: Array<{ type: ConsumableType; qty: number }> = [
 ];
 const PREMIUM_PAYMENT_WALLET = "9a5GXRjX6HKh9Yjc9d7gp9RFmuRvMQAcV1VJ9WV7LU8c";
 const PREMIUM_TX_MAX_AGE_SECONDS = 2 * 60 * 60;
+const PAYMENT_TX_LOOKUP_ATTEMPTS = 22;
+const PAYMENT_TX_LOOKUP_BASE_DELAY_MS = 1200;
+const PROFILE_UPDATE_RETRY_ATTEMPTS = 10;
 const BLOCKED_ERROR_MESSAGE = "You have been banned for cheating.";
 const GOLD_PACKS = [
   { id: "gold-50k", gold: 50000, lamports: Math.round(0.05 * SOL_LAMPORTS) },
@@ -334,6 +337,7 @@ const isConsumableType = (value: string): value is ConsumableType =>
   Object.prototype.hasOwnProperty.call(CONSUMABLE_DEFS, value);
 const isVillageBuildingId = (value: string): value is VillageBuildingId =>
   value === "castle" || value === "mine" || value === "lab" || value === "storage";
+const waitMs = (value: number) => new Promise((resolve) => setTimeout(resolve, value));
 
 let solanaConnection: Connection | null = null;
 const getSolanaConnection = () => {
@@ -371,6 +375,18 @@ const wasTxAlreadyProcessed = async (
   kinds: readonly string[],
   txSignature: string,
 ) => {
+  const signature = String(txSignature ?? "").trim();
+  if (!signature) return false;
+  const { data: exactMatch } = await supabase
+    .from("security_events")
+    .select("id")
+    .eq("wallet", wallet)
+    .in("kind", [...kinds])
+    .contains("details", { txSignature: signature })
+    .limit(1)
+    .maybeSingle();
+  if (exactMatch) return true;
+
   const { data, error } = await supabase
     .from("security_events")
     .select("details")
@@ -382,7 +398,7 @@ const wasTxAlreadyProcessed = async (
   if (error || !data) return false;
   for (const row of data as Array<{ details?: Record<string, unknown> }>) {
     const details = row.details && typeof row.details === "object" ? row.details : {};
-    if (String(details?.txSignature ?? "") === txSignature) {
+    if (String(details?.txSignature ?? "") === signature) {
       return true;
     }
   }
@@ -423,19 +439,21 @@ const verifySolTransferTx = async (
 ) => {
   const connection = getSolanaConnection();
   let tx = null as Awaited<ReturnType<typeof connection.getParsedTransaction>>;
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    tx = await connection.getParsedTransaction(txSignature, {
-      commitment: "confirmed",
-      maxSupportedTransactionVersion: 0,
-    });
-    if (!tx) {
-      tx = await connection.getParsedTransaction(txSignature, {
-        commitment: "finalized",
-        maxSupportedTransactionVersion: 0,
-      });
+  for (let attempt = 0; attempt < PAYMENT_TX_LOOKUP_ATTEMPTS; attempt += 1) {
+    for (const commitment of ["confirmed", "finalized"] as const) {
+      try {
+        tx = await connection.getParsedTransaction(txSignature, {
+          commitment,
+          maxSupportedTransactionVersion: 0,
+        });
+      } catch {
+        tx = null;
+      }
+      if (tx) break;
     }
     if (tx) break;
-    await new Promise((resolve) => setTimeout(resolve, 1200));
+    const delay = PAYMENT_TX_LOOKUP_BASE_DELAY_MS + Math.min(attempt * 180, 1800);
+    await waitMs(delay);
   }
 
   if (!tx) {
@@ -1866,7 +1884,7 @@ const updateProfileWithRetry = async (
   wallet: string,
   mutate: (state: Record<string, unknown>) => void,
 ) => {
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  for (let attempt = 0; attempt < PROFILE_UPDATE_RETRY_ATTEMPTS; attempt += 1) {
     const { data: profileRow, error: profileError } = await supabase
       .from("profiles")
       .select("state, updated_at")
@@ -1902,6 +1920,9 @@ const updateProfileWithRetry = async (
         state: nextState,
         updatedAt: String((updated as { updated_at?: string }).updated_at ?? updatedAt),
       };
+    }
+    if (attempt < PROFILE_UPDATE_RETRY_ATTEMPTS - 1) {
+      await waitMs(60 + Math.floor(Math.random() * 120));
     }
   }
   return { ok: false as const };
@@ -2859,7 +2880,7 @@ serve(async (req) => {
       return json({ ok: false, error: txCheck.error });
     }
 
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    for (let attempt = 0; attempt < PROFILE_UPDATE_RETRY_ATTEMPTS; attempt += 1) {
       const { data: profileRow, error: profileError } = await supabase
         .from("profiles")
         .select("state, updated_at")
@@ -2904,7 +2925,12 @@ serve(async (req) => {
         .select("wallet")
         .maybeSingle();
 
-      if (updateError || !updated) continue;
+      if (updateError || !updated) {
+        if (attempt < PROFILE_UPDATE_RETRY_ATTEMPTS - 1) {
+          await waitMs(70 + Math.floor(Math.random() * 140));
+        }
+        continue;
+      }
 
       await auditEvent(supabase, auth.wallet, "starter_pack_buy", {
         txSignature,
@@ -2961,7 +2987,7 @@ serve(async (req) => {
       return json({ ok: false, error: txCheck.error });
     }
 
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    for (let attempt = 0; attempt < PROFILE_UPDATE_RETRY_ATTEMPTS; attempt += 1) {
       const { data: profileRow, error: profileError } = await supabase
         .from("profiles")
         .select("state, updated_at")
@@ -3010,6 +3036,9 @@ serve(async (req) => {
           premiumDaysAdded: plan.days,
           premiumAlreadyProcessed: false,
         });
+      }
+      if (attempt < PROFILE_UPDATE_RETRY_ATTEMPTS - 1) {
+        await waitMs(70 + Math.floor(Math.random() * 140));
       }
     }
 
