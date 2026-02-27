@@ -957,6 +957,15 @@
   align-items: flex-start;
 }
 
+.nowpay-modal-backdrop {
+  z-index: 60;
+  background: rgba(4, 8, 12, 0.82);
+}
+
+.nowpay-modal {
+  width: min(560px, 100%);
+}
+
 .buygold-nowpay-grid {
   display: grid;
   gap: 6px;
@@ -977,6 +986,19 @@
 
 .buygold-nowpay-actions button {
   padding: 6px 10px;
+}
+
+.nowpay-modal .buygold-nowpay-grid {
+  gap: 8px;
+  font-size: 13px;
+}
+
+.nowpay-modal .buygold-nowpay-actions {
+  justify-content: flex-start;
+}
+
+.nowpay-modal .buygold-nowpay-actions button {
+  min-width: 130px;
 }
 
 .starterpack-body {

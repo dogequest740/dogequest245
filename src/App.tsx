@@ -1920,6 +1920,33 @@ const formatLongTimer = (seconds: number) => {
 const formatNumber = (value: number) => value.toLocaleString('en-US')
 const formatUsdt = (value: number) =>
   Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 3 })
+const resolveNowpayAmount = (payAmountRaw: string, fallbackUsdt: number) => {
+  const parsed = Number(String(payAmountRaw ?? '').trim().replace(',', '.'))
+  if (Number.isFinite(parsed) && parsed > 0) return parsed
+  const fallback = Number(fallbackUsdt)
+  return Number.isFinite(fallback) && fallback > 0 ? fallback : 0
+}
+const formatNowpayAmountDisplay = (payAmountRaw: string, fallbackUsdt: number) =>
+  `${formatUsdt(resolveNowpayAmount(payAmountRaw, fallbackUsdt))} USDT`
+const formatNowpayAmountCopy = (payAmountRaw: string, fallbackUsdt: number) =>
+  String(resolveNowpayAmount(payAmountRaw, fallbackUsdt))
+const formatNowpayNetwork = (payCurrencyRaw: string) => {
+  const normalized = String(payCurrencyRaw ?? '').trim().toLowerCase()
+  switch (normalized) {
+    case 'usdttrc20':
+      return 'trc20'
+    case 'usdterc20':
+      return 'erc20'
+    case 'usdtmatic':
+      return 'polygon'
+    case 'usdtbsc':
+      return 'bsc'
+    case 'usdtsol':
+      return 'solana'
+    default:
+      return normalized.replace(/^usdt/, '') || normalized || 'unknown'
+  }
+}
 const formatShortWallet = (wallet: string) => `${wallet.slice(0, 4)}...${wallet.slice(-4)}`
 const formatDateTime = (value: string) => {
   const date = new Date(value)
@@ -7856,37 +7883,54 @@ function App() {
                 })}
               </div>
               {buyGoldMethod === 'usdt' && nowpayPayment && (
-                <div className="withdraw-info buygold-nowpay-box">
-                  <span className="withdraw-info-label">Payment status</span>
-                  <strong>{String(nowpayPayment.status || 'waiting').toUpperCase()}</strong>
-                  <div className="buygold-nowpay-grid">
-                    <div>
-                      Amount: <strong>{nowpayPayment.payAmount || formatUsdt(nowpayPayment.usdtAmount)} {nowpayPayment.payCurrency.toUpperCase()}</strong>
+                <div className="modal-backdrop modal-backdrop-top nowpay-modal-backdrop" onClick={() => setNowpayPayment(null)}>
+                  <div className="modal nowpay-modal" onClick={(event) => event.stopPropagation()}>
+                    <div className="modal-header">
+                      <h3>USDT Payment</h3>
+                      <button type="button" className="ghost" onClick={() => setNowpayPayment(null)}>
+                        Close
+                      </button>
                     </div>
-                    <div>
-                      Network: <strong>{nowpayPayment.payCurrency.toUpperCase()}</strong>
+                    <div className="withdraw-info buygold-nowpay-box">
+                      <span className="withdraw-info-label">Payment status</span>
+                      <strong>{String(nowpayPayment.status || 'waiting').toUpperCase()}</strong>
+                      <div className="buygold-nowpay-grid">
+                        <div>
+                          Amount: <strong>{formatNowpayAmountDisplay(nowpayPayment.payAmount, nowpayPayment.usdtAmount)}</strong>
+                        </div>
+                        <div>
+                          Network: <strong>{formatNowpayNetwork(nowpayPayment.payCurrency)}</strong>
+                        </div>
+                        <div className="buygold-nowpay-address">
+                          Address: <strong>{nowpayPayment.payAddress || 'Pending...'}</strong>
+                        </div>
+                      </div>
+                      <div className="buygold-nowpay-actions">
+                        <button
+                          type="button"
+                          className="ghost"
+                          disabled={!nowpayPayment.payAddress}
+                          onClick={() => void copyToClipboard(nowpayPayment.payAddress)}
+                        >
+                          Copy address
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => void copyToClipboard(formatNowpayAmountCopy(nowpayPayment.payAmount, nowpayPayment.usdtAmount))}
+                        >
+                          Copy amount
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => void checkNowpayGoldPayment(nowpayPayment.providerPaymentId, true)}
+                          disabled={nowpayStatusLoading}
+                        >
+                          {nowpayStatusLoading ? 'Checking...' : 'I paid, check status'}
+                        </button>
+                      </div>
                     </div>
-                    <div className="buygold-nowpay-address">
-                      Address: <strong>{nowpayPayment.payAddress || 'Pending...'}</strong>
-                    </div>
-                  </div>
-                  <div className="buygold-nowpay-actions">
-                    <button
-                      type="button"
-                      className="ghost"
-                      disabled={!nowpayPayment.payAddress}
-                      onClick={() => void copyToClipboard(nowpayPayment.payAddress)}
-                    >
-                      Copy address
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost"
-                      onClick={() => void checkNowpayGoldPayment(nowpayPayment.providerPaymentId, true)}
-                      disabled={nowpayStatusLoading}
-                    >
-                      {nowpayStatusLoading ? 'Checking...' : 'I paid, check status'}
-                    </button>
                   </div>
                 </div>
               )}
@@ -8003,40 +8047,55 @@ function App() {
                   : (starterNowpayLoading ? 'Creating...' : 'Buy Starter Pack (USDT)')}
               </button>
               {starterPayMethod === 'usdt' && starterNowpayPayment && (
-                <div className="withdraw-info buygold-nowpay-box">
-                  <span className="withdraw-info-label">Payment status</span>
-                  <strong>{String(starterNowpayPayment.status || 'waiting').toUpperCase()}</strong>
-                  <div className="buygold-nowpay-grid">
-                    <div>
-                      Amount:{' '}
-                      <strong>
-                        {starterNowpayPayment.payAmount || formatUsdt(STARTER_PACK_PRICE_USDT)} {starterNowpayPayment.payCurrency.toUpperCase()}
-                      </strong>
+                <div className="modal-backdrop modal-backdrop-top nowpay-modal-backdrop" onClick={() => setStarterNowpayPayment(null)}>
+                  <div className="modal nowpay-modal" onClick={(event) => event.stopPropagation()}>
+                    <div className="modal-header">
+                      <h3>USDT Payment</h3>
+                      <button type="button" className="ghost" onClick={() => setStarterNowpayPayment(null)}>
+                        Close
+                      </button>
                     </div>
-                    <div>
-                      Network: <strong>{starterNowpayPayment.payCurrency.toUpperCase()}</strong>
+                    <div className="withdraw-info buygold-nowpay-box">
+                      <span className="withdraw-info-label">Payment status</span>
+                      <strong>{String(starterNowpayPayment.status || 'waiting').toUpperCase()}</strong>
+                      <div className="buygold-nowpay-grid">
+                        <div>
+                          Amount:{' '}
+                          <strong>{formatNowpayAmountDisplay(starterNowpayPayment.payAmount, STARTER_PACK_PRICE_USDT)}</strong>
+                        </div>
+                        <div>
+                          Network: <strong>{formatNowpayNetwork(starterNowpayPayment.payCurrency)}</strong>
+                        </div>
+                        <div className="buygold-nowpay-address">
+                          Address: <strong>{starterNowpayPayment.payAddress || 'Pending...'}</strong>
+                        </div>
+                      </div>
+                      <div className="buygold-nowpay-actions">
+                        <button
+                          type="button"
+                          className="ghost"
+                          disabled={!starterNowpayPayment.payAddress}
+                          onClick={() => void copyToClipboard(starterNowpayPayment.payAddress)}
+                        >
+                          Copy address
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => void copyToClipboard(formatNowpayAmountCopy(starterNowpayPayment.payAmount, STARTER_PACK_PRICE_USDT))}
+                        >
+                          Copy amount
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => void checkNowpayStarterPayment(starterNowpayPayment.providerPaymentId, true)}
+                          disabled={starterNowpayStatusLoading}
+                        >
+                          {starterNowpayStatusLoading ? 'Checking...' : 'I paid, check status'}
+                        </button>
+                      </div>
                     </div>
-                    <div className="buygold-nowpay-address">
-                      Address: <strong>{starterNowpayPayment.payAddress || 'Pending...'}</strong>
-                    </div>
-                  </div>
-                  <div className="buygold-nowpay-actions">
-                    <button
-                      type="button"
-                      className="ghost"
-                      disabled={!starterNowpayPayment.payAddress}
-                      onClick={() => void copyToClipboard(starterNowpayPayment.payAddress)}
-                    >
-                      Copy address
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost"
-                      onClick={() => void checkNowpayStarterPayment(starterNowpayPayment.providerPaymentId, true)}
-                      disabled={starterNowpayStatusLoading}
-                    >
-                      {starterNowpayStatusLoading ? 'Checking...' : 'I paid, check status'}
-                    </button>
                   </div>
                 </div>
               )}
@@ -8144,40 +8203,55 @@ function App() {
                 ))}
               </div>
               {premiumPayMethod === 'usdt' && premiumNowpayPayment && (
-                <div className="withdraw-info buygold-nowpay-box">
-                  <span className="withdraw-info-label">Payment status</span>
-                  <strong>{String(premiumNowpayPayment.status || 'waiting').toUpperCase()}</strong>
-                  <div className="buygold-nowpay-grid">
-                    <div>
-                      Amount:{' '}
-                      <strong>
-                        {premiumNowpayPayment.payAmount || formatUsdt(premiumNowpayPayment.usdtAmount)} {premiumNowpayPayment.payCurrency.toUpperCase()}
-                      </strong>
+                <div className="modal-backdrop modal-backdrop-top nowpay-modal-backdrop" onClick={() => setPremiumNowpayPayment(null)}>
+                  <div className="modal nowpay-modal" onClick={(event) => event.stopPropagation()}>
+                    <div className="modal-header">
+                      <h3>USDT Payment</h3>
+                      <button type="button" className="ghost" onClick={() => setPremiumNowpayPayment(null)}>
+                        Close
+                      </button>
                     </div>
-                    <div>
-                      Network: <strong>{premiumNowpayPayment.payCurrency.toUpperCase()}</strong>
+                    <div className="withdraw-info buygold-nowpay-box">
+                      <span className="withdraw-info-label">Payment status</span>
+                      <strong>{String(premiumNowpayPayment.status || 'waiting').toUpperCase()}</strong>
+                      <div className="buygold-nowpay-grid">
+                        <div>
+                          Amount:{' '}
+                          <strong>{formatNowpayAmountDisplay(premiumNowpayPayment.payAmount, premiumNowpayPayment.usdtAmount)}</strong>
+                        </div>
+                        <div>
+                          Network: <strong>{formatNowpayNetwork(premiumNowpayPayment.payCurrency)}</strong>
+                        </div>
+                        <div className="buygold-nowpay-address">
+                          Address: <strong>{premiumNowpayPayment.payAddress || 'Pending...'}</strong>
+                        </div>
+                      </div>
+                      <div className="buygold-nowpay-actions">
+                        <button
+                          type="button"
+                          className="ghost"
+                          disabled={!premiumNowpayPayment.payAddress}
+                          onClick={() => void copyToClipboard(premiumNowpayPayment.payAddress)}
+                        >
+                          Copy address
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => void copyToClipboard(formatNowpayAmountCopy(premiumNowpayPayment.payAmount, premiumNowpayPayment.usdtAmount))}
+                        >
+                          Copy amount
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => void checkNowpayPremiumPayment(premiumNowpayPayment.providerPaymentId, true)}
+                          disabled={premiumNowpayStatusLoading}
+                        >
+                          {premiumNowpayStatusLoading ? 'Checking...' : 'I paid, check status'}
+                        </button>
+                      </div>
                     </div>
-                    <div className="buygold-nowpay-address">
-                      Address: <strong>{premiumNowpayPayment.payAddress || 'Pending...'}</strong>
-                    </div>
-                  </div>
-                  <div className="buygold-nowpay-actions">
-                    <button
-                      type="button"
-                      className="ghost"
-                      disabled={!premiumNowpayPayment.payAddress}
-                      onClick={() => void copyToClipboard(premiumNowpayPayment.payAddress)}
-                    >
-                      Copy address
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost"
-                      onClick={() => void checkNowpayPremiumPayment(premiumNowpayPayment.providerPaymentId, true)}
-                      disabled={premiumNowpayStatusLoading}
-                    >
-                      {premiumNowpayStatusLoading ? 'Checking...' : 'I paid, check status'}
-                    </button>
                   </div>
                 </div>
               )}
@@ -8468,40 +8542,55 @@ function App() {
                 })}
               </div>
               {fortunePayMethod === 'usdt' && fortuneNowpayPayment && (
-                <div className="withdraw-info buygold-nowpay-box">
-                  <span className="withdraw-info-label">Payment status</span>
-                  <strong>{String(fortuneNowpayPayment.status || 'waiting').toUpperCase()}</strong>
-                  <div className="buygold-nowpay-grid">
-                    <div>
-                      Amount:{' '}
-                      <strong>
-                        {fortuneNowpayPayment.payAmount || formatUsdt(fortuneNowpayPayment.usdtAmount)} {fortuneNowpayPayment.payCurrency.toUpperCase()}
-                      </strong>
+                <div className="modal-backdrop modal-backdrop-top nowpay-modal-backdrop" onClick={() => setFortuneNowpayPayment(null)}>
+                  <div className="modal nowpay-modal" onClick={(event) => event.stopPropagation()}>
+                    <div className="modal-header">
+                      <h3>USDT Payment</h3>
+                      <button type="button" className="ghost" onClick={() => setFortuneNowpayPayment(null)}>
+                        Close
+                      </button>
                     </div>
-                    <div>
-                      Network: <strong>{fortuneNowpayPayment.payCurrency.toUpperCase()}</strong>
+                    <div className="withdraw-info buygold-nowpay-box">
+                      <span className="withdraw-info-label">Payment status</span>
+                      <strong>{String(fortuneNowpayPayment.status || 'waiting').toUpperCase()}</strong>
+                      <div className="buygold-nowpay-grid">
+                        <div>
+                          Amount:{' '}
+                          <strong>{formatNowpayAmountDisplay(fortuneNowpayPayment.payAmount, fortuneNowpayPayment.usdtAmount)}</strong>
+                        </div>
+                        <div>
+                          Network: <strong>{formatNowpayNetwork(fortuneNowpayPayment.payCurrency)}</strong>
+                        </div>
+                        <div className="buygold-nowpay-address">
+                          Address: <strong>{fortuneNowpayPayment.payAddress || 'Pending...'}</strong>
+                        </div>
+                      </div>
+                      <div className="buygold-nowpay-actions">
+                        <button
+                          type="button"
+                          className="ghost"
+                          disabled={!fortuneNowpayPayment.payAddress}
+                          onClick={() => void copyToClipboard(fortuneNowpayPayment.payAddress)}
+                        >
+                          Copy address
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => void copyToClipboard(formatNowpayAmountCopy(fortuneNowpayPayment.payAmount, fortuneNowpayPayment.usdtAmount))}
+                        >
+                          Copy amount
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => void checkNowpayFortunePayment(fortuneNowpayPayment.providerPaymentId, true)}
+                          disabled={fortuneNowpayStatusLoading}
+                        >
+                          {fortuneNowpayStatusLoading ? 'Checking...' : 'I paid, check status'}
+                        </button>
+                      </div>
                     </div>
-                    <div className="buygold-nowpay-address">
-                      Address: <strong>{fortuneNowpayPayment.payAddress || 'Pending...'}</strong>
-                    </div>
-                  </div>
-                  <div className="buygold-nowpay-actions">
-                    <button
-                      type="button"
-                      className="ghost"
-                      disabled={!fortuneNowpayPayment.payAddress}
-                      onClick={() => void copyToClipboard(fortuneNowpayPayment.payAddress)}
-                    >
-                      Copy address
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost"
-                      onClick={() => void checkNowpayFortunePayment(fortuneNowpayPayment.providerPaymentId, true)}
-                      disabled={fortuneNowpayStatusLoading}
-                    >
-                      {fortuneNowpayStatusLoading ? 'Checking...' : 'I paid, check status'}
-                    </button>
                   </div>
                 </div>
               )}
