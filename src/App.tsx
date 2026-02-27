@@ -1012,7 +1012,6 @@ const SHOP_DUNGEON_KEY_COST = 50000
 const SHOP_DUNGEON_KEY_DAILY_LIMIT = 10
 const WORLD_BOSS_TICKET_COST = 7000
 const SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT = 2
-const CONTRACT_ADDRESS = '97SNkVakQGB5md2AXn7ph4gD7swiA6ZiQa1woqX7pump'
 const PREMIUM_PLANS = [
   { id: 'premium-30', days: 30, sol: 0.5 },
   { id: 'premium-90', days: 90, sol: 1 },
@@ -3124,7 +3123,6 @@ function App() {
   const [stakeError, setStakeError] = useState('')
   const [stakeTab, setStakeTab] = useState<'stake' | 'my'>('stake')
   const [musicEnabled, setMusicEnabled] = useState(true)
-  const [contractCopied, setContractCopied] = useState(false)
   const [referralCopied, setReferralCopied] = useState(false)
   const [referralLoading, setReferralLoading] = useState(false)
   const [referralClaimLoading, setReferralClaimLoading] = useState(false)
@@ -3820,29 +3818,6 @@ function App() {
     window.addEventListener('resize', detectMobile)
     return () => window.removeEventListener('resize', detectMobile)
   }, [])
-
-  const copyContractAddress = async () => {
-    const contractValue = CONTRACT_ADDRESS
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(contractValue)
-      } else {
-        const textarea = document.createElement('textarea')
-        textarea.value = contractValue
-        textarea.style.position = 'fixed'
-        textarea.style.opacity = '0'
-        document.body.appendChild(textarea)
-        textarea.focus()
-        textarea.select()
-        document.execCommand('copy')
-        document.body.removeChild(textarea)
-      }
-      setContractCopied(true)
-      window.setTimeout(() => setContractCopied(false), 1600)
-    } catch (error) {
-      console.warn('Copy failed', error)
-    }
-  }
 
   const copyToClipboard = async (value: string) => {
     try {
@@ -5944,11 +5919,6 @@ function App() {
               <div className="auth-cta">
                 <div className="auth-cta-row">
                   <WalletMultiButton className="wallet-button auth-wallet" />
-                  <button type="button" className="contract-button" onClick={copyContractAddress}>
-                    Contract Address: <strong>{CONTRACT_ADDRESS}</strong>
-                    <span className="copy-icon" aria-hidden>⧉</span>
-                    {contractCopied && <span className="copy-tag">Copied</span>}
-                  </button>
                 </div>
                 <span className="auth-note">Connect wallet to continue. We only read your address.</span>
               </div>
