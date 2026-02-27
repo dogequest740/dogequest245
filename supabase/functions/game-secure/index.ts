@@ -356,6 +356,14 @@ const asInt = (value: unknown, fallback = 0) => {
   return Math.floor(parsed);
 };
 
+const getBearerToken = (req: Request) => {
+  const header = req.headers.get("authorization") ?? "";
+  if (!header) return "";
+  const [scheme, ...rest] = header.split(" ");
+  if (!scheme || scheme.toLowerCase() !== "bearer") return "";
+  return rest.join(" ").trim();
+};
+
 const clampInt = (value: unknown, min: number, max: number) => {
   const parsed = asInt(value, min);
   return Math.max(min, Math.min(max, parsed));
@@ -1272,37 +1280,64 @@ const getSessionWallet = async (
   now: Date,
 ) => {
   const token = req.headers.get("x-session-token") ?? "";
-  if (!token) {
-    return { ok: false as const, error: "Missing session token." };
-  }
-  const { data, error } = await supabase
-    .from("wallet_sessions")
-    .select("token, wallet, expires_at")
-    .eq("token", token)
-    .maybeSingle();
+  let sessionError = "";
 
-  if (error || !data) {
-    return { ok: false as const, error: "Invalid session token." };
+  if (token) {
+    const { data, error } = await supabase
+      .from("wallet_sessions")
+      .select("token, wallet, expires_at")
+      .eq("token", token)
+      .maybeSingle();
+
+    if (!error && data) {
+      const expiresAtMs = new Date(String(data.expires_at)).getTime();
+      if (!Number.isNaN(expiresAtMs) && expiresAtMs > now.getTime()) {
+        const wallet = String(data.wallet);
+        const blocked = await supabase
+          .from("blocked_wallets")
+          .select("wallet, reason")
+          .eq("wallet", wallet)
+          .maybeSingle();
+        if (!blocked.error && blocked.data) {
+          await supabase.from("wallet_sessions").delete().eq("token", token);
+          await auditEvent(supabase, wallet, "blocked_session_denied", {
+            reason: String(blocked.data.reason ?? "Cheating"),
+          });
+          return { ok: false as const, error: BLOCKED_ERROR_MESSAGE };
+        }
+        return { ok: true as const, wallet };
+      }
+      await supabase.from("wallet_sessions").delete().eq("token", token);
+      sessionError = "Session expired. Sign again.";
+    } else {
+      sessionError = "Invalid session token.";
+    }
+  } else {
+    sessionError = "Missing session token.";
   }
-  const expiresAtMs = new Date(String(data.expires_at)).getTime();
-  if (Number.isNaN(expiresAtMs) || expiresAtMs <= now.getTime()) {
-    await supabase.from("wallet_sessions").delete().eq("token", token);
-    return { ok: false as const, error: "Session expired. Sign again." };
+
+  const bearerToken = getBearerToken(req);
+  if (bearerToken) {
+    const { data, error } = await supabase.auth.getUser(bearerToken);
+    if (!error && data?.user?.id) {
+      const emailWallet = `email:${String(data.user.id)}`;
+      const blocked = await supabase
+        .from("blocked_wallets")
+        .select("wallet, reason")
+        .eq("wallet", emailWallet)
+        .maybeSingle();
+      if (!blocked.error && blocked.data) {
+        await auditEvent(supabase, emailWallet, "blocked_session_denied", {
+          reason: String(blocked.data.reason ?? "Cheating"),
+        });
+        return { ok: false as const, error: BLOCKED_ERROR_MESSAGE };
+      }
+      return { ok: true as const, wallet: emailWallet };
+    }
   }
-  const wallet = String(data.wallet);
-  const blocked = await supabase
-    .from("blocked_wallets")
-    .select("wallet, reason")
-    .eq("wallet", wallet)
-    .maybeSingle();
-  if (!blocked.error && blocked.data) {
-    await supabase.from("wallet_sessions").delete().eq("token", token);
-    await auditEvent(supabase, wallet, "blocked_session_denied", {
-      reason: String(blocked.data.reason ?? "Cheating"),
-    });
-    return { ok: false as const, error: BLOCKED_ERROR_MESSAGE };
-  }
-  return { ok: true as const, wallet };
+
+  if (token && sessionError) return { ok: false as const, error: sessionError };
+  return { ok: false as const, error: "Sign-in required." };
 };
 
 const toWalletList = (raw: string | undefined) =>
