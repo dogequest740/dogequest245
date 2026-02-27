@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { clusterApiUrl, Connection } from "https://esm.sh/@solana/web3.js@1.98.4";
+import { clusterApiUrl, Connection, PublicKey } from "https://esm.sh/@solana/web3.js@1.98.4";
 
 const MAX_LEVEL = 255;
 const WITHDRAW_RATE = 15000;
@@ -32,8 +32,10 @@ const PREMIUM_DAILY_GOLD = 50000;
 const PREMIUM_DAILY_SMALL_POTIONS = 5;
 const PREMIUM_DAILY_BIG_POTIONS = 3;
 const SOL_LAMPORTS = 1_000_000_000;
+const SOL_TO_USDT_RATE = 85;
 const STARTER_PACK_GOLD = 300000;
 const STARTER_PACK_PRICE_LAMPORTS = Math.round(0.35 * SOL_LAMPORTS);
+const STARTER_PACK_PRICE_USDT = Number(((STARTER_PACK_PRICE_LAMPORTS / SOL_LAMPORTS) * SOL_TO_USDT_RATE).toFixed(3));
 const STARTER_PACK_ITEMS: Array<{ type: ConsumableType; qty: number }> = [
   { type: "energy-small", qty: 20 },
   { type: "energy-full", qty: 5 },
@@ -47,22 +49,42 @@ const PAYMENT_TX_LOOKUP_ATTEMPTS = 22;
 const PAYMENT_TX_LOOKUP_BASE_DELAY_MS = 1200;
 const PROFILE_UPDATE_RETRY_ATTEMPTS = 10;
 const BLOCKED_ERROR_MESSAGE = "You have been banned for cheating.";
+const NOWPAYMENTS_API_BASE = "https://api.nowpayments.io/v1";
+const NOWPAYMENTS_CREATE_TIMEOUT_MS = 18_000;
+const NOWPAYMENTS_STATUS_TIMEOUT_MS = 15_000;
+const NOWPAYMENTS_PENDING_STATUSES = new Set(["waiting", "confirming", "sending", "partially_paid"]);
+const NOWPAYMENTS_PAID_STATUSES = new Set(["finished", "confirmed"]);
+const NOWPAYMENTS_TERMINAL_STATUSES = new Set(["finished", "confirmed", "failed", "expired", "refunded"]);
+const NOWPAYMENTS_ALLOWED_USDT_NETWORKS = [
+  "usdttrc20",
+  "usdtbsc",
+  "usdterc20",
+  "usdtmatic",
+  "usdtsol",
+] as const;
+const NOWPAYMENTS_PENDING_REUSE_MS = 30 * 60 * 1000;
 const GOLD_PACKS = [
-  { id: "gold-50k", gold: 50000, lamports: Math.round(0.05 * SOL_LAMPORTS) },
-  { id: "gold-100k", gold: 100000, lamports: Math.round(0.1 * SOL_LAMPORTS) },
-  { id: "gold-500k", gold: 500000, lamports: Math.round(0.4 * SOL_LAMPORTS) },
-  { id: "gold-1200k", gold: 1200000, lamports: Math.round(0.63 * SOL_LAMPORTS) },
+  { id: "gold-50k", gold: 50000, lamports: Math.round(0.05 * SOL_LAMPORTS), usdt: 4.25 },
+  { id: "gold-100k", gold: 100000, lamports: Math.round(0.1 * SOL_LAMPORTS), usdt: 8.5 },
+  { id: "gold-500k", gold: 500000, lamports: Math.round(0.4 * SOL_LAMPORTS), usdt: 34 },
+  { id: "gold-1200k", gold: 1200000, lamports: Math.round(0.63 * SOL_LAMPORTS), usdt: 53.55 },
 ] as const;
 const FORTUNE_SPIN_PACKS = [1, 10] as const;
 const FORTUNE_SPIN_PRICES_LAMPORTS: Record<(typeof FORTUNE_SPIN_PACKS)[number], number> = {
   1: Math.round(0.007 * SOL_LAMPORTS),
   10: Math.round(0.06 * SOL_LAMPORTS),
 };
+const FORTUNE_SPIN_PRICES_USDT: Record<(typeof FORTUNE_SPIN_PACKS)[number], number> = {
+  1: 0.595,
+  10: 5.1,
+};
 const ENERGY_REGEN_SECONDS = 420;
 const PREMIUM_PLANS = [
-  { id: "premium-30", days: 30, lamports: Math.round(0.5 * SOL_LAMPORTS) },
-  { id: "premium-90", days: 90, lamports: Math.round(1 * SOL_LAMPORTS) },
+  { id: "premium-30", days: 30, lamports: Math.round(0.5 * SOL_LAMPORTS), usdt: 42.5 },
+  { id: "premium-90", days: 90, lamports: Math.round(1 * SOL_LAMPORTS), usdt: 85 },
 ] as const;
+const CRYPTO_PAYMENT_SELECT =
+  "id, wallet, provider, kind, product_ref, usdt_amount, pay_currency, provider_payment_id, provider_order_id, payment_status, credit_state, credited, credited_at, credit_error, reward, provider_payload, created_at, updated_at";
 const VILLAGE_CASTLE_MAX_LEVEL = 3;
 const VILLAGE_OTHER_MAX_LEVEL = 25;
 const VILLAGE_PREMIUM_UPGRADE_TIME_MULTIPLIER = 0.5;
@@ -214,6 +236,27 @@ type DungeonStateRow = {
   updated_at?: string;
 };
 
+type CryptoPaymentRow = {
+  id: string;
+  wallet: string;
+  provider: string;
+  kind: string;
+  product_ref: string;
+  usdt_amount: number;
+  pay_currency: string;
+  provider_payment_id: string;
+  provider_order_id: string;
+  payment_status: string;
+  credit_state: string;
+  credited: boolean;
+  credited_at: string | null;
+  credit_error: string;
+  reward: Record<string, unknown>;
+  provider_payload?: Record<string, unknown>;
+  created_at: string;
+  updated_at?: string;
+};
+
 type ReferralRow = {
   referrer_wallet: string;
   referee_wallet: string;
@@ -331,6 +374,15 @@ const sanitizeSettlementName = (value: unknown) =>
     .slice(0, 24);
 
 const isWalletLike = (value: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
+const isValidSolanaAddress = (value: string) => {
+  try {
+    return new PublicKey(value).toBase58() === value;
+  } catch {
+    return false;
+  }
+};
+const isEmailIdentity = (value: string) => /^email:[0-9a-fA-F-]{8,}$/.test(value);
+const isPlayerIdentity = (value: string) => isWalletLike(value) || isEmailIdentity(value);
 const isTxSignatureLike = (value: string) => /^[1-9A-HJ-NP-Za-km-z]{70,120}$/.test(value);
 const todayKeyUtc = (now: Date) => now.toISOString().slice(0, 10);
 const isConsumableType = (value: string): value is ConsumableType =>
@@ -367,6 +419,97 @@ const getGoldPack = (packIdRaw: unknown) => {
   const packId = String(packIdRaw ?? "").trim();
   if (!packId) return null;
   return GOLD_PACKS.find((entry) => entry.id === packId) ?? null;
+};
+
+const isNowpayKind = (value: string): value is "buy_gold" | "starter_pack_buy" | "premium_buy" | "fortune_buy" =>
+  value === "buy_gold" || value === "starter_pack_buy" || value === "premium_buy" || value === "fortune_buy";
+
+const isNowpaymentsCurrency = (value: string): value is (typeof NOWPAYMENTS_ALLOWED_USDT_NETWORKS)[number] =>
+  (NOWPAYMENTS_ALLOWED_USDT_NETWORKS as readonly string[]).includes(value);
+
+const normalizeNowpaymentsStatus = (value: unknown) => String(value ?? "").trim().toLowerCase();
+
+const nowpaymentsFetch = async (
+  method: "GET" | "POST",
+  path: string,
+  body?: Record<string, unknown>,
+  timeoutMs = NOWPAYMENTS_STATUS_TIMEOUT_MS,
+) => {
+  const apiKey = String(Deno.env.get("NOWPAYMENTS_API_KEY") ?? "").trim();
+  if (!apiKey) {
+    return { ok: false as const, error: "NOWPayments is not configured." };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(2000, timeoutMs));
+  try {
+    const response = await fetch(`${NOWPAYMENTS_API_BASE}${path}`, {
+      method,
+      headers: {
+        "x-api-key": apiKey,
+        "Content-Type": "application/json",
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+
+    let data: Record<string, unknown> | null = null;
+    try {
+      data = await response.json() as Record<string, unknown>;
+    } catch {
+      data = null;
+    }
+
+    if (!response.ok) {
+      const message = typeof data?.message === "string"
+        ? data.message
+        : typeof data?.error === "string"
+        ? data.error
+        : `HTTP ${response.status}`;
+      return { ok: false as const, error: `NOWPayments error: ${message}` };
+    }
+
+    return { ok: true as const, data: data ?? {} };
+  } catch {
+    return { ok: false as const, error: "NOWPayments request failed." };
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const createNowpaymentsOrderId = (wallet: string, kind: string, productRef: string) => {
+  const walletPart = wallet.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 16) || "player";
+  const randomPart = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
+  const safeKind = kind.replace(/[^a-z0-9_-]/gi, "").slice(0, 18) || "pay";
+  const safeRef = productRef.replace(/[^a-z0-9_-]/gi, "").slice(0, 18) || "item";
+  return `dq-${safeKind}-${safeRef}-${walletPart}-${Date.now()}-${randomPart}`.slice(0, 64);
+};
+
+const parseNowpaymentAmount = (value: unknown) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "";
+  return String(numeric);
+};
+
+const mapNowpaymentForClient = (row: CryptoPaymentRow) => {
+  const payload = row.provider_payload && typeof row.provider_payload === "object"
+    ? row.provider_payload as Record<string, unknown>
+    : {};
+  return {
+    id: row.id,
+    providerPaymentId: String(row.provider_payment_id ?? ""),
+    providerOrderId: String(row.provider_order_id ?? ""),
+    kind: String(row.kind ?? ""),
+    productRef: String(row.product_ref ?? ""),
+    usdtAmount: Number(row.usdt_amount ?? 0),
+    payCurrency: String(row.pay_currency ?? ""),
+    payAmount: parseNowpaymentAmount(payload.pay_amount),
+    payAddress: String(payload.pay_address ?? ""),
+    status: normalizeNowpaymentsStatus(row.payment_status),
+    credited: Boolean(row.credited),
+    createdAt: String(row.created_at ?? ""),
+    updatedAt: String(row.updated_at ?? ""),
+  };
 };
 
 const wasTxAlreadyProcessed = async (
@@ -1928,6 +2071,247 @@ const updateProfileWithRetry = async (
   return { ok: false as const };
 };
 
+const loadRecentPendingNowpayPayment = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  kind: string,
+  productRef: string,
+  now: Date,
+) => {
+  const { data, error } = await supabase
+    .from("crypto_payments")
+    .select(CRYPTO_PAYMENT_SELECT)
+    .eq("wallet", wallet)
+    .eq("provider", "nowpayments")
+    .eq("kind", kind)
+    .eq("product_ref", productRef)
+    .order("created_at", { ascending: false })
+    .limit(8);
+
+  if (error || !data) return null;
+  for (const row of data as CryptoPaymentRow[]) {
+    const createdAtMs = new Date(String(row.created_at ?? "")).getTime();
+    const ageMs = Number.isFinite(createdAtMs) ? Math.max(0, now.getTime() - createdAtMs) : Number.MAX_SAFE_INTEGER;
+    const status = normalizeNowpaymentsStatus(row.payment_status);
+    if (
+      ageMs <= NOWPAYMENTS_PENDING_REUSE_MS &&
+      NOWPAYMENTS_PENDING_STATUSES.has(status) &&
+      !Boolean(row.credited)
+    ) {
+      return row;
+    }
+  }
+  return null;
+};
+
+const refreshNowpaymentRowStatus = async (
+  supabase: ReturnType<typeof createClient>,
+  row: CryptoPaymentRow,
+  latestPayload: Record<string, unknown>,
+) => {
+  const paymentStatus = normalizeNowpaymentsStatus(latestPayload.payment_status ?? row.payment_status);
+  const nextPayload = {
+    ...(row.provider_payload && typeof row.provider_payload === "object" ? row.provider_payload : {}),
+    ...latestPayload,
+  };
+  const nowIso = new Date().toISOString();
+  const { data: updated, error } = await supabase
+    .from("crypto_payments")
+    .update({
+      payment_status: paymentStatus || row.payment_status,
+      provider_payload: nextPayload,
+      updated_at: nowIso,
+    })
+    .eq("id", row.id)
+    .select(CRYPTO_PAYMENT_SELECT)
+    .maybeSingle();
+
+  if (error || !updated) return row;
+  return updated as CryptoPaymentRow;
+};
+
+const creditNowpaymentIfNeeded = async (
+  supabase: ReturnType<typeof createClient>,
+  row: CryptoPaymentRow,
+) => {
+  if (Boolean(row.credited) || row.credit_state === "done") {
+    return {
+      ok: true as const,
+      row,
+      creditedNow: false as const,
+      state: null as Record<string, unknown> | null,
+      response: {} as Record<string, unknown>,
+    };
+  }
+
+  const lockIso = new Date().toISOString();
+  const { data: lockedRow } = await supabase
+    .from("crypto_payments")
+    .update({
+      credit_state: "processing",
+      credit_error: "",
+      updated_at: lockIso,
+    })
+    .eq("id", row.id)
+    .in("credit_state", ["pending", "failed"])
+    .select(CRYPTO_PAYMENT_SELECT)
+    .maybeSingle();
+
+  if (!lockedRow) {
+    const { data: latest } = await supabase
+      .from("crypto_payments")
+      .select(CRYPTO_PAYMENT_SELECT)
+      .eq("id", row.id)
+      .maybeSingle();
+    const current = (latest as CryptoPaymentRow | null) ?? row;
+    if (Boolean(current.credited) || current.credit_state === "done") {
+      return {
+        ok: true as const,
+        row: current,
+        creditedNow: false as const,
+        state: null as Record<string, unknown> | null,
+        response: {} as Record<string, unknown>,
+      };
+    }
+    return { ok: false as const, row: current, error: "Payment credit is processing. Retry shortly." };
+  }
+
+  const locked = lockedRow as CryptoPaymentRow;
+  const reward = locked.reward && typeof locked.reward === "object" ? locked.reward as Record<string, unknown> : {};
+  let stateAfterCredit: Record<string, unknown> | null = null;
+  const response: Record<string, unknown> = {};
+  let creditError = "";
+
+  if (locked.kind === "buy_gold") {
+    const goldAmount = Math.max(0, asInt(reward.gold, 0));
+    if (goldAmount <= 0) {
+      creditError = "Invalid payment reward payload.";
+    } else {
+      const creditResult = await updateProfileWithRetry(supabase, locked.wallet, (state) => {
+        state.gold = Math.max(0, asInt(state.gold, 0)) + goldAmount;
+      });
+      if (!creditResult.ok || !creditResult.state) {
+        creditError = "Failed to credit gold package.";
+      } else {
+        stateAfterCredit = creditResult.state;
+        response.gold = Math.max(0, asInt(creditResult.state.gold, 0));
+      }
+    }
+  } else if (locked.kind === "starter_pack_buy") {
+    const creditResult = await updateProfileWithRetry(supabase, locked.wallet, (state) => {
+      if (Boolean(state.starterPackPurchased)) return;
+      state.gold = Math.max(0, asInt(state.gold, 0)) + STARTER_PACK_GOLD;
+      for (const entry of STARTER_PACK_ITEMS) {
+        for (let i = 0; i < entry.qty; i += 1) addConsumableToState(state, entry.type);
+      }
+      state.starterPackPurchased = true;
+    });
+    if (!creditResult.ok || !creditResult.state) {
+      creditError = "Failed to credit starter pack.";
+    } else {
+      stateAfterCredit = creditResult.state;
+      response.gold = Math.max(0, asInt(creditResult.state.gold, 0));
+      response.starterPackPurchased = Boolean(creditResult.state.starterPackPurchased);
+      response.consumables = normalizeConsumables(creditResult.state.consumables).rows;
+    }
+  } else if (locked.kind === "premium_buy") {
+    const plan = getPremiumPlan(reward.planId, reward.days);
+    if (!plan) {
+      creditError = "Invalid premium payment reward.";
+    } else {
+      const creditResult = await updateProfileWithRetry(supabase, locked.wallet, (state) => {
+        const nowMs = Date.now();
+        const currentPremiumEndsAt = Math.max(0, asInt(state.premiumEndsAt, 0));
+        const base = Math.max(nowMs, currentPremiumEndsAt);
+        state.premiumEndsAt = base + plan.days * 24 * 60 * 60 * 1000;
+      });
+      if (!creditResult.ok || !creditResult.state) {
+        creditError = "Failed to credit premium purchase.";
+      } else {
+        stateAfterCredit = creditResult.state;
+        response.premiumEndsAt = Math.max(0, asInt(creditResult.state.premiumEndsAt, 0));
+        response.premiumDaysAdded = plan.days;
+      }
+    }
+  } else if (locked.kind === "fortune_buy") {
+    const spins = Math.max(0, asInt(reward.spins, 0));
+    if (!(FORTUNE_SPIN_PACKS as readonly number[]).includes(spins)) {
+      creditError = "Invalid fortune payment reward.";
+    } else {
+      const dayKey = todayKeyUtc(new Date());
+      let updatedFortune: FortuneStateRow | null = null;
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const fortuneState = await ensureFortuneState(supabase, locked.wallet, new Date());
+        if (!fortuneState.ok) {
+          creditError = fortuneState.error;
+          break;
+        }
+        const nextPaidSpins = Math.max(0, asInt(fortuneState.state.paid_spins, 0)) + spins;
+        const updated = await updateFortuneState(supabase, fortuneState.state, { paid_spins: nextPaidSpins });
+        if (updated.ok) {
+          updatedFortune = updated.state;
+          break;
+        }
+      }
+      if (!updatedFortune && !creditError) {
+        creditError = "Failed to credit fortune spins.";
+      } else if (updatedFortune) {
+        response.fortunePaidSpins = Math.max(0, asInt(updatedFortune.paid_spins, 0));
+        response.fortuneFreeSpinAvailable = String(updatedFortune.free_spin_day ?? "") !== dayKey;
+      }
+    }
+  } else {
+    creditError = "Unsupported payment kind.";
+  }
+
+  if (creditError) {
+    const failIso = new Date().toISOString();
+    await supabase
+      .from("crypto_payments")
+      .update({
+        credit_state: "failed",
+        credit_error: creditError,
+        updated_at: failIso,
+      })
+      .eq("id", locked.id);
+    return {
+      ok: false as const,
+      row: { ...locked, credit_state: "failed", credit_error: creditError, updated_at: failIso },
+      error: creditError,
+    };
+  }
+
+  const doneIso = new Date().toISOString();
+  const { data: doneRow } = await supabase
+    .from("crypto_payments")
+    .update({
+      credited: true,
+      credited_at: doneIso,
+      credit_state: "done",
+      credit_error: "",
+      updated_at: doneIso,
+    })
+    .eq("id", locked.id)
+    .select(CRYPTO_PAYMENT_SELECT)
+    .maybeSingle();
+
+  const finalRow = (doneRow as CryptoPaymentRow | null) ?? {
+    ...locked,
+    credited: true,
+    credited_at: doneIso,
+    credit_state: "done",
+    credit_error: "",
+    updated_at: doneIso,
+  };
+  return {
+    ok: true as const,
+    row: finalRow,
+    creditedNow: true as const,
+    state: stateAfterCredit,
+    response,
+  };
+};
+
 const claimWorldBossReward = async (
   supabase: ReturnType<typeof createClient>,
   wallet: string,
@@ -2396,6 +2780,18 @@ serve(async (req) => {
     if (!Number.isFinite(amount) || amount < WITHDRAW_MIN) {
       return json({ ok: false, error: `Minimum withdrawal is ${WITHDRAW_MIN} crystals.` });
     }
+    const payoutWalletRaw = String(body.payoutWallet ?? body.withdrawAddress ?? "").trim();
+    const accountIsEmail = isEmailIdentity(auth.wallet);
+    let payoutWallet = payoutWalletRaw;
+    if (!payoutWallet && !accountIsEmail && isValidSolanaAddress(auth.wallet)) {
+      payoutWallet = auth.wallet;
+    }
+    if (!payoutWallet) {
+      return json({ ok: false, error: "Enter your Solana address." });
+    }
+    if (!isValidSolanaAddress(payoutWallet)) {
+      return json({ ok: false, error: "Enter a valid Solana address." });
+    }
 
     const { data: profileRow, error: profileError } = await supabase
       .from("profiles")
@@ -2441,13 +2837,14 @@ serve(async (req) => {
       .from("withdrawals")
       .insert({
         wallet: auth.wallet,
+        payout_wallet: payoutWallet,
         name,
         crystals: amount,
         sol_amount: solAmount,
         status: "pending",
         created_at: createdAt,
       })
-      .select("id, wallet, name, crystals, sol_amount, status, created_at")
+      .select("id, wallet, payout_wallet, name, crystals, sol_amount, status, created_at")
       .maybeSingle();
 
     if (insertError || !withdrawalRow) {
@@ -2461,6 +2858,7 @@ serve(async (req) => {
     await auditEvent(supabase, auth.wallet, "withdraw_submit", {
       amount,
       solAmount,
+      payoutWallet,
       remainingCrystals: nextCrystals,
       withdrawalId: String(withdrawalRow.id ?? ""),
     });
@@ -2476,7 +2874,7 @@ serve(async (req) => {
   if (action === "withdraw_list") {
     const { data, error } = await supabase
       .from("withdrawals")
-      .select("id, wallet, name, crystals, sol_amount, status, created_at")
+      .select("id, wallet, payout_wallet, name, crystals, sol_amount, status, created_at")
       .eq("wallet", auth.wallet)
       .order("created_at", { ascending: false })
       .limit(20);
@@ -2847,6 +3245,267 @@ serve(async (req) => {
       buyGoldAlreadyProcessed: false,
       gold: Math.max(0, asInt(creditResult.state.gold, 0)),
       savedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
+    });
+  }
+
+  if (action === "nowpay_latest" || action === "nowpay_gold_latest") {
+    const rawKind = action === "nowpay_gold_latest" ? "buy_gold" : String(body.kind ?? "").trim();
+    if (!isNowpayKind(rawKind)) {
+      return json({ ok: false, error: "Invalid payment kind." });
+    }
+    const productRef = String(body.productRef ?? "").trim().slice(0, 64);
+
+    let query = supabase
+      .from("crypto_payments")
+      .select(CRYPTO_PAYMENT_SELECT)
+      .eq("wallet", auth.wallet)
+      .eq("provider", "nowpayments")
+      .eq("kind", rawKind)
+      .order("created_at", { ascending: false })
+      .limit(12);
+    if (productRef) {
+      query = query.eq("product_ref", productRef);
+    }
+    const { data, error } = await query;
+    if (error || !data) {
+      return json({ ok: false, error: "Failed to load crypto payments." });
+    }
+
+    const pending = (data as CryptoPaymentRow[]).find((row) => {
+      const status = normalizeNowpaymentsStatus(row.payment_status);
+      return NOWPAYMENTS_PENDING_STATUSES.has(status) && !Boolean(row.credited);
+    });
+
+    return json({
+      ok: true,
+      nowpayPayment: pending ? mapNowpaymentForClient(pending) : null,
+    });
+  }
+
+  if (action === "nowpay_create" || action === "nowpay_gold_create") {
+    const rawKind = action === "nowpay_gold_create" ? "buy_gold" : String(body.kind ?? "").trim();
+    if (!isNowpayKind(rawKind)) {
+      return json({ ok: false, error: "Invalid payment kind." });
+    }
+    const payCurrency = normalizeNowpaymentsStatus(body.payCurrency);
+    if (!isNowpaymentsCurrency(payCurrency)) {
+      return json({ ok: false, error: "Unsupported USDT network." });
+    }
+
+    let productRef = "";
+    let usdtAmount = 0;
+    let orderDescription = "";
+    let reward: Record<string, unknown> = {};
+    const auditDetails: Record<string, unknown> = { kind: rawKind };
+
+    if (rawKind === "buy_gold") {
+      const pack = getGoldPack(body.packId);
+      if (!pack) {
+        return json({ ok: false, error: "Invalid gold package." });
+      }
+      productRef = pack.id;
+      usdtAmount = pack.usdt;
+      orderDescription = `Doge Quest Gold ${pack.id}`;
+      reward = { gold: pack.gold };
+      auditDetails.packId = pack.id;
+      auditDetails.gold = pack.gold;
+    } else if (rawKind === "starter_pack_buy") {
+      const { data: profileRow } = await supabase
+        .from("profiles")
+        .select("state")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+      const state = normalizeState(profileRow?.state ?? null);
+      if (!state) return json({ ok: false, error: "Profile not found." });
+      if (Boolean(state.starterPackPurchased)) {
+        return json({ ok: false, error: "Starter pack already purchased." });
+      }
+      productRef = "starter-pack";
+      usdtAmount = STARTER_PACK_PRICE_USDT;
+      orderDescription = "Doge Quest Starter Pack";
+      reward = { starterPack: true };
+    } else if (rawKind === "premium_buy") {
+      const plan = getPremiumPlan(body.planId, body.days);
+      if (!plan) {
+        return json({ ok: false, error: "Invalid Premium plan." });
+      }
+      productRef = String(plan.id);
+      usdtAmount = Number(plan.usdt);
+      orderDescription = `Doge Quest Premium ${plan.id}`;
+      reward = { planId: plan.id, days: plan.days };
+      auditDetails.planId = plan.id;
+      auditDetails.days = plan.days;
+    } else if (rawKind === "fortune_buy") {
+      const spins = asInt(body.spins, 0);
+      if (!(FORTUNE_SPIN_PACKS as readonly number[]).includes(spins)) {
+        return json({ ok: false, error: "Invalid fortune spin pack." });
+      }
+      productRef = `fortune-${spins}`;
+      usdtAmount = (FORTUNE_SPIN_PRICES_USDT as Record<number, number>)[spins];
+      orderDescription = `Doge Quest Fortune Spins x${spins}`;
+      reward = { spins };
+      auditDetails.spins = spins;
+    }
+
+    if (!productRef || !Number.isFinite(usdtAmount) || usdtAmount <= 0) {
+      return json({ ok: false, error: "Invalid payment configuration." });
+    }
+
+    const existingPending = await loadRecentPendingNowpayPayment(supabase, auth.wallet, rawKind, productRef, now);
+    if (existingPending) {
+      return json({
+        ok: true,
+        nowpayReused: true,
+        nowpayPayment: mapNowpaymentForClient(existingPending),
+      });
+    }
+
+    const orderId = createNowpaymentsOrderId(auth.wallet, rawKind, productRef);
+    const createBody: Record<string, unknown> = {
+      price_amount: usdtAmount < 1 ? Number(usdtAmount.toFixed(3)) : Number(usdtAmount.toFixed(2)),
+      price_currency: "usd",
+      pay_currency: payCurrency,
+      order_id: orderId,
+      order_description: orderDescription,
+      is_fixed_rate: true,
+      is_fee_paid_by_user: false,
+    };
+    const callbackUrl = String(Deno.env.get("NOWPAYMENTS_IPN_CALLBACK_URL") ?? "").trim();
+    if (callbackUrl) {
+      createBody.ipn_callback_url = callbackUrl;
+    }
+
+    const createResult = await nowpaymentsFetch("POST", "/payment", createBody, NOWPAYMENTS_CREATE_TIMEOUT_MS);
+    if (!createResult.ok) {
+      return json({ ok: false, error: createResult.error });
+    }
+
+    const providerPaymentId = String(createResult.data.payment_id ?? "").trim().slice(0, 120);
+    if (!providerPaymentId) {
+      return json({ ok: false, error: "NOWPayments returned invalid payment id." });
+    }
+    const providerOrderId = String(createResult.data.order_id ?? orderId).trim().slice(0, 120) || orderId;
+    const paymentStatus = normalizeNowpaymentsStatus(createResult.data.payment_status ?? "waiting") || "waiting";
+    const nowIso = new Date().toISOString();
+
+    const { data: inserted, error: insertError } = await supabase
+      .from("crypto_payments")
+      .insert({
+        wallet: auth.wallet,
+        provider: "nowpayments",
+        kind: rawKind,
+        product_ref: productRef,
+        usdt_amount: usdtAmount < 1 ? Number(usdtAmount.toFixed(3)) : Number(usdtAmount.toFixed(2)),
+        pay_currency: payCurrency,
+        provider_payment_id: providerPaymentId,
+        provider_order_id: providerOrderId,
+        payment_status: paymentStatus,
+        credit_state: "pending",
+        credited: false,
+        credit_error: "",
+        reward,
+        provider_payload: createResult.data,
+        created_at: nowIso,
+        updated_at: nowIso,
+      })
+      .select(CRYPTO_PAYMENT_SELECT)
+      .maybeSingle();
+
+    if (insertError || !inserted) {
+      return json({ ok: false, error: "Failed to store crypto payment." });
+    }
+
+    await auditEvent(supabase, auth.wallet, "nowpay_create", {
+      ...auditDetails,
+      productRef,
+      usdtAmount,
+      payCurrency,
+      providerPaymentId,
+      providerOrderId,
+      paymentStatus,
+    });
+
+    return json({
+      ok: true,
+      nowpayReused: false,
+      nowpayPayment: mapNowpaymentForClient(inserted as CryptoPaymentRow),
+    });
+  }
+
+  if (action === "nowpay_payment_status") {
+    const providerPaymentId = String(body.providerPaymentId ?? "").trim().slice(0, 120);
+    if (!providerPaymentId) {
+      return json({ ok: false, error: "Missing payment id." });
+    }
+
+    const { data: rowData, error: rowError } = await supabase
+      .from("crypto_payments")
+      .select(CRYPTO_PAYMENT_SELECT)
+      .eq("wallet", auth.wallet)
+      .eq("provider", "nowpayments")
+      .eq("provider_payment_id", providerPaymentId)
+      .maybeSingle();
+
+    if (rowError || !rowData) {
+      return json({ ok: false, error: "Payment not found." });
+    }
+
+    let row = rowData as CryptoPaymentRow;
+    const statusResult = await nowpaymentsFetch(
+      "GET",
+      `/payment/${encodeURIComponent(providerPaymentId)}`,
+      undefined,
+      NOWPAYMENTS_STATUS_TIMEOUT_MS,
+    );
+    if (statusResult.ok) {
+      row = await refreshNowpaymentRowStatus(supabase, row, statusResult.data);
+    } else {
+      return json({ ok: false, error: statusResult.error });
+    }
+
+    const status = normalizeNowpaymentsStatus(row.payment_status);
+    let creditedNow = false;
+    let finalRow = row;
+    let stateAfterCredit: Record<string, unknown> | null = null;
+    let creditResponse: Record<string, unknown> = {};
+
+    if (NOWPAYMENTS_PAID_STATUSES.has(status)) {
+      const creditResult = await creditNowpaymentIfNeeded(supabase, row);
+      if (!creditResult.ok) {
+        await auditEvent(supabase, auth.wallet, "nowpay_credit_failed", {
+          kind: row.kind,
+          providerPaymentId,
+          status,
+          error: creditResult.error,
+        });
+        return json({ ok: false, error: creditResult.error || "Failed to credit payment." });
+      }
+      finalRow = creditResult.row;
+      creditedNow = Boolean(creditResult.creditedNow);
+      stateAfterCredit = creditResult.state;
+      creditResponse = creditResult.response ?? {};
+      if (creditedNow) {
+        await auditEvent(supabase, auth.wallet, "nowpay_credited", {
+          kind: row.kind,
+          providerPaymentId,
+          providerOrderId: row.provider_order_id,
+          status,
+          productRef: row.product_ref,
+          usdtAmount: row.usdt_amount,
+        });
+      }
+    }
+
+    return json({
+      ok: true,
+      nowpayPayment: mapNowpaymentForClient(finalRow),
+      nowpayPaid: NOWPAYMENTS_PAID_STATUSES.has(status),
+      nowpayTerminal: NOWPAYMENTS_TERMINAL_STATUSES.has(status),
+      nowpayCredited: Boolean(finalRow.credited || finalRow.credit_state === "done"),
+      nowpayCreditedNow: creditedNow,
+      ...creditResponse,
+      gold: stateAfterCredit ? Math.max(0, asInt(stateAfterCredit.gold, 0)) : undefined,
+      savedAt: stateAfterCredit ? new Date().toISOString() : undefined,
     });
   }
 
@@ -4014,8 +4673,8 @@ serve(async (req) => {
     }
 
     const wallet = String(body.wallet ?? "").trim();
-    if (!isWalletLike(wallet)) {
-      return json({ ok: false, error: "Invalid wallet." });
+    if (!isPlayerIdentity(wallet)) {
+      return json({ ok: false, error: "Invalid player id." });
     }
     if (wallet === auth.wallet) {
       return json({ ok: false, error: "You cannot block your own wallet." });
@@ -4050,8 +4709,8 @@ serve(async (req) => {
     }
 
     const wallet = String(body.wallet ?? "").trim();
-    if (!isWalletLike(wallet)) {
-      return json({ ok: false, error: "Invalid wallet." });
+    if (!isPlayerIdentity(wallet)) {
+      return json({ ok: false, error: "Invalid player id." });
     }
 
     const blocked = await getBlockedWallet(supabase, wallet);
@@ -4076,7 +4735,7 @@ serve(async (req) => {
     }
 
     const walletFilterRaw = String(body.walletFilter ?? "").trim();
-    const walletFilter = isWalletLike(walletFilterRaw) ? walletFilterRaw : "";
+    const walletFilter = isPlayerIdentity(walletFilterRaw) ? walletFilterRaw : "";
     const kindFilter = String(body.kindFilter ?? "").trim().slice(0, 120);
     const limit = clampInt(body.limit, 20, 1000);
 
@@ -4148,7 +4807,7 @@ serve(async (req) => {
     const limit = clampInt(body.limit, 20, 1000);
     const { data, error } = await supabase
       .from("withdrawals")
-      .select("id, wallet, name, crystals, sol_amount, status, created_at")
+      .select("id, wallet, payout_wallet, name, crystals, sol_amount, status, created_at")
       .order("created_at", { ascending: false })
       .limit(limit);
 

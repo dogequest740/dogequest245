@@ -75,12 +75,16 @@ using (true);
 create table if not exists public.withdrawals (
   id uuid primary key default gen_random_uuid(),
   wallet text not null,
+  payout_wallet text,
   name text not null,
   crystals int not null,
   sol_amount numeric not null,
   status text not null default 'pending',
   created_at timestamptz default now()
 );
+
+alter table public.withdrawals
+add column if not exists payout_wallet text;
 
 alter table public.withdrawals enable row level security;
 
@@ -183,7 +187,33 @@ create table if not exists public.fortune_state (
   updated_at timestamptz default now()
 );
 
+create table if not exists public.crypto_payments (
+  id uuid primary key default gen_random_uuid(),
+  wallet text not null,
+  provider text not null default 'nowpayments',
+  kind text not null,
+  product_ref text not null default '',
+  usdt_amount numeric not null,
+  pay_currency text not null default '',
+  provider_payment_id text not null unique,
+  provider_order_id text not null unique,
+  payment_status text not null default 'waiting',
+  credit_state text not null default 'pending',
+  credited boolean not null default false,
+  credited_at timestamptz,
+  credit_error text not null default '',
+  reward jsonb not null default '{}'::jsonb,
+  provider_payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create index if not exists crypto_payments_wallet_created_idx on public.crypto_payments(wallet, created_at desc);
+create index if not exists crypto_payments_status_idx on public.crypto_payments(payment_status, credit_state);
+create index if not exists crypto_payments_provider_payment_idx on public.crypto_payments(provider_payment_id);
+
 alter table public.wallet_auth_nonces enable row level security;
 alter table public.wallet_sessions enable row level security;
 alter table public.dungeon_state enable row level security;
 alter table public.fortune_state enable row level security;
+alter table public.crypto_payments enable row level security;
