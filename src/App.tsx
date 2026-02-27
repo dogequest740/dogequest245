@@ -4835,20 +4835,20 @@ function App() {
   }, [activePanel])
 
   useEffect(() => {
-    if (publicKey) return
-    if (buyGoldMethod === 'sol') {
-      setBuyGoldMethod('usdt')
+    const preferredMethod: BuyGoldMethod = usingWalletAuth ? 'sol' : 'usdt'
+    if (activePanel === 'buygold') {
+      setBuyGoldMethod((prev) => (prev === preferredMethod ? prev : preferredMethod))
     }
-    if (starterPayMethod === 'sol') {
-      setStarterPayMethod('usdt')
+    if (activePanel === 'starterpack') {
+      setStarterPayMethod((prev) => (prev === preferredMethod ? prev : preferredMethod))
     }
-    if (premiumPayMethod === 'sol') {
-      setPremiumPayMethod('usdt')
+    if (activePanel === 'premium') {
+      setPremiumPayMethod((prev) => (prev === preferredMethod ? prev : preferredMethod))
     }
-    if (fortunePayMethod === 'sol') {
-      setFortunePayMethod('usdt')
+    if (activePanel === 'fortune') {
+      setFortunePayMethod((prev) => (prev === preferredMethod ? prev : preferredMethod))
     }
-  }, [publicKey, buyGoldMethod, starterPayMethod, premiumPayMethod, fortunePayMethod])
+  }, [activePanel, usingWalletAuth])
 
   useEffect(() => {
     if (activePanel !== 'village') return
