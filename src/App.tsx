@@ -1035,7 +1035,7 @@ const GOLD_PACKAGES_SOL = [
   { id: 'gold-1200k', gold: 1200000, sol: 0.63, image: gold1200kImage },
 ] as const
 const GOLD_PACKAGES_USDT = [
-  { id: 'gold-150k', gold: 150000, usdt: 10, image: goldMiddleImage },
+  { id: 'gold-150k', gold: 150000, usdt: 11, image: goldMiddleImage },
   { id: 'gold-500k', gold: 500000, usdt: 34, image: goldLargeImage },
   { id: 'gold-1200k', gold: 1200000, usdt: 53.55, image: gold1200kImage },
 ] as const
@@ -1078,7 +1078,7 @@ const FORTUNE_SPIN_PRICES = {
 } as const
 const FORTUNE_SPIN_PACKS_SOL = [1, 10] as const
 const FORTUNE_SPIN_PRICES_USDT = {
-  20: 10,
+  20: 11,
   50: 17,
 } as const
 const FORTUNE_SPIN_PACKS_USDT = [20, 50] as const
@@ -8421,7 +8421,6 @@ function App() {
               </button>
 
               <div className="fortune-buy-row">
-                {fortunePayMethod === 'usdt' && <div className="withdraw-note">NOWPayments minimum: {NOWPAY_MIN_USDT} USDT.</div>}
                 {(fortunePayMethod === 'sol' ? FORTUNE_SPIN_PACKS_SOL : FORTUNE_SPIN_PACKS_USDT).map((spins) => {
                   const isSolPack = fortunePayMethod === 'sol'
                   const usdtPrice = isSolPack ? 0 : Number(FORTUNE_SPIN_PRICES_USDT[spins as FortuneUsdtPackId] ?? 0)

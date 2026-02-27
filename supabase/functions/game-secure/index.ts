@@ -71,7 +71,7 @@ const GOLD_PACKS_SOL = [
   { id: "gold-1200k", gold: 1200000, lamports: Math.round(0.63 * SOL_LAMPORTS) },
 ] as const;
 const GOLD_PACKS_USDT = [
-  { id: "gold-150k", gold: 150000, usdt: 10 },
+  { id: "gold-150k", gold: 150000, usdt: 11 },
   { id: "gold-500k", gold: 500000, usdt: 34 },
   { id: "gold-1200k", gold: 1200000, usdt: 53.55 },
 ] as const;
@@ -83,7 +83,7 @@ const FORTUNE_SPIN_PRICES_LAMPORTS: Record<(typeof FORTUNE_SPIN_PACKS_SOL)[numbe
   10: Math.round(0.06 * SOL_LAMPORTS),
 };
 const FORTUNE_SPIN_PRICES_USDT: Record<(typeof FORTUNE_SPIN_PACKS_USDT)[number], number> = {
-  20: 10,
+  20: 11,
   50: 17,
 };
 const ENERGY_REGEN_SECONDS = 420;
