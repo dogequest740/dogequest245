@@ -3488,6 +3488,8 @@ function App() {
     setEmailAuthBusy(false)
     setEmailAuthInfo('')
     setEmailAuthError('')
+    setActivePanel(null)
+    setHud(null)
   }
 
   const callDungeonSecure = async (
@@ -3901,6 +3903,20 @@ function App() {
     )
   }
 
+  const isFortuneRetryableError = (errorText: string) => {
+    const normalized = errorText.toLowerCase()
+    return (
+      normalized.includes('secure service unavailable') ||
+      normalized.includes('empty secure service response') ||
+      normalized.includes('failed to load fortune state') ||
+      normalized.includes('conflict') ||
+      normalized.includes('timeout') ||
+      normalized.includes('network') ||
+      normalized.includes('fetch') ||
+      normalized.includes('retry')
+    )
+  }
+
   const finalizePaymentCredit = async (
     action: string,
     payload: Record<string, unknown>,
@@ -4125,16 +4141,28 @@ function App() {
     }
     if (!silent) setFortuneStatusLoading(true)
     if (interactive) setFortuneError('')
-    const result = await callGameSecureAuthed('fortune_status', {}, interactive)
-    if (!result.ok) {
-      if (interactive) {
-        setFortuneError(result.error || 'Failed to load wheel status.')
+    try {
+      const attempts = interactive ? 3 : 2
+      let delayMs = 450
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const result = await callGameSecureAuthed('fortune_status', {}, false)
+        if (result.ok) {
+          applyFortuneStatus(result)
+          return
+        }
+        const errorText = String(result.error ?? '')
+        if (attempt >= attempts - 1 || !isFortuneRetryableError(errorText)) {
+          break
+        }
+        await new Promise<void>((resolve) => window.setTimeout(resolve, delayMs))
+        delayMs = Math.min(1800, Math.round(delayMs * 1.5))
       }
+      if (interactive) {
+        setFortuneError('Wheel status is temporarily unavailable. Please retry in a few seconds.')
+      }
+    } finally {
       if (!silent) setFortuneStatusLoading(false)
-      return
     }
-    applyFortuneStatus(result)
-    if (!silent) setFortuneStatusLoading(false)
   }
 
   const buyFortuneSpins = async (spins: FortunePackId) => {
@@ -4220,7 +4248,13 @@ function App() {
     try {
       const result = await callGameSecureAuthed('fortune_spin', {}, true)
       if (!result.ok || !result.fortuneReward) {
-        setFortuneError(result.error || 'Failed to spin wheel.')
+        const errorText = String(result.error || '')
+        if (isFortuneRetryableError(errorText)) {
+          setFortuneError('Spin result is delayed. Please wait a few seconds and try again.')
+          void loadFortuneStatus(false, true)
+        } else {
+          setFortuneError(result.error || 'Failed to spin wheel.')
+        }
         return
       }
 
@@ -4492,6 +4526,8 @@ function App() {
       setFortuneSpinUsed(null)
       setFortuneWheelSpinning(false)
       setSecurityAuthError('')
+      setActivePanel(null)
+      setHud(null)
       setStage('auth')
       return () => {
         active = false
