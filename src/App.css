@@ -4274,6 +4274,33 @@ button.ghost {
   height: 96px;
 }
 
+.premium-sale-banner {
+  margin-top: 6px;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 118, 118, 0.45);
+  background: linear-gradient(145deg, rgba(110, 22, 26, 0.95), rgba(56, 14, 18, 0.92));
+  box-shadow: 0 8px 14px rgba(0, 0, 0, 0.28), inset 0 0 12px rgba(255, 126, 126, 0.18);
+}
+
+.premium-sale-badge {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  color: #ffe9e9;
+  text-transform: uppercase;
+}
+
+.premium-sale-timer {
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffd8a8;
+}
+
 .premium-plans .premium-card {
   justify-items: stretch;
 }
@@ -4291,6 +4318,30 @@ button.ghost {
   letter-spacing: 0.5px;
   color: #ffe2a3;
   text-shadow: 0 0 10px rgba(255, 210, 120, 0.42);
+}
+
+.premium-price-old {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 13px;
+  color: rgba(255, 216, 216, 0.78);
+  text-decoration: line-through;
+}
+
+.premium-price-old-usdt {
+  color: rgba(255, 214, 168, 0.78);
+}
+
+.premium-price-new {
+  color: #ffe59b;
+  text-shadow: 0 0 12px rgba(255, 208, 100, 0.5);
+}
+
+.premium-price-new-usdt {
+  color: #9df5cd !important;
+  text-shadow: 0 0 10px rgba(126, 232, 182, 0.38);
 }
 
 .premium-plans .premium-card button {

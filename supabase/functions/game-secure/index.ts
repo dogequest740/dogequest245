@@ -93,6 +93,9 @@ const PREMIUM_PLANS = [
   { id: "premium-30", days: 30, lamports: Math.round(0.5 * SOL_LAMPORTS), usdt: 42.5 },
   { id: "premium-90", days: 90, lamports: Math.round(1 * SOL_LAMPORTS), usdt: 85 },
 ] as const;
+const PREMIUM_SALE_START_MS = Date.parse("2026-02-28T00:00:00Z");
+const PREMIUM_SALE_END_MS = Date.parse("2026-03-02T00:00:00Z");
+const PREMIUM_SALE_DISCOUNT_RATE = 0.5;
 const CRYPTO_PAYMENT_SELECT =
   "id, wallet, provider, kind, product_ref, usdt_amount, pay_currency, provider_payment_id, provider_order_id, payment_status, credit_state, credited, credited_at, credit_error, reward, provider_payload, created_at, updated_at";
 const VILLAGE_CASTLE_MAX_LEVEL = 3;
@@ -431,6 +434,31 @@ const getPremiumPlan = (planIdRaw: unknown, daysRaw: unknown) => {
     if (byDays) return byDays;
   }
   return null;
+};
+
+const isPremiumSaleActiveAt = (nowMs: number) =>
+  Number.isFinite(PREMIUM_SALE_START_MS) &&
+  Number.isFinite(PREMIUM_SALE_END_MS) &&
+  nowMs >= PREMIUM_SALE_START_MS &&
+  nowMs < PREMIUM_SALE_END_MS;
+
+const getPremiumPlanPricing = (plan: (typeof PREMIUM_PLANS)[number], now: Date) => {
+  const saleActive = isPremiumSaleActiveAt(now.getTime());
+  if (!saleActive) {
+    return {
+      lamports: plan.lamports,
+      usdt: Number(plan.usdt),
+      saleActive: false as const,
+      discountRate: 0,
+    };
+  }
+  const factor = 1 - PREMIUM_SALE_DISCOUNT_RATE;
+  return {
+    lamports: Math.max(1, Math.round(plan.lamports * factor)),
+    usdt: Number((Number(plan.usdt) * factor).toFixed(2)),
+    saleActive: true as const,
+    discountRate: PREMIUM_SALE_DISCOUNT_RATE,
+  };
 };
 
 const getGoldPackSol = (packIdRaw: unknown) => {
@@ -3382,12 +3410,15 @@ serve(async (req) => {
       if (!plan) {
         return json({ ok: false, error: "Invalid Premium plan." });
       }
+      const pricing = getPremiumPlanPricing(plan, now);
       productRef = String(plan.id);
-      usdtAmount = Number(plan.usdt);
+      usdtAmount = pricing.usdt;
       orderDescription = `Doge Quest Premium ${plan.id}`;
       reward = { planId: plan.id, days: plan.days };
       auditDetails.planId = plan.id;
       auditDetails.days = plan.days;
+      auditDetails.saleActive = pricing.saleActive;
+      auditDetails.discountRate = pricing.discountRate;
     } else if (rawKind === "fortune_buy") {
       const spins = asInt(body.spins, 0);
       if (!(FORTUNE_SPIN_PACKS_USDT as readonly number[]).includes(spins)) {
@@ -3728,6 +3759,7 @@ serve(async (req) => {
     if (!plan) {
       return json({ ok: false, error: "Invalid Premium plan." });
     }
+    const pricing = getPremiumPlanPricing(plan, now);
 
     const txSignature = String(body.txSignature ?? "").trim().slice(0, 120);
     if (!isTxSignatureLike(txSignature)) {
@@ -3752,7 +3784,7 @@ serve(async (req) => {
       });
     }
 
-    const txCheck = await verifyPremiumPaymentTx(auth.wallet, txSignature, plan.lamports, now);
+    const txCheck = await verifyPremiumPaymentTx(auth.wallet, txSignature, pricing.lamports, now);
     if (!txCheck.ok) {
       return json({ ok: false, error: txCheck.error });
     }
@@ -3794,7 +3826,9 @@ serve(async (req) => {
           planId: plan.id,
           days: plan.days,
           txSignature,
-          lamports: plan.lamports,
+          lamports: pricing.lamports,
+          saleActive: pricing.saleActive,
+          discountRate: pricing.discountRate,
           premiumEndsAt: nextPremiumEndsAt,
           txBlockTime: txCheck.blockTime,
           txSlot: txCheck.slot,

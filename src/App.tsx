@@ -1062,6 +1062,9 @@ const PREMIUM_PLANS = [
   { id: 'premium-30', days: 30, sol: 0.5, usdt: 42.5 },
   { id: 'premium-90', days: 90, sol: 1, usdt: 85 },
 ] as const
+const PREMIUM_SALE_START_MS = Date.parse('2026-02-28T00:00:00Z')
+const PREMIUM_SALE_END_MS = Date.parse('2026-03-02T00:00:00Z')
+const PREMIUM_SALE_DISCOUNT_RATE = 0.5
 type PremiumPlanId = (typeof PREMIUM_PLANS)[number]['id']
 const PREMIUM_DAILY_KEYS = 5
 const PREMIUM_DAILY_GOLD = 50000
@@ -2039,6 +2042,33 @@ const isPremiumActiveAt = (premiumEndsAt: number, nowMs = Date.now()) => premium
 const getPremiumDaysLeft = (premiumEndsAt: number, nowMs = Date.now()) => {
   if (!isPremiumActiveAt(premiumEndsAt, nowMs)) return 0
   return Math.max(1, Math.ceil((premiumEndsAt - nowMs) / (24 * 60 * 60 * 1000)))
+}
+const isPremiumSaleActiveAt = (nowMs = Date.now()) =>
+  Number.isFinite(PREMIUM_SALE_START_MS) &&
+  Number.isFinite(PREMIUM_SALE_END_MS) &&
+  nowMs >= PREMIUM_SALE_START_MS &&
+  nowMs < PREMIUM_SALE_END_MS
+const getPremiumSaleRemainingSec = (nowMs = Date.now()) =>
+  Math.max(0, Math.ceil((PREMIUM_SALE_END_MS - nowMs) / 1000))
+const getPremiumPlanPrice = (plan: (typeof PREMIUM_PLANS)[number], nowMs = Date.now()) => {
+  const saleActive = isPremiumSaleActiveAt(nowMs)
+  if (!saleActive) {
+    return {
+      saleActive: false,
+      sol: plan.sol,
+      usdt: plan.usdt,
+      baseSol: plan.sol,
+      baseUsdt: plan.usdt,
+    }
+  }
+  const factor = 1 - PREMIUM_SALE_DISCOUNT_RATE
+  return {
+    saleActive: true,
+    sol: Number((plan.sol * factor).toFixed(3)),
+    usdt: Number((plan.usdt * factor).toFixed(2)),
+    baseSol: plan.sol,
+    baseUsdt: plan.usdt,
+  }
 }
 const getFortuneRewardById = (id: string) => FORTUNE_REWARDS.find((reward) => reward.id === id) ?? null
 const getFortuneRewardIcon = (reward: FortuneReward) => {
@@ -5939,6 +5969,7 @@ function App() {
       setPremiumError('Connect your wallet to buy Premium.')
       return
     }
+    const pricing = getPremiumPlanPrice(plan)
     setPremiumLoading(plan.id)
     setPremiumError('')
     try {
@@ -5949,11 +5980,11 @@ function App() {
         return
       }
 
-      const lamports = Math.round(plan.sol * LAMPORTS_PER_SOL)
+      const lamports = Math.round(pricing.sol * LAMPORTS_PER_SOL)
       const balance = await connection.getBalance(publicKey)
       const feeBuffer = 5000
       if (balance < lamports + feeBuffer) {
-        setPremiumError(`Not enough SOL. Need ${plan.sol} SOL + network fee.`)
+        setPremiumError(`Not enough SOL. Need ${pricing.sol} SOL + network fee.`)
         setPremiumLoading(null)
         return
       }
@@ -6563,6 +6594,9 @@ function App() {
   const levelUpNotice = hud?.levelUpNotice ?? null
   const currentDayKey = getDayKey()
   const dailyResetSeconds = getSecondsToNextUtcDay()
+  const premiumSaleNowMs = Date.now()
+  const premiumSaleActive = isPremiumSaleActiveAt(premiumSaleNowMs)
+  const premiumSaleRemainingSec = premiumSaleActive ? getPremiumSaleRemainingSec(premiumSaleNowMs) : 0
   const premiumActive = Boolean(hud && isPremiumActiveAt(hud.premiumEndsAt))
   const premiumDaysLeft = hud ? getPremiumDaysLeft(hud.premiumEndsAt) : 0
   const premiumClaimReady = Boolean(hud && premiumActive && hud.premiumClaimDay !== currentDayKey)
@@ -8189,6 +8223,12 @@ function App() {
                     {premiumActive ? `Active: ${premiumDaysLeft} day${premiumDaysLeft === 1 ? '' : 's'} left.` : 'Inactive.'}
                   </div>
                   {premiumActive && <div className="withdraw-note">Ends: {new Date(hud.premiumEndsAt).toLocaleString()}</div>}
+                  {premiumSaleActive && (
+                    <div className="premium-sale-banner">
+                      <span className="premium-sale-badge">Flash Sale 50% OFF</span>
+                      <span className="premium-sale-timer">Ends in {formatLongTimer(premiumSaleRemainingSec)}</span>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="buygold-method-row">
@@ -8229,15 +8269,24 @@ function App() {
                 </label>
               )}
               <div className="shop-grid premium-plans">
-                {PREMIUM_PLANS.map((plan) => (
+                {PREMIUM_PLANS.map((plan) => {
+                  const pricing = getPremiumPlanPrice(plan, premiumSaleNowMs)
+                  return (
                   <div key={plan.id} className="shop-card premium-card">
                     <div className="shop-title">{plan.days} days</div>
                     <div className="shop-desc">{plan.id === 'premium-90' ? 'Best value' : 'Starter premium plan'}</div>
-                    <div className="shop-meta">
+                    {pricing.saleActive && (
+                      <div className="premium-price-old">
+                        <img className="icon-img tiny" src={iconSolana} alt="" />
+                        {plan.sol} SOL
+                        <span className="premium-price-old-usdt"> / {formatUsdt(plan.usdt)} USDT</span>
+                      </div>
+                    )}
+                    <div className="shop-meta premium-price-new">
                       <img className="icon-img small" src={iconSolana} alt="" />
-                      {plan.sol} SOL
+                      {pricing.sol} SOL
                     </div>
-                    <div className="shop-meta buygold-usdt-meta">{formatUsdt(plan.usdt)} USDT</div>
+                    <div className="shop-meta buygold-usdt-meta premium-price-new-usdt">{formatUsdt(pricing.usdt)} USDT</div>
                     <button
                       type="button"
                       disabled={
@@ -8266,7 +8315,7 @@ function App() {
                             : `BUY ${plan.days}D (USDT)`)}
                     </button>
                   </div>
-                ))}
+                )})}
               </div>
               {premiumPayMethod === 'usdt' && showNowpayPremiumModal && premiumNowpayPayment && (
                 <div className="modal-backdrop modal-backdrop-top nowpay-modal-backdrop" onClick={() => setShowNowpayPremiumModal(false)}>
