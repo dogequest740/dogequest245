@@ -3213,6 +3213,7 @@ function App() {
   const [adminLoading, setAdminLoading] = useState(false)
   const [adminError, setAdminError] = useState('')
   const [securityAuthError, setSecurityAuthError] = useState('')
+  const [walletSessionVerified, setWalletSessionVerified] = useState(false)
   const [authLoginMethod, setAuthLoginMethod] = useState<'wallet' | 'email'>('wallet')
   const [emailAuthUser, setEmailAuthUser] = useState<{ id: string; email: string } | null>(null)
   const [emailAuthLoading, setEmailAuthLoading] = useState(Boolean(supabase))
@@ -3381,9 +3382,9 @@ function App() {
   const usingEmailAuth = !usingWalletAuth && Boolean(emailIdentity)
 
   const isAdmin = useMemo(() => {
-    if (!walletAddress) return false
+    if (!walletAddress || !walletSessionVerified) return false
     return adminWallets.includes(walletAddress)
-  }, [walletAddress, adminWallets])
+  }, [walletAddress, walletSessionVerified, adminWallets])
 
   const referralWalletFromUrl = useMemo(() => {
     if (typeof window === 'undefined') return ''
@@ -3564,10 +3565,11 @@ function App() {
 
   const handleSecurityAuthFailure = (message: string, interactive = false) => {
     if (!message) return
+    setWalletSessionVerified(false)
     if (interactive || isBlockedAuthError(message)) {
       setSecurityAuthError(message)
     }
-    if (isBlockedAuthError(message)) {
+    if (interactive || isBlockedAuthError(message)) {
       dungeonSessionRef.current = null
       dungeonSessionRequestRef.current = null
       secureSessionInitRef.current = false
@@ -3609,7 +3611,10 @@ function App() {
 
     const request = (async () => {
       if (wallet) {
-        if (!signMessage) return null
+        if (!signMessage) {
+          setWalletSessionVerified(false)
+          return null
+        }
         const challenge = await callDungeonSecure({ action: 'challenge', wallet })
         if (!challenge.ok || !challenge.message) {
           handleSecurityAuthFailure(challenge.error || 'Wallet login failed.', interactive)
@@ -3620,6 +3625,12 @@ function App() {
         try {
           signature = await signMessage(new TextEncoder().encode(challenge.message))
         } catch {
+          setWalletSessionVerified(false)
+          dungeonSessionRef.current = null
+          dungeonSessionRequestRef.current = null
+          secureSessionInitRef.current = false
+          setActivePanel(null)
+          setStage('auth')
           if (interactive) {
             setSecurityAuthError('Wallet signature was rejected.')
           }
@@ -3641,6 +3652,7 @@ function App() {
           token: login.token,
           expiresAt: Number.isFinite(expiresAtMs) ? expiresAtMs : Date.now() + 24 * 60 * 60 * 1000,
         }
+        setWalletSessionVerified(true)
         setSecurityAuthError('')
         return login.token
       }
@@ -3693,8 +3705,9 @@ function App() {
         token: login.token,
         expiresAt: Number.isFinite(expiresAtMs) ? expiresAtMs : Date.now() + 24 * 60 * 60 * 1000,
       }
-      setSecurityAuthError('')
-      return login.token
+      setWalletSessionVerified(true)
+        setSecurityAuthError('')
+        return login.token
     })()
 
     dungeonSessionRequestRef.current = request
@@ -4555,6 +4568,7 @@ function App() {
       setFortuneSpinResult(null)
       setFortuneSpinUsed(null)
       setFortuneWheelSpinning(false)
+      setWalletSessionVerified(false)
       setSecurityAuthError('')
       setActivePanel(null)
       setHud(null)
@@ -4567,6 +4581,7 @@ function App() {
     dungeonSessionRef.current = null
     dungeonSessionRequestRef.current = null
     secureSessionInitRef.current = false
+    setWalletSessionVerified(false)
     if (!supabase) {
       isNewProfileRef.current = false
       referralProcessedRef.current = false
@@ -4584,7 +4599,21 @@ function App() {
       }
     }
 
-    loadProfileStateSecure(true).then((saved) => {
+    ;(async () => {
+      let walletSessionOk = false
+      if (usingWalletAuth) {
+        const token = await ensureDungeonSession(true)
+        if (!active) return
+        if (!token) {
+          isNewProfileRef.current = false
+          pendingProfileRef.current = null
+          setStage('auth')
+          return
+        }
+        walletSessionOk = true
+      }
+
+      const saved = await loadProfileStateSecure(false)
       if (!active) return
       if (saved) {
         isNewProfileRef.current = false
@@ -4595,13 +4624,17 @@ function App() {
         setPlayerName(sanitizePlayerName(saved.state.name || ''))
         setStage('game')
       } else {
+        if (usingWalletAuth && !walletSessionOk) {
+          setStage('auth')
+          return
+        }
         isNewProfileRef.current = true
         referralProcessedRef.current = false
         profileUpdatedAtRef.current = ''
         pendingProfileRef.current = null
         setStage('select')
       }
-    })
+    })()
 
     return () => {
       active = false
@@ -7304,7 +7337,13 @@ function App() {
             <button
               className="start-button"
               disabled={playerName.trim().length < 2}
-              onClick={() => setStage('game')}
+              onClick={async () => {
+                if (usingWalletAuth && !walletSessionVerified) {
+                  const token = await ensureDungeonSession(true)
+                  if (!token) return
+                }
+                setStage('game')
+              }}
             >
               Start adventure
             </button>
@@ -9765,5 +9804,9 @@ function App() {
 }
 
 export default App
+
+
+
+
 
 
