@@ -1027,7 +1027,7 @@ const CRYSTAL_TO_GOLD_SWAP_RATE = 75
 const STAKE_BONUS = 0.05
 const STAKE_MIN = 50
 const STAKE_LOCK_HOURS = 24
-const GOLD_STORE_WALLET = new PublicKey('9a5GXRjX6HKh9Yjc9d7gp9RFmuRvMQAcV1VJ9WV7LU8c')
+const GOLD_STORE_WALLET = new PublicKey('6tsXjdYxaqKBf83wHM5ps5rMGvZ6wq4Fc7N1QtSQGPrg')
 const GOLD_PACKAGES_SOL = [
   { id: 'gold-50k', gold: 50000, sol: 0.05, image: goldSmallImage },
   { id: 'gold-100k', gold: 100000, sol: 0.1, image: goldMiddleImage },
@@ -9826,9 +9826,4 @@ function App() {
 }
 
 export default App
-
-
-
-
-
 

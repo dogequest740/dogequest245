@@ -4,7 +4,7 @@ use solana_program::pubkey;
 
 declare_id!("11111111111111111111111111111111");
 
-pub const TREASURY_WALLET: Pubkey = pubkey!("9a5GXRjX6HKh9Yjc9d7gp9RFmuRvMQAcV1VJ9WV7LU8c");
+pub const TREASURY_WALLET: Pubkey = pubkey!("6tsXjdYxaqKBf83wHM5ps5rMGvZ6wq4Fc7N1QtSQGPrg");
 
 #[program]
 pub mod dogequest_payments {

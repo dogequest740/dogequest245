@@ -43,7 +43,7 @@ const STARTER_PACK_ITEMS: Array<{ type: ConsumableType; qty: number }> = [
   { type: "attack", qty: 10 },
   { type: "key", qty: 20 },
 ];
-const PREMIUM_PAYMENT_WALLET = "9a5GXRjX6HKh9Yjc9d7gp9RFmuRvMQAcV1VJ9WV7LU8c";
+const PREMIUM_PAYMENT_WALLET = "6tsXjdYxaqKBf83wHM5ps5rMGvZ6wq4Fc7N1QtSQGPrg";
 const PREMIUM_TX_MAX_AGE_SECONDS = 2 * 60 * 60;
 const PAYMENT_TX_LOOKUP_ATTEMPTS = 22;
 const PAYMENT_TX_LOOKUP_BASE_DELAY_MS = 1200;
