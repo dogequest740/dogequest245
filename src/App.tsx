@@ -3183,7 +3183,7 @@ const drawGame = (
 }
 
 function App() {
-  const { publicKey, sendTransaction, signMessage } = useWallet()
+  const { publicKey, sendTransaction, signMessage, disconnect } = useWallet()
   const { connection } = useConnection()
   const [stage, setStage] = useState<'auth' | 'select' | 'game'>('auth')
   const [selectedId, setSelectedId] = useState(CHARACTER_CLASSES[0].id)
@@ -3217,6 +3217,7 @@ function App() {
   const [authLoginMethod, setAuthLoginMethod] = useState<'wallet' | 'email'>('wallet')
   const [emailAuthUser, setEmailAuthUser] = useState<{ id: string; email: string } | null>(null)
   const [emailAuthLoading, setEmailAuthLoading] = useState(Boolean(supabase))
+  const [walletLogoutBusy, setWalletLogoutBusy] = useState(false)
   const [emailAuthMode, setEmailAuthMode] = useState<'signin' | 'signup'>('signin')
   const [emailAuthEmail, setEmailAuthEmail] = useState('')
   const [emailAuthPassword, setEmailAuthPassword] = useState('')
@@ -3521,6 +3522,23 @@ function App() {
     setEmailAuthError('')
     setActivePanel(null)
     setHud(null)
+  }
+
+  const signOutWalletAuth = async () => {
+    setWalletLogoutBusy(true)
+    try {
+      dungeonSessionRef.current = null
+      dungeonSessionRequestRef.current = null
+      secureSessionInitRef.current = false
+      setWalletSessionVerified(false)
+      setSecurityAuthError('')
+      setActivePanel(null)
+      setHud(null)
+      setStage('auth')
+      await disconnect().catch(() => undefined)
+    } finally {
+      setWalletLogoutBusy(false)
+    }
   }
 
   const callDungeonSecure = async (
@@ -6789,6 +6807,11 @@ function App() {
               >
                 {musicEnabled ? 'Music On' : 'Music Off'}
               </button>
+              {usingWalletAuth && (
+                <button type="button" className="wallet-button email-logout-btn" onClick={signOutWalletAuth} disabled={walletLogoutBusy}>
+                  {walletLogoutBusy ? '...' : 'Log out'}
+                </button>
+              )}
               {usingEmailAuth && !usingWalletAuth && (
                 <button type="button" className="wallet-button email-logout-btn" onClick={signOutEmailAuth} disabled={emailAuthBusy}>
                   {emailAuthBusy ? '...' : 'Log out'}
