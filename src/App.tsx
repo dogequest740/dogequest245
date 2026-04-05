@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useConnection, useWallet } from '@solana/wallet-adapter-react'
-import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
+import { WalletModalButton } from '@solana/wallet-adapter-react-ui'
 import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
 import knightSprite from './assets/knight.png'
 import mageSprite from './assets/mage.png'
@@ -6756,7 +6756,7 @@ function App() {
               >
                 {musicEnabled ? 'Music On' : 'Music Off'}
               </button>
-              {!usingEmailAuth && <WalletMultiButton className="wallet-button" />}
+              {!usingEmailAuth && <WalletModalButton className="wallet-button" />}
               {usingEmailAuth && !usingWalletAuth && (
                 <button type="button" className="wallet-button email-logout-btn" onClick={signOutEmailAuth} disabled={emailAuthBusy}>
                   {emailAuthBusy ? '...' : 'Log out'}
@@ -6836,7 +6836,7 @@ function App() {
                 {authLoginMethod === 'wallet' ? (
                   <>
                     <div className="auth-cta-row">
-                      <WalletMultiButton className="wallet-button auth-wallet" />
+                      <WalletModalButton className="wallet-button auth-wallet" />
                     </div>
                     <span className="auth-note">Connect wallet to continue. We only read your address.</span>
                   </>
@@ -7215,7 +7215,7 @@ function App() {
               <div className="auth-footer-title">Ready to enter the realm?</div>
               <div className="auth-footer-copy">Sign in with wallet or email, then choose a class to begin.</div>
             </div>
-            <WalletMultiButton className="wallet-button auth-wallet" />
+            <WalletModalButton className="wallet-button auth-wallet" />
           </div>
         </section>
       )}
@@ -9765,4 +9765,5 @@ function App() {
 }
 
 export default App
+
 
