@@ -7176,9 +7176,9 @@ function App() {
           <div className="auth-section roadmap reveal delay-8">
             <h2>Roadmap</h2>
             <ul className="roadmap-list">
-              <li className="roadmap-item">
+              <li className="roadmap-item completed">
                 <img className="roadmap-icon" src={iconBattle} alt="" />
-                <div>Game launch</div>
+                <div className="roadmap-label">Game launch</div>
               </li>
               <li className="roadmap-item">
                 <img className="roadmap-icon" src={iconName} alt="" />
