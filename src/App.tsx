@@ -6789,7 +6789,6 @@ function App() {
               >
                 {musicEnabled ? 'Music On' : 'Music Off'}
               </button>
-              {!usingEmailAuth && <WalletModalButton className="wallet-button" />}
               {usingEmailAuth && !usingWalletAuth && (
                 <button type="button" className="wallet-button email-logout-btn" onClick={signOutEmailAuth} disabled={emailAuthBusy}>
                   {emailAuthBusy ? '...' : 'Log out'}
