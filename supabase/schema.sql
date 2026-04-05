@@ -204,13 +204,24 @@ create table if not exists public.crypto_payments (
   credit_error text not null default '',
   reward jsonb not null default '{}'::jsonb,
   provider_payload jsonb not null default '{}'::jsonb,
+  treasury_address text not null default '',
+  tx_hash text not null default '',
+  expires_at timestamptz,
+  detected_at timestamptz,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
 
+alter table public.crypto_payments add column if not exists treasury_address text not null default '';
+alter table public.crypto_payments add column if not exists tx_hash text not null default '';
+alter table public.crypto_payments add column if not exists expires_at timestamptz;
+alter table public.crypto_payments add column if not exists detected_at timestamptz;
+
 create index if not exists crypto_payments_wallet_created_idx on public.crypto_payments(wallet, created_at desc);
 create index if not exists crypto_payments_status_idx on public.crypto_payments(payment_status, credit_state);
 create index if not exists crypto_payments_provider_payment_idx on public.crypto_payments(provider_payment_id);
+create index if not exists crypto_payments_provider_currency_idx on public.crypto_payments(provider, pay_currency, created_at desc);
+create index if not exists crypto_payments_tx_hash_idx on public.crypto_payments(tx_hash) where tx_hash <> '';
 
 alter table public.wallet_auth_nonces enable row level security;
 alter table public.wallet_sessions enable row level security;

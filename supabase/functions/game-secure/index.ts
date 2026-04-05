@@ -49,23 +49,29 @@ const PAYMENT_TX_LOOKUP_ATTEMPTS = 22;
 const PAYMENT_TX_LOOKUP_BASE_DELAY_MS = 1200;
 const PROFILE_UPDATE_RETRY_ATTEMPTS = 10;
 const BLOCKED_ERROR_MESSAGE = "You have been banned for cheating.";
-const NOWPAYMENTS_API_BASE = "https://api.nowpayments.io/v1";
-const NOWPAYMENTS_CREATE_TIMEOUT_MS = 18_000;
-const NOWPAYMENTS_STATUS_TIMEOUT_MS = 15_000;
-const NOWPAYMENTS_PENDING_STATUSES = new Set(["waiting", "confirming", "sending", "partially_paid"]);
-const NOWPAYMENTS_PAID_STATUSES = new Set(["finished", "confirmed"]);
-const NOWPAYMENTS_TERMINAL_STATUSES = new Set(["finished", "confirmed", "failed", "expired", "refunded"]);
-const NOWPAYMENTS_ALLOWED_USDT_NETWORKS = [
+const SELF_CUSTODY_PROVIDER = "selfcustody";
+const SELF_CUSTODY_PENDING_STATUSES = new Set(["waiting", "confirming", "seen"]);
+const SELF_CUSTODY_PAID_STATUSES = new Set(["finished"]);
+const SELF_CUSTODY_TERMINAL_STATUSES = new Set(["finished", "failed", "expired"]);
+const SELF_CUSTODY_ALLOWED_USDT_NETWORKS = [
   "usdttrc20",
-  "usdtbsc",
-  "usdterc20",
   "usdtmatic",
-  "usdtsol",
 ] as const;
-const NOWPAYMENTS_SMALL_USDT_PREFERRED_NETWORKS = ["usdtmatic", "usdterc20"] as const;
-const NOWPAYMENTS_PENDING_REUSE_MS = 30 * 60 * 1000;
-const NOWPAYMENTS_MIN_USDT = 10;
-const NOWPAYMENTS_SMALL_USDT_FORCE_LIMIT = 20;
+const SELF_CUSTODY_PENDING_REUSE_MS = 30 * 60 * 1000;
+const SELF_CUSTODY_ORDER_TTL_MS = 45 * 60 * 1000;
+const SELF_CUSTODY_USDT_DECIMALS = 6;
+const POLYGON_USDT_CONTRACT = "0xc2132D05D31c914a87C6611C10748AEb04B58e8F";
+const TRON_USDT_CONTRACT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
+const POLYGON_RPC_FALLBACK = "https://polygon-rpc.com";
+const TRONGRID_API_FALLBACK = "https://api.trongrid.io";
+const POLYGON_CONFIRMATIONS_REQUIRED = 12;
+const SELF_CUSTODY_AMOUNT_OFFSET_MAX = 9999;
+const NOWPAYMENTS_PENDING_STATUSES = SELF_CUSTODY_PENDING_STATUSES;
+const NOWPAYMENTS_PAID_STATUSES = SELF_CUSTODY_PAID_STATUSES;
+const NOWPAYMENTS_TERMINAL_STATUSES = SELF_CUSTODY_TERMINAL_STATUSES;
+const NOWPAYMENTS_ALLOWED_USDT_NETWORKS = SELF_CUSTODY_ALLOWED_USDT_NETWORKS;
+const NOWPAYMENTS_PENDING_REUSE_MS = SELF_CUSTODY_PENDING_REUSE_MS;
+const NOWPAYMENTS_MIN_USDT = 0;
 const GOLD_PACKS_SOL = [
   { id: "gold-50k", gold: 50000, lamports: Math.round(0.05 * SOL_LAMPORTS) },
   { id: "gold-100k", gold: 100000, lamports: Math.round(0.1 * SOL_LAMPORTS) },
@@ -97,7 +103,7 @@ const PREMIUM_SALE_START_MS = Date.parse("2026-02-28T00:00:00Z");
 const PREMIUM_SALE_END_MS = Date.parse("2026-03-02T00:00:00Z");
 const PREMIUM_SALE_DISCOUNT_RATE = 0.5;
 const CRYPTO_PAYMENT_SELECT =
-  "id, wallet, provider, kind, product_ref, usdt_amount, pay_currency, provider_payment_id, provider_order_id, payment_status, credit_state, credited, credited_at, credit_error, reward, provider_payload, created_at, updated_at";
+  "id, wallet, provider, kind, product_ref, usdt_amount, pay_currency, provider_payment_id, provider_order_id, payment_status, credit_state, credited, credited_at, credit_error, reward, provider_payload, treasury_address, tx_hash, expires_at, detected_at, created_at, updated_at";
 const VILLAGE_CASTLE_MAX_LEVEL = 3;
 const VILLAGE_OTHER_MAX_LEVEL = 25;
 const VILLAGE_PREMIUM_UPGRADE_TIME_MULTIPLIER = 0.5;
@@ -266,6 +272,10 @@ type CryptoPaymentRow = {
   credit_error: string;
   reward: Record<string, unknown>;
   provider_payload?: Record<string, unknown>;
+  treasury_address?: string;
+  tx_hash?: string;
+  expires_at?: string | null;
+  detected_at?: string | null;
   created_at: string;
   updated_at?: string;
 };
@@ -481,54 +491,6 @@ const isNowpaymentsCurrency = (value: string): value is (typeof NOWPAYMENTS_ALLO
 
 const normalizeNowpaymentsStatus = (value: unknown) => String(value ?? "").trim().toLowerCase();
 
-const nowpaymentsFetch = async (
-  method: "GET" | "POST",
-  path: string,
-  body?: Record<string, unknown>,
-  timeoutMs = NOWPAYMENTS_STATUS_TIMEOUT_MS,
-) => {
-  const apiKey = String(Deno.env.get("NOWPAYMENTS_API_KEY") ?? "").trim();
-  if (!apiKey) {
-    return { ok: false as const, error: "NOWPayments is not configured." };
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Math.max(2000, timeoutMs));
-  try {
-    const response = await fetch(`${NOWPAYMENTS_API_BASE}${path}`, {
-      method,
-      headers: {
-        "x-api-key": apiKey,
-        "Content-Type": "application/json",
-      },
-      body: body ? JSON.stringify(body) : undefined,
-      signal: controller.signal,
-    });
-
-    let data: Record<string, unknown> | null = null;
-    try {
-      data = await response.json() as Record<string, unknown>;
-    } catch {
-      data = null;
-    }
-
-    if (!response.ok) {
-      const message = typeof data?.message === "string"
-        ? data.message
-        : typeof data?.error === "string"
-        ? data.error
-        : `HTTP ${response.status}`;
-      return { ok: false as const, error: `NOWPayments error: ${message}` };
-    }
-
-    return { ok: true as const, data: data ?? {} };
-  } catch {
-    return { ok: false as const, error: "NOWPayments request failed." };
-  } finally {
-    clearTimeout(timer);
-  }
-};
-
 const createNowpaymentsOrderId = (wallet: string, kind: string, productRef: string) => {
   const walletPart = wallet.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 16) || "player";
   const randomPart = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
@@ -555,13 +517,326 @@ const mapNowpaymentForClient = (row: CryptoPaymentRow) => {
     productRef: String(row.product_ref ?? ""),
     usdtAmount: Number(row.usdt_amount ?? 0),
     payCurrency: String(row.pay_currency ?? ""),
-    payAmount: parseNowpaymentAmount(payload.pay_amount),
-    payAddress: String(payload.pay_address ?? ""),
+    payAmount: parseNowpaymentAmount(payload.pay_amount ?? row.usdt_amount),
+    payAddress: String(payload.pay_address ?? row.treasury_address ?? ""),
     status: normalizeNowpaymentsStatus(row.payment_status),
     credited: Boolean(row.credited),
+    txHash: String(row.tx_hash ?? ""),
+    expiresAt: row.expires_at ? String(row.expires_at) : "",
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? ""),
   };
+};
+
+
+const toUsdtAtomicUnits = (value: unknown) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0n;
+  return BigInt(Math.round(numeric * 1_000_000));
+};
+
+const formatUsdtAtomicUnits = (value: bigint) => {
+  const normalized = value < 0n ? 0n : value;
+  const whole = normalized / 1_000_000n;
+  const fraction = String(normalized % 1_000_000n).padStart(6, "0");
+  return `${whole}.${fraction}`;
+};
+
+const getSelfCustodyTreasuryAddress = (payCurrencyRaw: string) => {
+  const payCurrency = normalizeNowpaymentsStatus(payCurrencyRaw);
+  if (payCurrency === "usdtmatic") {
+    return String(Deno.env.get("POLYGON_USDT_TREASURY_ADDRESS") ?? "").trim();
+  }
+  if (payCurrency === "usdttrc20") {
+    return String(Deno.env.get("TRON_USDT_TREASURY_ADDRESS") ?? "").trim();
+  }
+  return "";
+};
+
+const getSelfCustodyNetworkConfigError = (payCurrencyRaw: string) => {
+  const payCurrency = normalizeNowpaymentsStatus(payCurrencyRaw);
+  if (payCurrency === "usdtmatic") return "Polygon treasury wallet is not configured.";
+  if (payCurrency === "usdttrc20") return "TRON treasury wallet is not configured.";
+  return "Unsupported USDT network.";
+};
+
+const getPolygonRpcUrl = () => String(Deno.env.get("POLYGON_RPC_URL") ?? POLYGON_RPC_FALLBACK).trim() || POLYGON_RPC_FALLBACK;
+const getTronGridBaseUrl = () => String(Deno.env.get("TRONGRID_API_BASE") ?? TRONGRID_API_FALLBACK).trim() || TRONGRID_API_FALLBACK;
+const getTronGridApiKey = () => String(Deno.env.get("TRONGRID_API_KEY") ?? "").trim();
+
+const isHexAddressLike = (value: string) => /^0x[a-fA-F0-9]{40}$/.test(value);
+const isTronAddressLike = (value: string) => /^[1-9A-HJ-NP-Za-km-z]{34}$/.test(value);
+const padHexTopicAddress = (value: string) => `0x${value.toLowerCase().replace(/^0x/, "").padStart(64, "0")}`;
+const TRANSFER_EVENT_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+
+const polygonRpc = async (method: string, params: unknown[]) => {
+  const response = await fetch(getPolygonRpcUrl(), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+  const payload = await response.json().catch(() => null) as { result?: unknown; error?: { message?: string } } | null;
+  if (!response.ok || payload?.error) {
+    const message = payload?.error?.message || `HTTP ${response.status}`;
+    return { ok: false as const, error: `Polygon RPC error: ${message}` };
+  }
+  return { ok: true as const, result: payload?.result };
+};
+
+const loadRecentSelfCustodyAmounts = async (
+  supabase: ReturnType<typeof createClient>,
+  payCurrency: string,
+  now: Date,
+) => {
+  const thresholdIso = new Date(now.getTime() - SELF_CUSTODY_ORDER_TTL_MS).toISOString();
+  const { data } = await supabase
+    .from("crypto_payments")
+    .select("usdt_amount, payment_status, expires_at")
+    .eq("provider", SELF_CUSTODY_PROVIDER)
+    .eq("pay_currency", payCurrency)
+    .gte("created_at", thresholdIso)
+    .order("created_at", { ascending: false })
+    .limit(500);
+
+  const used = new Set<string>();
+  for (const row of (data as Array<{ usdt_amount?: number; payment_status?: string; expires_at?: string | null }> | null) ?? []) {
+    const status = normalizeNowpaymentsStatus(row.payment_status);
+    const expiresAtMs = row.expires_at ? new Date(String(row.expires_at)).getTime() : Number.NaN;
+    const isExpired = Number.isFinite(expiresAtMs) && expiresAtMs <= now.getTime();
+    if (SELF_CUSTODY_TERMINAL_STATUSES.has(status) && !isExpired) continue;
+    if (status === "expired" || isExpired) continue;
+    used.add(String(toUsdtAtomicUnits(row.usdt_amount ?? 0)));
+  }
+  return used;
+};
+
+const allocateExactUsdtAmount = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  kind: string,
+  productRef: string,
+  payCurrency: string,
+  baseAmount: number,
+  now: Date,
+) => {
+  const baseAtomic = toUsdtAtomicUnits(baseAmount);
+  if (baseAtomic <= 0n) return { ok: false as const, error: "Invalid payment amount." };
+  const used = await loadRecentSelfCustodyAmounts(supabase, payCurrency, now);
+  const entropy = [...`${wallet}:${kind}:${productRef}:${now.getTime()}`].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  const startOffset = (entropy % SELF_CUSTODY_AMOUNT_OFFSET_MAX) + 1;
+  for (let step = 0; step < SELF_CUSTODY_AMOUNT_OFFSET_MAX; step += 1) {
+    const offset = ((startOffset + step - 1) % SELF_CUSTODY_AMOUNT_OFFSET_MAX) + 1;
+    const candidate = baseAtomic + BigInt(offset);
+    if (used.has(String(candidate))) continue;
+    return {
+      ok: true as const,
+      amount: Number(formatUsdtAtomicUnits(candidate)),
+      amountAtomic: String(candidate),
+    };
+  }
+  return { ok: false as const, error: "Too many active payment orders. Retry shortly." };
+};
+
+const wasPaymentTxAlreadyMatched = async (
+  supabase: ReturnType<typeof createClient>,
+  rowId: string,
+  txHashRaw: string,
+) => {
+  const txHash = String(txHashRaw ?? "").trim();
+  if (!txHash) return false;
+  const { data } = await supabase
+    .from("crypto_payments")
+    .select("id")
+    .eq("tx_hash", txHash)
+    .neq("id", rowId)
+    .limit(1)
+    .maybeSingle();
+  return Boolean(data);
+};
+
+const findPolygonTransferForOrder = async (row: CryptoPaymentRow) => {
+  const treasuryAddress = String(row.treasury_address ?? getSelfCustodyTreasuryAddress(row.pay_currency) ?? "").trim();
+  if (!isHexAddressLike(treasuryAddress)) {
+    return { ok: false as const, error: "Polygon treasury wallet is not configured." };
+  }
+  const expectedAtomic = toUsdtAtomicUnits(row.usdt_amount);
+  if (expectedAtomic <= 0n) return { ok: false as const, error: "Invalid Polygon payment amount." };
+  const payload = row.provider_payload && typeof row.provider_payload === "object"
+    ? row.provider_payload as Record<string, unknown>
+    : {};
+  const latestBlockResult = await polygonRpc("eth_blockNumber", []);
+  if (!latestBlockResult.ok) return latestBlockResult;
+  const latestBlock = Number.parseInt(String(latestBlockResult.result ?? "0x0"), 16);
+  if (!Number.isFinite(latestBlock)) return { ok: false as const, error: "Failed to read Polygon block height." };
+  const createdBlock = Number(payload.created_block ?? Math.max(0, latestBlock - 10_000));
+  const fromBlock = Math.max(0, Number.isFinite(createdBlock) ? createdBlock : latestBlock - 10_000);
+  const logsResult = await polygonRpc("eth_getLogs", [{
+    fromBlock: `0x${fromBlock.toString(16)}`,
+    toBlock: `0x${latestBlock.toString(16)}`,
+    address: POLYGON_USDT_CONTRACT,
+    topics: [TRANSFER_EVENT_TOPIC, null, padHexTopicAddress(treasuryAddress)],
+  }]);
+  if (!logsResult.ok) return logsResult;
+  const logs = Array.isArray(logsResult.result) ? logsResult.result as Array<Record<string, unknown>> : [];
+  for (const log of logs) {
+    const dataHex = String(log.data ?? "0x0");
+    const txHash = String(log.transactionHash ?? "").trim();
+    const blockHex = String(log.blockNumber ?? "0x0");
+    let amountAtomic = 0n;
+    try {
+      amountAtomic = BigInt(dataHex);
+    } catch {
+      amountAtomic = 0n;
+    }
+    if (amountAtomic !== expectedAtomic || !txHash) continue;
+    const blockNumber = Number.parseInt(blockHex, 16);
+    const confirmations = Number.isFinite(blockNumber) ? Math.max(0, latestBlock - blockNumber + 1) : 0;
+    return {
+      ok: true as const,
+      found: true as const,
+      txHash,
+      confirmations,
+      status: confirmations >= POLYGON_CONFIRMATIONS_REQUIRED ? "finished" : "confirming",
+      detectedAt: new Date().toISOString(),
+      payloadPatch: {
+        tx_hash: txHash,
+        confirmations,
+        matched_block: blockNumber,
+        matched_network: "polygon",
+      },
+    };
+  }
+  return { ok: true as const, found: false as const, latestBlock };
+};
+
+const findTronTransferForOrder = async (row: CryptoPaymentRow) => {
+  const treasuryAddress = String(row.treasury_address ?? getSelfCustodyTreasuryAddress(row.pay_currency) ?? "").trim();
+  if (!isTronAddressLike(treasuryAddress)) {
+    return { ok: false as const, error: "TRON treasury wallet is not configured." };
+  }
+  const expectedAtomic = String(toUsdtAtomicUnits(row.usdt_amount));
+  if (expectedAtomic === "0") return { ok: false as const, error: "Invalid TRON payment amount." };
+  const createdAtMs = new Date(String(row.created_at ?? "")).getTime();
+  const minTimestamp = Number.isFinite(createdAtMs) ? Math.max(0, createdAtMs - 5 * 60 * 1000) : 0;
+  const apiKey = getTronGridApiKey();
+  const response = await fetch(
+    `${getTronGridBaseUrl()}/v1/accounts/${encodeURIComponent(treasuryAddress)}/transactions/trc20?limit=200&only_confirmed=true&contract_address=${encodeURIComponent(TRON_USDT_CONTRACT)}&min_timestamp=${minTimestamp}`,
+    {
+      headers: apiKey ? { "TRON-PRO-API-KEY": apiKey } : undefined,
+    },
+  );
+  const payload = await response.json().catch(() => null) as { data?: Array<Record<string, unknown>>; success?: boolean } | null;
+  if (!response.ok) {
+    return { ok: false as const, error: `TronGrid error: HTTP ${response.status}` };
+  }
+  const items = Array.isArray(payload?.data) ? payload?.data ?? [] : [];
+  for (const item of items) {
+    const txHash = String(item.transaction_id ?? item.transactionId ?? "").trim();
+    const to = String(item.to ?? "").trim();
+    const contractAddress = String(item.token_info && typeof item.token_info === "object"
+      ? (item.token_info as Record<string, unknown>).address ?? ""
+      : item.token_address ?? "").trim();
+    const value = String(item.value ?? "").trim();
+    if (!txHash || to !== treasuryAddress || contractAddress !== TRON_USDT_CONTRACT || value !== expectedAtomic) continue;
+    return {
+      ok: true as const,
+      found: true as const,
+      txHash,
+      confirmations: 1,
+      status: "finished",
+      detectedAt: new Date().toISOString(),
+      payloadPatch: {
+        tx_hash: txHash,
+        confirmations: 1,
+        matched_network: "trc20",
+      },
+    };
+  }
+  return { ok: true as const, found: false as const };
+};
+
+const refreshNowpaymentRowStatus = async (
+  supabase: ReturnType<typeof createClient>,
+  row: CryptoPaymentRow,
+  latestPayload: Record<string, unknown> = {},
+) => {
+  const currentPayload = row.provider_payload && typeof row.provider_payload === "object"
+    ? row.provider_payload as Record<string, unknown>
+    : {};
+  const nextPayload: Record<string, unknown> = { ...currentPayload, ...latestPayload };
+  const nowIso = new Date().toISOString();
+  let paymentStatus = normalizeNowpaymentsStatus(row.payment_status) || "waiting";
+  let txHash = String(row.tx_hash ?? currentPayload.tx_hash ?? "").trim();
+  let detectedAt = row.detected_at ?? null;
+  let creditError = String(row.credit_error ?? "");
+  const expiresAtMs = row.expires_at ? new Date(String(row.expires_at)).getTime() : Number.NaN;
+  const payCurrency = normalizeNowpaymentsStatus(row.pay_currency);
+
+  if (txHash && payCurrency === "usdtmatic" && paymentStatus === "confirming") {
+    const lookupResult = await findPolygonTransferForOrder(row);
+    if (lookupResult.ok && lookupResult.found && lookupResult.txHash === txHash) {
+      paymentStatus = lookupResult.status;
+      detectedAt = detectedAt ?? lookupResult.detectedAt;
+      Object.assign(nextPayload, lookupResult.payloadPatch ?? {});
+    }
+  }
+
+  if (!txHash && (!Number.isFinite(expiresAtMs) || expiresAtMs > Date.now())) {
+    const lookupResult = payCurrency === "usdtmatic"
+      ? await findPolygonTransferForOrder(row)
+      : payCurrency === "usdttrc20"
+      ? await findTronTransferForOrder(row)
+      : { ok: false as const, error: "Unsupported USDT network." };
+
+    if (!lookupResult.ok) {
+      return row;
+    }
+    if (lookupResult.found) {
+      txHash = lookupResult.txHash;
+      paymentStatus = lookupResult.status;
+      detectedAt = lookupResult.detectedAt;
+      Object.assign(nextPayload, lookupResult.payloadPatch ?? {});
+      nextPayload.pay_amount = nextPayload.pay_amount ?? String(row.usdt_amount ?? "");
+      nextPayload.pay_address = nextPayload.pay_address ?? String(row.treasury_address ?? "");
+      if (await wasPaymentTxAlreadyMatched(supabase, row.id, txHash)) {
+        paymentStatus = "failed";
+        creditError = "Transaction already matched to another order.";
+      }
+    }
+  }
+
+  if (!txHash && Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now()) {
+    paymentStatus = "expired";
+  }
+
+  const updatePayload = {
+    payment_status: paymentStatus,
+    provider_payload: nextPayload,
+    tx_hash: txHash,
+    detected_at: detectedAt,
+    credit_error: paymentStatus === "failed" ? creditError : row.credit_error,
+    updated_at: nowIso,
+  };
+
+  const { data: updated, error } = await supabase
+    .from("crypto_payments")
+    .update(updatePayload)
+    .eq("id", row.id)
+    .select(CRYPTO_PAYMENT_SELECT)
+    .maybeSingle();
+
+  if (error || !updated) {
+    return {
+      ...row,
+      payment_status: paymentStatus,
+      provider_payload: nextPayload,
+      tx_hash: txHash,
+      detected_at: detectedAt,
+      credit_error: paymentStatus === "failed" ? creditError : row.credit_error,
+      updated_at: nowIso,
+    } as CryptoPaymentRow;
+  }
+  return updated as CryptoPaymentRow;
 };
 
 const wasTxAlreadyProcessed = async (
@@ -2165,7 +2440,7 @@ const loadRecentPendingNowpayPayment = async (
     .from("crypto_payments")
     .select(CRYPTO_PAYMENT_SELECT)
     .eq("wallet", wallet)
-    .eq("provider", "nowpayments")
+    .eq("provider", SELF_CUSTODY_PROVIDER)
     .eq("kind", kind)
     .eq("product_ref", productRef)
     .eq("pay_currency", payCurrency)
@@ -2177,41 +2452,18 @@ const loadRecentPendingNowpayPayment = async (
     const createdAtMs = new Date(String(row.created_at ?? "")).getTime();
     const ageMs = Number.isFinite(createdAtMs) ? Math.max(0, now.getTime() - createdAtMs) : Number.MAX_SAFE_INTEGER;
     const status = normalizeNowpaymentsStatus(row.payment_status);
+    const expiresAtMs = row.expires_at ? new Date(String(row.expires_at)).getTime() : Number.NaN;
+    const isExpired = Number.isFinite(expiresAtMs) && expiresAtMs <= now.getTime();
     if (
       ageMs <= NOWPAYMENTS_PENDING_REUSE_MS &&
       NOWPAYMENTS_PENDING_STATUSES.has(status) &&
-      !Boolean(row.credited)
+      !Boolean(row.credited) &&
+      !isExpired
     ) {
       return row;
     }
   }
   return null;
-};
-
-const refreshNowpaymentRowStatus = async (
-  supabase: ReturnType<typeof createClient>,
-  row: CryptoPaymentRow,
-  latestPayload: Record<string, unknown>,
-) => {
-  const paymentStatus = normalizeNowpaymentsStatus(latestPayload.payment_status ?? row.payment_status);
-  const nextPayload = {
-    ...(row.provider_payload && typeof row.provider_payload === "object" ? row.provider_payload : {}),
-    ...latestPayload,
-  };
-  const nowIso = new Date().toISOString();
-  const { data: updated, error } = await supabase
-    .from("crypto_payments")
-    .update({
-      payment_status: paymentStatus || row.payment_status,
-      provider_payload: nextPayload,
-      updated_at: nowIso,
-    })
-    .eq("id", row.id)
-    .select(CRYPTO_PAYMENT_SELECT)
-    .maybeSingle();
-
-  if (error || !updated) return row;
-  return updated as CryptoPaymentRow;
 };
 
 const creditNowpaymentIfNeeded = async (
@@ -3349,12 +3601,13 @@ serve(async (req) => {
       return json({ ok: false, error: "Invalid payment kind." });
     }
     const productRef = String(body.productRef ?? "").trim().slice(0, 64);
+    const nowMs = now.getTime();
 
     let query = supabase
       .from("crypto_payments")
       .select(CRYPTO_PAYMENT_SELECT)
       .eq("wallet", auth.wallet)
-      .eq("provider", "nowpayments")
+      .eq("provider", SELF_CUSTODY_PROVIDER)
       .eq("kind", rawKind)
       .order("created_at", { ascending: false })
       .limit(12);
@@ -3368,7 +3621,9 @@ serve(async (req) => {
 
     const pending = (data as CryptoPaymentRow[]).find((row) => {
       const status = normalizeNowpaymentsStatus(row.payment_status);
-      return NOWPAYMENTS_PENDING_STATUSES.has(status) && !Boolean(row.credited);
+      const expiresAtMs = row.expires_at ? new Date(String(row.expires_at)).getTime() : Number.NaN;
+      const isExpired = Number.isFinite(expiresAtMs) && expiresAtMs <= nowMs;
+      return NOWPAYMENTS_PENDING_STATUSES.has(status) && !Boolean(row.credited) && !isExpired;
     });
 
     return json({
@@ -3382,14 +3637,13 @@ serve(async (req) => {
     if (!isNowpayKind(rawKind)) {
       return json({ ok: false, error: "Invalid payment kind." });
     }
-    let payCurrency = normalizeNowpaymentsStatus(body.payCurrency);
+    const payCurrency = normalizeNowpaymentsStatus(body.payCurrency);
     if (!isNowpaymentsCurrency(payCurrency)) {
       return json({ ok: false, error: "Unsupported USDT network." });
     }
 
     let productRef = "";
-    let usdtAmount = 0;
-    let orderDescription = "";
+    let baseUsdtAmount = 0;
     let reward: Record<string, unknown> = {};
     const auditDetails: Record<string, unknown> = { kind: rawKind };
 
@@ -3399,8 +3653,7 @@ serve(async (req) => {
         return json({ ok: false, error: "Invalid gold package." });
       }
       productRef = pack.id;
-      usdtAmount = pack.usdt;
-      orderDescription = `Doge Quest Gold ${pack.id}`;
+      baseUsdtAmount = pack.usdt;
       reward = { gold: pack.gold };
       auditDetails.packId = pack.id;
       auditDetails.gold = pack.gold;
@@ -3416,8 +3669,7 @@ serve(async (req) => {
         return json({ ok: false, error: "Starter pack already purchased." });
       }
       productRef = "starter-pack";
-      usdtAmount = STARTER_PACK_PRICE_USDT;
-      orderDescription = "Doge Quest Starter Pack";
+      baseUsdtAmount = STARTER_PACK_PRICE_USDT;
       reward = { starterPack: true };
     } else if (rawKind === "premium_buy") {
       const plan = getPremiumPlan(body.planId, body.days);
@@ -3426,8 +3678,7 @@ serve(async (req) => {
       }
       const pricing = getPremiumPlanPricing(plan, now);
       productRef = String(plan.id);
-      usdtAmount = pricing.usdt;
-      orderDescription = `Doge Quest Premium ${plan.id}`;
+      baseUsdtAmount = pricing.usdt;
       reward = { planId: plan.id, days: plan.days };
       auditDetails.planId = plan.id;
       auditDetails.days = plan.days;
@@ -3439,29 +3690,24 @@ serve(async (req) => {
         return json({ ok: false, error: "Invalid fortune spin pack." });
       }
       productRef = `fortune-${spins}`;
-      usdtAmount = (FORTUNE_SPIN_PRICES_USDT as Record<number, number>)[spins];
-      orderDescription = `Doge Quest Fortune Spins x${spins}`;
+      baseUsdtAmount = (FORTUNE_SPIN_PRICES_USDT as Record<number, number>)[spins];
       reward = { spins };
       auditDetails.spins = spins;
     }
 
-    if (!productRef || !Number.isFinite(usdtAmount) || usdtAmount <= 0) {
+    if (!productRef || !Number.isFinite(baseUsdtAmount) || baseUsdtAmount <= 0) {
       return json({ ok: false, error: "Invalid payment configuration." });
     }
-    if (usdtAmount < NOWPAYMENTS_MIN_USDT) {
-      return json({
-        ok: false,
-        error: `NOWPayments minimum is ${NOWPAYMENTS_MIN_USDT} USDT for this method. Use SOL or a larger package.`,
-      });
+
+    const treasuryAddress = getSelfCustodyTreasuryAddress(payCurrency);
+    if (!treasuryAddress) {
+      return json({ ok: false, error: getSelfCustodyNetworkConfigError(payCurrency) });
     }
-    const isSmallUsdtPayment = usdtAmount <= NOWPAYMENTS_SMALL_USDT_FORCE_LIMIT;
-    if (
-      isSmallUsdtPayment &&
-      !(NOWPAYMENTS_SMALL_USDT_PREFERRED_NETWORKS as readonly string[]).includes(payCurrency)
-    ) {
-      auditDetails.payCurrencyForcedFrom = payCurrency;
-      payCurrency = NOWPAYMENTS_SMALL_USDT_PREFERRED_NETWORKS[0];
-      auditDetails.payCurrencyForcedTo = payCurrency;
+    if (payCurrency === "usdtmatic" && !isHexAddressLike(treasuryAddress)) {
+      return json({ ok: false, error: "Polygon treasury wallet must be an EVM address." });
+    }
+    if (payCurrency === "usdttrc20" && !isTronAddressLike(treasuryAddress)) {
+      return json({ ok: false, error: "TRON treasury wallet must be a TRON address." });
     }
 
     const existingPending = await loadRecentPendingNowpayPayment(
@@ -3480,87 +3726,70 @@ serve(async (req) => {
       });
     }
 
-    const orderId = createNowpaymentsOrderId(auth.wallet, rawKind, productRef);
-    const priceAmount = usdtAmount < 1 ? Number(usdtAmount.toFixed(3)) : Number(usdtAmount.toFixed(2));
-    const createBodyBase: Record<string, unknown> = {
-      price_amount: priceAmount,
-      price_currency: "usd",
-      order_id: orderId,
-      order_description: orderDescription,
-      is_fixed_rate: true,
-      is_fee_paid_by_user: false,
-    };
-    const callbackUrl = String(Deno.env.get("NOWPAYMENTS_IPN_CALLBACK_URL") ?? "").trim();
-    if (callbackUrl) {
-      createBodyBase.ipn_callback_url = callbackUrl;
+    const amountResult = await allocateExactUsdtAmount(
+      supabase,
+      auth.wallet,
+      rawKind,
+      productRef,
+      payCurrency,
+      baseUsdtAmount,
+      now,
+    );
+    if (!amountResult.ok) {
+      return json({ ok: false, error: amountResult.error });
     }
 
-    const createPayment = (currency: string) =>
-      nowpaymentsFetch(
-        "POST",
-        "/payment",
-        {
-          ...createBodyBase,
-          pay_currency: currency,
-        },
-        NOWPAYMENTS_CREATE_TIMEOUT_MS,
-      );
-
-    let createResult = await createPayment(payCurrency);
-    if (!createResult.ok) {
-      const normalizedError = String(createResult.error ?? "").toLowerCase();
-      const isTooSmall = normalizedError.includes("too small") &&
-        (normalizedError.includes("amountto") || normalizedError.includes("amount_to") || normalizedError.includes("amount"));
-      const fallbackNetworks = (NOWPAYMENTS_SMALL_USDT_PREFERRED_NETWORKS as readonly string[]).filter((network) =>
-        network !== payCurrency
-      );
-      if (isSmallUsdtPayment || isTooSmall) {
-        for (const fallbackNetwork of fallbackNetworks) {
-          const retryResult = await createPayment(fallbackNetwork);
-          if (!retryResult.ok) continue;
-          auditDetails.payCurrencyFallbackFrom = payCurrency;
-          payCurrency = fallbackNetwork;
-          auditDetails.payCurrencyFallbackTo = payCurrency;
-          createResult = retryResult;
-          break;
-        }
-        if (!createResult.ok && isTooSmall) {
-          return json({
-            ok: false,
-            error: `${createResult.error}. Try USDT Polygon or USDT ERC20 network for small payments.`,
-          });
-        }
+    const providerPaymentId = createNowpaymentsOrderId(auth.wallet, rawKind, productRef);
+    const providerOrderId = providerPaymentId;
+    const expiresAtIso = new Date(now.getTime() + SELF_CUSTODY_ORDER_TTL_MS).toISOString();
+    let createdBlock = 0;
+    if (payCurrency === "usdtmatic") {
+      const latestBlockResult = await polygonRpc("eth_blockNumber", []);
+      if (!latestBlockResult.ok) {
+        return json({ ok: false, error: latestBlockResult.error });
+      }
+      createdBlock = Number.parseInt(String(latestBlockResult.result ?? "0x0"), 16);
+      if (!Number.isFinite(createdBlock)) {
+        return json({ ok: false, error: "Failed to prepare Polygon checkout." });
       }
     }
-    if (!createResult.ok) {
-      return json({ ok: false, error: createResult.error });
-    }
 
-    const providerPaymentId = String(createResult.data.payment_id ?? "").trim().slice(0, 120);
-    if (!providerPaymentId) {
-      return json({ ok: false, error: "NOWPayments returned invalid payment id." });
+    const payAmount = formatUsdtAtomicUnits(BigInt(amountResult.amountAtomic));
+    const nowIso = now.toISOString();
+    const providerPayload: Record<string, unknown> = {
+      pay_amount: payAmount,
+      pay_address: treasuryAddress,
+      base_amount: Number(baseUsdtAmount),
+      amount_atomic: amountResult.amountAtomic,
+      token_decimals: SELF_CUSTODY_USDT_DECIMALS,
+      network: payCurrency,
+      expires_at: expiresAtIso,
+    };
+    if (createdBlock > 0) {
+      providerPayload.created_block = createdBlock;
     }
-    const providerOrderId = String(createResult.data.order_id ?? orderId).trim().slice(0, 120) || orderId;
-    const paymentStatus = normalizeNowpaymentsStatus(createResult.data.payment_status ?? "waiting") || "waiting";
-    const nowIso = new Date().toISOString();
 
     const { data: inserted, error: insertError } = await supabase
       .from("crypto_payments")
       .insert({
         wallet: auth.wallet,
-        provider: "nowpayments",
+        provider: SELF_CUSTODY_PROVIDER,
         kind: rawKind,
         product_ref: productRef,
-        usdt_amount: usdtAmount < 1 ? Number(usdtAmount.toFixed(3)) : Number(usdtAmount.toFixed(2)),
+        usdt_amount: amountResult.amount,
         pay_currency: payCurrency,
         provider_payment_id: providerPaymentId,
         provider_order_id: providerOrderId,
-        payment_status: paymentStatus,
+        payment_status: "waiting",
         credit_state: "pending",
         credited: false,
         credit_error: "",
         reward,
-        provider_payload: createResult.data,
+        provider_payload: providerPayload,
+        treasury_address: treasuryAddress,
+        tx_hash: "",
+        expires_at: expiresAtIso,
+        detected_at: null,
         created_at: nowIso,
         updated_at: nowIso,
       })
@@ -3573,12 +3802,16 @@ serve(async (req) => {
 
     await auditEvent(supabase, auth.wallet, "nowpay_create", {
       ...auditDetails,
+      provider: SELF_CUSTODY_PROVIDER,
       productRef,
-      usdtAmount,
+      baseUsdtAmount,
+      exactUsdtAmount: amountResult.amount,
       payCurrency,
+      treasuryAddress,
       providerPaymentId,
       providerOrderId,
-      paymentStatus,
+      paymentStatus: "waiting",
+      expiresAt: expiresAtIso,
     });
 
     return json({
@@ -3598,7 +3831,7 @@ serve(async (req) => {
       .from("crypto_payments")
       .select(CRYPTO_PAYMENT_SELECT)
       .eq("wallet", auth.wallet)
-      .eq("provider", "nowpayments")
+      .eq("provider", SELF_CUSTODY_PROVIDER)
       .eq("provider_payment_id", providerPaymentId)
       .maybeSingle();
 
@@ -3606,19 +3839,7 @@ serve(async (req) => {
       return json({ ok: false, error: "Payment not found." });
     }
 
-    let row = rowData as CryptoPaymentRow;
-    const statusResult = await nowpaymentsFetch(
-      "GET",
-      `/payment/${encodeURIComponent(providerPaymentId)}`,
-      undefined,
-      NOWPAYMENTS_STATUS_TIMEOUT_MS,
-    );
-    if (statusResult.ok) {
-      row = await refreshNowpaymentRowStatus(supabase, row, statusResult.data);
-    } else {
-      return json({ ok: false, error: statusResult.error });
-    }
-
+    const row = await refreshNowpaymentRowStatus(supabase, rowData as CryptoPaymentRow, {});
     const status = normalizeNowpaymentsStatus(row.payment_status);
     let creditedNow = false;
     let finalRow = row;
@@ -3633,6 +3854,7 @@ serve(async (req) => {
           providerPaymentId,
           status,
           error: creditResult.error,
+          txHash: row.tx_hash ?? "",
         });
         return json({ ok: false, error: creditResult.error || "Failed to credit payment." });
       }
@@ -3648,6 +3870,7 @@ serve(async (req) => {
           status,
           productRef: row.product_ref,
           usdtAmount: row.usdt_amount,
+          txHash: row.tx_hash ?? "",
         });
       }
     }

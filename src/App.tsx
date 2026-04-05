@@ -368,6 +368,8 @@ type NowpayPayment = {
   payAddress: string
   status: string
   credited: boolean
+  txHash?: string
+  expiresAt?: string
   createdAt: string
   updatedAt: string
 }
@@ -1042,12 +1044,9 @@ const GOLD_PACKAGES_USDT = [
 ] as const
 const NOWPAY_USDT_NETWORKS = [
   { id: 'usdttrc20', label: 'USDT TRC20' },
-  { id: 'usdtbsc', label: 'USDT BSC' },
-  { id: 'usdterc20', label: 'USDT ERC20' },
   { id: 'usdtmatic', label: 'USDT Polygon' },
-  { id: 'usdtsol', label: 'USDT Solana' },
 ] as const
-const NOWPAY_MIN_USDT = 10
+const NOWPAY_MIN_USDT = 0
 type NowpayNetworkId = (typeof NOWPAY_USDT_NETWORKS)[number]['id']
 type BuyGoldMethod = 'sol' | 'usdt'
 type NowpayKind = 'buy_gold' | 'starter_pack_buy' | 'premium_buy' | 'fortune_buy'
@@ -1924,6 +1923,8 @@ const formatLongTimer = (seconds: number) => {
 const formatNumber = (value: number) => value.toLocaleString('en-US')
 const formatUsdt = (value: number) =>
   Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 3 })
+const formatExactUsdt = (value: number) =>
+  Number(value).toLocaleString('en-US', { minimumFractionDigits: 6, maximumFractionDigits: 6 })
 const resolveNowpayAmount = (payAmountRaw: string, fallbackUsdt: number) => {
   const parsed = Number(String(payAmountRaw ?? '').trim().replace(',', '.'))
   if (Number.isFinite(parsed) && parsed > 0) return parsed
@@ -1931,9 +1932,9 @@ const resolveNowpayAmount = (payAmountRaw: string, fallbackUsdt: number) => {
   return Number.isFinite(fallback) && fallback > 0 ? fallback : 0
 }
 const formatNowpayAmountDisplay = (payAmountRaw: string, fallbackUsdt: number) =>
-  `${formatUsdt(resolveNowpayAmount(payAmountRaw, fallbackUsdt))} USDT`
+  `${formatExactUsdt(resolveNowpayAmount(payAmountRaw, fallbackUsdt))} USDT`
 const formatNowpayAmountCopy = (payAmountRaw: string, fallbackUsdt: number) =>
-  String(resolveNowpayAmount(payAmountRaw, fallbackUsdt))
+  formatExactUsdt(resolveNowpayAmount(payAmountRaw, fallbackUsdt))
 const formatNowpayNetwork = (payCurrencyRaw: string) => {
   const normalized = String(payCurrencyRaw ?? '').trim().toLowerCase()
   switch (normalized) {
@@ -3185,16 +3186,6 @@ const drawGame = (
 
 
 const NOWPAY_EVM_DEEP_LINKS: Partial<Record<NowpayNetworkId, { chainId: number; tokenContract: string; decimals: number }>> = {
-  usdterc20: {
-    chainId: 1,
-    tokenContract: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
-    decimals: 6,
-  },
-  usdtbsc: {
-    chainId: 56,
-    tokenContract: '0x55d398326f99059fF775485246999027B3197955',
-    decimals: 18,
-  },
   usdtmatic: {
     chainId: 137,
     tokenContract: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
