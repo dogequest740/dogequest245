@@ -2113,12 +2113,15 @@ const updateProfileWithRetry = async (
       .eq("wallet", wallet)
       .maybeSingle();
 
-    if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
-      return { ok: false as const };
+    if (profileError) {
+      return { ok: false as const, error: String(profileError.message ?? "Failed to load profile.") };
+    }
+    if (!profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+      return { ok: false as const, error: "Profile not found." };
     }
 
     const normalized = normalizeState(profileRow.state);
-    if (!normalized) return { ok: false as const };
+    if (!normalized) return { ok: false as const, error: "Invalid profile state." };
 
     const nextState = structuredClone(normalized) as Record<string, unknown>;
     mutate(nextState);
@@ -2144,10 +2147,10 @@ const updateProfileWithRetry = async (
       };
     }
     if (attempt < PROFILE_UPDATE_RETRY_ATTEMPTS - 1) {
-      await waitMs(60 + Math.floor(Math.random() * 120));
+      await waitMs(90 + Math.floor(Math.random() * 180));
     }
   }
-  return { ok: false as const };
+  return { ok: false as const, error: "Profile update conflict, retry." };
 };
 
 const loadRecentPendingNowpayPayment = async (
@@ -3049,6 +3052,8 @@ serve(async (req) => {
 
   if (action === "fortune_spin") {
     const dayKey = todayKeyUtc(now);
+    let chosenReward: FortuneRewardDef | null = null;
+    let lastCreditError = "";
 
     for (let attempt = 0; attempt < 6; attempt += 1) {
       const fortuneState = await ensureFortuneState(supabase, auth.wallet, now);
@@ -3070,10 +3075,12 @@ serve(async (req) => {
       const updatedState = await updateFortuneState(supabase, fortuneState.state, nextPatch);
       if (!updatedState.ok) continue;
 
-      const reward = pickFortuneReward();
+      const reward = chosenReward ?? pickFortuneReward();
+      chosenReward = reward;
       const creditResult = await applyFortuneReward(supabase, auth.wallet, reward);
 
       if (!creditResult.ok || !creditResult.state) {
+        lastCreditError = String((creditResult as { error?: string }).error ?? "Failed to apply fortune reward.");
         if (useFreeSpin) {
           await supabase
             .from("fortune_state")
@@ -3099,8 +3106,15 @@ serve(async (req) => {
         await auditEvent(supabase, auth.wallet, "fortune_spin_credit_failed", {
           rewardId: reward.id,
           used: useFreeSpin ? "free" : "paid",
+          error: lastCreditError,
+          attempt,
         });
-        return json({ ok: false, error: "Failed to apply fortune reward." });
+
+        if (attempt < 5) {
+          await waitMs(120 + Math.floor(Math.random() * 220));
+          continue;
+        }
+        return json({ ok: false, error: lastCreditError || "Failed to apply fortune reward." });
       }
 
       await auditEvent(supabase, auth.wallet, "fortune_spin", {
@@ -3134,7 +3148,7 @@ serve(async (req) => {
       });
     }
 
-    return json({ ok: false, error: "Fortune spin conflict, please retry." });
+    return json({ ok: false, error: lastCreditError || "Fortune spin conflict, please retry." });
   }
 
   if (action === "referrals_status") {
@@ -4981,3 +4995,4 @@ serve(async (req) => {
 
   return json({ ok: false, error: "Unknown action." });
 });
+
