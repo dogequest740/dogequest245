@@ -7173,54 +7173,12 @@ function App() {
             </div>
           </div>
 
-          <div className="auth-section tokenomics reveal delay-7">
-            <h2>Tokenomics</h2>
-            <div className="tokenomics-split">
-              <div className="tokenomics-slice buyback">
-                <div className="tokenomics-slice-label">
-                  <strong>50%</strong>
-                  <span>Buyback & burn</span>
-                </div>
-              </div>
-              <div className="tokenomics-slice treasury">
-                <div className="tokenomics-slice-label">
-                  <strong>50%</strong>
-                  <span>Treasury for players</span>
-                </div>
-              </div>
-            </div>
-            <div className="tokenomics-grid">
-              <div className="tokenomics-card">
-                <div className="tokenomics-title">Creator rewards allocation</div>
-                <p>
-                  50% of creator rewards go to token buyback & burn. The remaining 50% flows into the treasury to fund
-                  player payouts.
-                </p>
-              </div>
-              <div className="tokenomics-card">
-                <div className="tokenomics-title">In‑game purchase revenue</div>
-                <p>
-                  Revenue from in‑game purchases follows the same split: 50% buyback & burn, 50% treasury for player
-                  rewards.
-                </p>
-              </div>
-            </div>
-          </div>
-
           <div className="auth-section roadmap reveal delay-8">
             <h2>Roadmap</h2>
             <ul className="roadmap-list">
               <li className="roadmap-item">
                 <img className="roadmap-icon" src={iconBattle} alt="" />
                 <div>Game launch</div>
-              </li>
-              <li className="roadmap-item">
-                <img className="roadmap-icon" src={iconSolana} alt="" />
-                <div>Project token launch</div>
-              </li>
-              <li className="roadmap-item">
-                <img className="roadmap-icon" src={iconCrystals} alt="" />
-                <div>Token integration in-game</div>
               </li>
               <li className="roadmap-item">
                 <img className="roadmap-icon" src={iconName} alt="" />
@@ -7257,10 +7215,6 @@ function App() {
               <li className="roadmap-item">
                 <img className="roadmap-icon" src={iconInventory} alt="" />
                 <div>Customization: skins & profile avatars</div>
-              </li>
-              <li className="roadmap-item">
-                <img className="roadmap-icon" src={iconSolana} alt="" />
-                <div>NFT collection</div>
               </li>
             </ul>
           </div>
