@@ -313,8 +313,17 @@ const CHARACTER_CLASS_STATS = {
   mage: { attack: 18, attackSpeed: 1.1, speed: 62, range: 22 },
   archer: { attack: 14, attackSpeed: 1.4, speed: 78, range: 20 },
   elon: { attack: 17, attackSpeed: 1.05, speed: 68, range: 24 },
-  gake: { attack: 15, attackSpeed: 1.25, speed: 82, range: 18 },
 } as const;
+
+const LEGACY_CHARACTER_CLASS_MAP = {
+  gake: 'archer',
+} as const;
+
+const normalizeCharacterClassId = (classIdRaw: unknown) => {
+  const classId = String(classIdRaw ?? '').trim().toLowerCase();
+  if (!classId) return '';
+  return LEGACY_CHARACTER_CLASS_MAP[classId as keyof typeof LEGACY_CHARACTER_CLASS_MAP] ?? classId;
+};
 
 const EQUIPMENT_SLOT_IDS: EquipmentSlot[] = ["weapon", "armor", "head", "legs", "boots", "artifact"];
 const EQUIPMENT_RARITIES = [
@@ -784,7 +793,7 @@ const getXpForLevel = (levelRaw: number) => {
 const emptyEquipmentStats = (): EquipmentStats => ({ power: 0, fortune: 0, prosperity: 0 });
 
 const getCharacterClassStats = (classIdRaw: unknown) => {
-  const classId = String(classIdRaw ?? "").trim() as keyof typeof CHARACTER_CLASS_STATS;
+  const classId = normalizeCharacterClassId(classIdRaw) as keyof typeof CHARACTER_CLASS_STATS;
   return classId && classId in CHARACTER_CLASS_STATS
     ? { classId, stats: CHARACTER_CLASS_STATS[classId] }
     : null;
@@ -5110,3 +5119,4 @@ serve(async (req) => {
 
   return json({ ok: false, error: "Unknown action." });
 });
+

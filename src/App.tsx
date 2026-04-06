@@ -6,7 +6,6 @@ import knightSprite from './assets/knight.png'
 import mageSprite from './assets/mage.png'
 import archerSprite from './assets/archer.png'
 import elonSprite from './assets/elon.png'
-import gakeSprite from './assets/gake.png'
 import goblinSprite from './assets/monsters/goblin.png'
 import deathEyeSprite from './assets/monsters/death eye.png'
 import mushroomSprite from './assets/monsters/mushroom.png'
@@ -520,7 +519,7 @@ type StakeEntry = {
   amount: number
   endsAt: number
 }
-type PlayerSpriteKey = 'knight' | 'mage' | 'archer' | 'elon' | 'gake'
+type PlayerSpriteKey = 'knight' | 'mage' | 'archer' | 'elon'
 type PlayerSpriteSource = HTMLImageElement | HTMLCanvasElement
 type MonsterSpriteKey =
   | 'goblin'
@@ -768,15 +767,17 @@ const CHARACTER_CLASSES: CharacterClass[] = [
     spriteKey: 'elon',
     stats: { attack: 17, attackSpeed: 1.05, speed: 68, range: 24 },
   },
-  {
-    id: 'gake',
-    label: 'Gake',
-    tagline: 'Trickster scout',
-    color: '#ffb347',
-    spriteKey: 'gake',
-    stats: { attack: 15, attackSpeed: 1.25, speed: 82, range: 18 },
-  },
 ]
+
+const LEGACY_CHARACTER_CLASS_MAP: Record<string, CharacterClass['id']> = {
+  gake: 'archer',
+}
+
+const normalizeCharacterClassId = (classIdRaw: unknown) => {
+  const classId = String(classIdRaw ?? '').trim().toLowerCase()
+  if (!classId) return ''
+  return LEGACY_CHARACTER_CLASS_MAP[classId] ?? classId
+}
 
 const ENERGY_MAX = 50
 const ENERGY_REGEN_SECONDS = 420
@@ -1494,7 +1495,7 @@ const buildPersistedState = (state: GameState): PersistedState => ({
 const applyPersistedState = (state: GameState, saved: PersistedState, _savedUpdatedAt?: string) => {
   if (!saved || saved.version !== PERSIST_VERSION) return
 
-  const classMatch = CHARACTER_CLASSES.find((entry) => entry.id === saved.classId)
+  const classMatch = CHARACTER_CLASSES.find((entry) => entry.id === normalizeCharacterClassId(saved.classId))
   if (classMatch) {
     state.classId = classMatch.id
     state.classLabel = classMatch.label
@@ -1671,7 +1672,6 @@ const PLAYER_SPRITE_SOURCES: Record<PlayerSpriteKey, string> = {
   mage: mageSprite,
   archer: archerSprite,
   elon: elonSprite,
-  gake: gakeSprite,
 }
 
 const MONSTER_SPRITE_SOURCES: Record<MonsterSpriteKey, string> = {
@@ -2911,7 +2911,7 @@ const updateGame = (state: GameState, dt: number) => {
       addEffect(state, { kind: 'text', x: target.x, y: target.y - 12, t: 0, text: `-${damage}`, color: '#ffd36f' })
       addEffect(state, { kind: 'impact', x: target.x, y: target.y + 2, t: 0, size: 10, color: '#ffd36f' })
 
-      if (player.spriteKey === 'knight' || player.spriteKey === 'gake') {
+      if (player.spriteKey === 'knight') {
         addEffect(state, { kind: 'slash', x: target.x, y: target.y, t: 0, angle, size: 26, color: '#ffe2a3' })
       } else if (player.spriteKey === 'mage' || player.spriteKey === 'elon') {
         addEffect(state, {
@@ -3376,7 +3376,6 @@ function App() {
     mage: null,
     archer: null,
     elon: null,
-    gake: null,
   })
   const monsterSpriteCacheRef = useRef<MonsterSpriteMap>({
     goblin: null,
@@ -4767,7 +4766,7 @@ function App() {
         referralProcessedRef.current = true
         profileUpdatedAtRef.current = saved.updatedAt || ''
         pendingProfileRef.current = saved
-        setSelectedId(saved.state.classId || CHARACTER_CLASSES[0].id)
+        setSelectedId(normalizeCharacterClassId(saved.state.classId) || CHARACTER_CLASSES[0].id)
         setPlayerName(sanitizePlayerName(saved.state.name || ''))
         setStage('game')
       } else {
@@ -6344,7 +6343,6 @@ function App() {
               </div>
             </div>
           </div>
-
           <div className="auth-section alt reveal delay-3">
             <h2>Choose your legend</h2>
             <div className="roster-grid">
@@ -6363,10 +6361,6 @@ function App() {
               <div className="roster-card">
                 <img src={elonSprite} alt="Elon" />
                 <span>Elon Commander</span>
-              </div>
-              <div className="roster-card">
-                <img src={gakeSprite} alt="Gake" />
-                <span>Gake Trickster</span>
               </div>
             </div>
           </div>
@@ -8732,4 +8726,6 @@ function App() {
   )
 }
 export default App
+
+
 
