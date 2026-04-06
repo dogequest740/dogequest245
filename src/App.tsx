@@ -7052,7 +7052,7 @@ function App() {
 
       {activePanel === 'dungeons' && hud && (
         <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
-          <div className="modal wide" onClick={(event) => event.stopPropagation()}>
+          <div className="modal wide season-modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <h3>Dungeons</h3>
               <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
@@ -7992,27 +7992,31 @@ function App() {
               {seasonLoading && <div className="muted">Loading season data...</div>}
 
               {seasonLeaderboard.length > 0 && (
-                <div className="admin-table season-table">
-                  <div className="admin-row header season-table">
-                    <span>Rank</span>
-                    <span>Player</span>
-                    <span>Crystals</span>
-                    <span>Premium</span>
-                    <span>Weighted</span>
-                    <span>Payout</span>
-                    <span>Wallet</span>
-                  </div>
-                  {seasonLeaderboard.map((row) => (
-                    <div key={row.wallet} className="admin-row season-table">
-                      <span>#{row.rank}</span>
-                      <span>{row.name}</span>
-                      <span>{formatNumber(row.crystals)}</span>
-                      <span>{row.premiumActive ? 'x1.5' : 'x1.0'}</span>
-                      <span>{formatNumber(Math.floor(row.effectiveCrystals))}</span>
-                      <span>{row.payoutSol.toFixed(6)} SOL</span>
-                      <span className="wallet-chip">{formatShortWallet(row.wallet)}</span>
+                <div className="season-leaderboard">
+                  <div className="season-leaderboard-header">
+                    <div>
+                      <h4>Top 20 Players</h4>
+                      <p>Current crystal leaders this season.</p>
                     </div>
-                  ))}
+                  </div>
+                  <div className="season-leaderboard-list">
+                    {seasonLeaderboard.map((row) => {
+                      const isCurrentPlayer = row.wallet === accountIdentity
+                      const rankTone = row.rank <= 3 ? `top-${row.rank}` : 'standard'
+                      return (
+                        <div key={row.wallet} className={`season-leaderboard-row ${rankTone} ${isCurrentPlayer ? 'current-player' : ''}`}>
+                          <div className="season-rank-pill">#{row.rank}</div>
+                          <div className="season-player-block">
+                            <div className="season-player-name-row">
+                              <strong>{row.name}</strong>
+                              {isCurrentPlayer && <span className="season-you-badge">You</span>}
+                            </div>
+                            <span className="season-player-crystals">{formatNumber(row.crystals)} crystals</span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
               )}
 
@@ -8063,7 +8067,7 @@ function App() {
                   {seasonPreviewRows.length > 0 && (
                     <>
                       <div className="withdraw-note">Preview close uses the current crystal balances and Premium state at the moment of closing.</div>
-                      <div className="admin-table season-table compact">
+                      <div className="season-admin-scroll"><div className="admin-table season-table compact">
                         <div className="admin-row header season-table compact">
                           <span>Rank</span>
                           <span>Player</span>
@@ -8082,13 +8086,13 @@ function App() {
                             <span>{row.payoutSol.toFixed(6)} SOL</span>
                           </div>
                         ))}
-                      </div>
+                      </div></div>
                     </>
                   )}
                   {seasonSnapshotRows.length > 0 && (
                     <>
                       <div className="withdraw-note">Latest closed season snapshot. Use this table for manual payouts.</div>
-                      <div className="admin-table season-table compact">
+                      <div className="season-admin-scroll"><div className="admin-table season-table compact">
                         <div className="admin-row header season-table compact">
                           <span>Rank</span>
                           <span>Player</span>
@@ -8107,7 +8111,7 @@ function App() {
                             <span>{row.payoutSol.toFixed(6)} SOL</span>
                           </div>
                         ))}
-                      </div>
+                      </div></div>
                     </>
                   )}
                 </div>

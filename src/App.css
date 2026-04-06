@@ -5373,6 +5373,148 @@ button.ghost {
   box-shadow: 0 6px 12px rgba(140, 110, 255, 0.25);
 }
 
+.season-modal {
+  overflow-x: hidden;
+}
+
+.season-body {
+  overflow-x: hidden;
+}
+
+.season-leaderboard {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(120, 188, 255, 0.22);
+  background: linear-gradient(160deg, rgba(15, 24, 36, 0.92), rgba(10, 14, 22, 0.9));
+  box-shadow: inset 0 0 18px rgba(120, 188, 255, 0.06);
+}
+
+.season-leaderboard-header h4 {
+  margin: 0;
+  font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
+  font-size: 18px;
+  letter-spacing: 0.8px;
+  color: #f6d488;
+}
+
+.season-leaderboard-header p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: rgba(231, 240, 245, 0.72);
+}
+
+.season-leaderboard-list {
+  display: grid;
+  gap: 10px;
+}
+
+.season-leaderboard-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(150deg, rgba(18, 26, 40, 0.95), rgba(11, 17, 26, 0.92));
+}
+
+.season-leaderboard-row.current-player {
+  border-color: rgba(255, 211, 111, 0.45);
+  box-shadow: 0 0 0 1px rgba(255, 211, 111, 0.16), inset 0 0 18px rgba(255, 211, 111, 0.05);
+}
+
+.season-leaderboard-row.top-1 {
+  background: linear-gradient(150deg, rgba(58, 42, 18, 0.95), rgba(24, 18, 10, 0.94));
+  border-color: rgba(255, 211, 111, 0.45);
+}
+
+.season-leaderboard-row.top-2 {
+  background: linear-gradient(150deg, rgba(34, 40, 48, 0.95), rgba(14, 18, 24, 0.94));
+  border-color: rgba(205, 216, 228, 0.28);
+}
+
+.season-leaderboard-row.top-3 {
+  background: linear-gradient(150deg, rgba(52, 32, 18, 0.95), rgba(20, 14, 10, 0.94));
+  border-color: rgba(232, 163, 102, 0.3);
+}
+
+.season-rank-pill {
+  min-width: 54px;
+  padding: 9px 10px;
+  border-radius: 999px;
+  text-align: center;
+  font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  color: #f8f6ef;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.season-player-block {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.season-player-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.season-player-name-row strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  color: #f8f6ef;
+}
+
+.season-you-badge {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 211, 111, 0.12);
+  border: 1px solid rgba(255, 211, 111, 0.35);
+  color: #ffd36f;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.season-player-crystals {
+  font-family: 'Manrope', system-ui, sans-serif;
+  font-size: 12px;
+  color: rgba(231, 240, 245, 0.78);
+}
+
+.season-admin-block {
+  min-width: 0;
+}
+
+.season-admin-scroll {
+  width: 100%;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+@media (max-width: 720px) {
+  .season-leaderboard-row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .season-rank-pill {
+    width: fit-content;
+  }
+}
+
 .muted {
   color: var(--text-muted);
   font-size: 12px;
