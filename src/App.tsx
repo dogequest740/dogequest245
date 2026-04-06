@@ -23,6 +23,7 @@ import castleSprite from './assets/props/castle.png'
 import darkCastleSprite from './assets/props/dark castle.png'
 import iconGold from './assets/icons/gold.png'
 import iconCrystals from './assets/icons/crystals.png'
+import iconCrystalSeason from './assets/icons/crystal-season.png'
 import iconInventory from './assets/icons/inventory.png'
 import iconDungeons from './assets/icons/dungeons.png'
 import iconShop from './assets/icons/shop.png'
@@ -6157,9 +6158,8 @@ function App() {
   ) : null
   const resourceActionRow = (
     <div className="resources-actions-row">
-      <button type="button" className="resource-action" onClick={() => setActivePanel('season')}>
-        <img className="icon-img tiny" src={iconCrystals} alt="" />
-        Season
+      <button type="button" className="resource-action season-action" onClick={() => setActivePanel('season')} aria-label="Open season panel">
+        <img className="season-action-art" src={iconCrystalSeason} alt="Crystal Season" />
       </button>
     </div>
   )
@@ -8726,6 +8726,7 @@ function App() {
   )
 }
 export default App
+
 
 
 
