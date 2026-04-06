@@ -1891,6 +1891,14 @@ const formatLongTimer = (seconds: number) => {
   return `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
 }
 
+const formatSeasonCountdown = (seconds: number) => {
+  const total = Math.max(0, Math.ceil(seconds))
+  const days = Math.floor(total / 86400)
+  const hours = Math.floor((total % 86400) / 3600)
+  const mins = Math.floor((total % 3600) / 60)
+  return `${days}d ${hours}h ${mins}m`
+}
+
 const formatNumber = (value: number) => value.toLocaleString('en-US')
 const formatShortWallet = (wallet: string) => `${wallet.slice(0, 4)}...${wallet.slice(-4)}`
 const formatDateTime = (value: string) => {
@@ -7980,30 +7988,25 @@ function App() {
                 <div className="season-hero">
                   <div className="season-hero-header">
                     <div className="season-hero-copy">
-                      <span className="season-kicker">
-                        <img className="icon-img small" src={iconCrystals} alt="" />
-                        Active season
-                      </span>
                       <h4>{seasonInfo.name}</h4>
                       <p>Keep as many crystals as you can on your balance until the season closes. At the snapshot, the full USDT pool is split between players according to their crystal share.</p>
                     </div>
                     <div className="season-status-card">
                       <span className="season-status-label">Ends in</span>
-                      <strong>{formatLongTimer(seasonRemainingSec)}</strong>
-                      <span>{formatDateTime(seasonInfo.endAt)}</span>
+                      <strong>{formatSeasonCountdown(seasonRemainingSec)}</strong>
                     </div>
                   </div>
 
                   <div className="season-summary-grid">
                     <div className="season-summary-card season-summary-pool">
-                      <span className="season-summary-label">Season pool</span>
+                      <span className="season-summary-label">Current pool</span>
                       <strong>{seasonInfo.poolUsdt.toFixed(3)} USDT</strong>
-                      <small>Manual payouts are calculated from the final snapshot.</small>
+                      <small>The pool is topped up with player donations during the season.</small>
                     </div>
                     <div className="season-summary-card">
                       <span className="season-summary-label">Your crystals</span>
                       <strong>{formatNumber(seasonPlayerCrystals)}</strong>
-                      <small>Only crystals on your balance count.</small>
+                      
                     </div>
                     <div className="season-summary-card">
                       <span className="season-summary-label">Your rank</span>
@@ -8051,7 +8054,7 @@ function App() {
                         <img className="season-premium-icon" src={iconPremium} alt="" />
                         <div>
                           <strong>x1.5 payout multiplier</strong>
-                          <p>Premium does not create extra crystals. It boosts your season payout weight at the snapshot.</p>
+                          
                         </div>
                       </div>
                       <div className="season-premium-badge">
