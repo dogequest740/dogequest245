@@ -6122,3 +6122,9 @@ button.ghost {
     font-size: 10px;
   }
 }
+
+@media (min-width: 921px) {
+  .app:not(.auth-mode):not(.mobile) .game-section {
+    margin-top: -6px;
+  }
+}
