@@ -6131,51 +6131,55 @@ button.ghost {
 
 
 .resource-action.season-action {
-  min-height: 66px;
-  padding: 4px 14px 4px 8px;
+  min-height: 80px;
+  padding: 6px 18px 6px 10px;
   border-radius: 16px;
   background: linear-gradient(160deg, rgba(18, 28, 40, 0.96), rgba(10, 16, 24, 0.98));
   border-color: rgba(120, 190, 255, 0.45);
   box-shadow:
     0 12px 20px rgba(0, 0, 0, 0.3),
     inset 0 0 0 1px rgba(255, 255, 255, 0.05);
-  gap: 12px;
+  gap: 14px;
 }
 
 .season-action-art {
   display: block;
-  height: 58px;
+  height: 70px;
   width: auto;
-  max-width: 110px;
+  max-width: 132px;
   object-fit: contain;
   image-rendering: auto;
   flex: 0 0 auto;
 }
 
 .season-action-label {
-  font-family: 'Cinzel Decorative', 'Cinzel', system-ui, sans-serif;
-  font-size: 15px;
-  line-height: 1;
-  letter-spacing: 0.7px;
+  font-family: 'Manrope', system-ui, sans-serif;
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: 0.9px;
   color: #f7f3ea;
-  text-shadow: 0 0 12px rgba(120, 190, 255, 0.28);
+  text-transform: uppercase;
+  text-shadow: 0 0 8px rgba(120, 190, 255, 0.16);
   white-space: nowrap;
 }
 
 @media (max-width: 920px) {
   .resource-action.season-action {
-    min-height: 52px;
-    padding: 3px 10px 3px 6px;
-    gap: 8px;
+    min-height: 62px;
+    padding: 4px 12px 4px 8px;
+    gap: 10px;
   }
 
   .season-action-art {
-    height: 44px;
-    max-width: 84px;
+    height: 52px;
+    max-width: 98px;
   }
 
   .season-action-label {
-    font-size: 12px;
+    font-size: 13px;
+    letter-spacing: 0.7px;
   }
 }
+
 
