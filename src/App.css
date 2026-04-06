@@ -1079,16 +1079,15 @@
   font-size: 28px;
   letter-spacing: 2.8px;
   font-weight: 700;
-  background: linear-gradient(180deg, #fff2bd 0%, #ffd86f 34%, #ffb347 68%, #ffefb3 100%);
+  background: linear-gradient(180deg, #fff0b6 0%, #ffd36f 38%, #ffb347 72%, #fff4cf 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
   text-shadow:
-    0 1px 0 #6d3206,
-    0 2px 0 #572503,
-    0 3px 0 #3b1701,
-    0 6px 12px rgba(0, 0, 0, 0.34),
-    0 0 16px rgba(255, 191, 86, 0.32);
+    0 2px 0 rgba(69, 35, 4, 0.8),
+    0 10px 24px rgba(255, 183, 71, 0.42),
+    0 0 20px rgba(255, 214, 120, 0.34);
+  filter: drop-shadow(0 5px 14px rgba(0, 0, 0, 0.28));
 }
 
 .wallet {

@@ -6246,7 +6246,7 @@ function App() {
                 conquer dungeons, build your own village, and share World Boss rewards.
               </p>
               <p className="auth-sublead highlight">
-                Stack crystals in dungeons, World Boss raids, and your village, then compete in 30-day seasons for your share of the live USDT reward pool.
+                Stack crystals in dungeons, World Boss raids, and your village, then fight for your share of the live seasonal USDT pool. Premium gives a 1.5x payout bonus at the final snapshot.
               </p>
               <div className="auth-cta">
                 <div className="auth-cta-row">
