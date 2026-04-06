@@ -63,13 +63,6 @@ const decodeBase64 = (value: string) => {
   }
 };
 
-const getBearerToken = (req: Request) => {
-  const header = req.headers.get("authorization") ?? "";
-  if (!header) return "";
-  const [scheme, ...rest] = header.split(" ");
-  if (!scheme || scheme.toLowerCase() !== "bearer") return "";
-  return rest.join(" ").trim();
-};
 
 const auditEvent = async (
   supabase: ReturnType<typeof createClient>,
@@ -100,40 +93,60 @@ const getBlockedWallet = async (
   };
 };
 
-const getEmailIdentity = async (
-  supabase: ReturnType<typeof createClient>,
-  req: Request,
+
+type EquipmentSlot = "weapon" | "armor" | "head" | "legs" | "boots" | "artifact";
+
+const EQUIPMENT_SLOT_IDS: EquipmentSlot[] = ["weapon", "armor", "head", "legs", "boots", "artifact"];
+const EQUIPMENT_RARITIES = [
+  { name: "Common", color: "#c7c7c7", tier: 1 },
+  { name: "Uncommon", color: "#7bd88f", tier: 2 },
+  { name: "Rare", color: "#5aa7ff", tier: 3 },
+  { name: "Epic", color: "#b36bff", tier: 4 },
+  { name: "Legendary", color: "#ffb347", tier: 5 },
+  { name: "Mythic", color: "#ff6bd6", tier: 6 },
+  { name: "Ancient", color: "#ffe36b", tier: 7 },
+] as const;
+
+const computeItemTierScore = (level: number, rarity: (typeof EQUIPMENT_RARITIES)[number]) => {
+  const baseScore = 18;
+  const perLevel = 14;
+  const rarityMultiplier = 1 + (rarity.tier - 1) * 0.07;
+  const levelMultiplier = 1 + (level - 1) * 0.004;
+  const levelLinear = baseScore + perLevel * (level - 1);
+  return Math.round(levelLinear * levelMultiplier * rarityMultiplier);
+};
+
+const validateEquipmentTierItem = (
+  raw: unknown,
+  playerLevelRaw: number,
+  expectedSlot: EquipmentSlot,
 ) => {
-  const accessToken = getBearerToken(req);
-  if (!accessToken) {
-    return { ok: false as const, error: "Missing auth token." };
-  }
-
-  const { data, error } = await supabase.auth.getUser(accessToken);
-  if (error || !data?.user) {
-    return { ok: false as const, error: "Invalid auth token." };
-  }
-
-  const user = data.user as {
-    id: string;
-    email?: string | null;
-  };
-
-  return {
-    ok: true as const,
-    wallet: `email:${user.id}`,
-    email: String(user.email ?? ""),
-  };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const item = raw as Record<string, unknown>;
+  const slot = String(item.slot ?? "");
+  if (slot !== expectedSlot) return null;
+  const level = Math.max(1, asInt(item.level, 0));
+  const playerLevel = Math.max(1, Math.floor(playerLevelRaw));
+  if (level > playerLevel) return null;
+  const rarity = EQUIPMENT_RARITIES.find((entry) => entry.name === String(item.rarity ?? ""));
+  if (!rarity) return null;
+  if (String(item.color ?? "") !== rarity.color) return null;
+  const tierScore = asInt(item.tierScore, 0);
+  if (tierScore !== computeItemTierScore(level, rarity)) return null;
+  return tierScore;
 };
 
 const getTierScoreFromState = (state: unknown) => {
   if (!state || typeof state !== "object") return 0;
-  const equipment = (state as { equipment?: Record<string, { tierScore?: number } | null> }).equipment ?? {};
-  const slots = ["weapon", "armor", "head", "legs", "boots", "artifact"];
+  const row = state as { equipment?: Record<string, unknown>; player?: Record<string, unknown> };
+  const equipment = row.equipment ?? {};
+  const playerLevel = Math.max(1, asInt(row.player?.level, 1));
   let score = 0;
-  for (const slot of slots) {
-    const tierScore = Number(equipment[slot]?.tierScore ?? 0);
-    if (Number.isFinite(tierScore)) score += Math.max(0, Math.round(tierScore * ITEM_TIER_SCORE_MULTIPLIER));
+  for (const slot of EQUIPMENT_SLOT_IDS) {
+    const tierScore = validateEquipmentTierItem(equipment[slot], playerLevel, slot);
+    if (typeof tierScore === "number") {
+      score += Math.max(0, Math.round(tierScore * ITEM_TIER_SCORE_MULTIPLIER));
+    }
   }
   return score;
 };
@@ -525,16 +538,6 @@ const getSessionWallet = async (supabase: ReturnType<typeof createClient>, req: 
     sessionError = "Missing session token.";
   }
 
-  const emailIdentity = await getEmailIdentity(supabase, req);
-  if (emailIdentity.ok) {
-    const blocked = await getBlockedWallet(supabase, emailIdentity.wallet);
-    if (blocked) {
-      await auditEvent(supabase, emailIdentity.wallet, "blocked_session_denied", { reason: blocked.reason });
-      return { ok: false as const, error: BLOCKED_ERROR_MESSAGE };
-    }
-    return { ok: true as const, wallet: emailIdentity.wallet, token: "" };
-  }
-
   if (token && sessionError) return { ok: false as const, error: sessionError };
   return { ok: false as const, error: "Sign-in required." };
 };
@@ -562,51 +565,6 @@ serve(async (req) => {
 
   const action = String(body.action ?? "");
 
-  if (action === "email_login") {
-    const identity = await getEmailIdentity(supabase, req);
-    if (!identity.ok) {
-      return json({ ok: false, error: identity.error });
-    }
-
-    const blocked = await getBlockedWallet(supabase, identity.wallet);
-    if (blocked) {
-      await supabase.from("wallet_sessions").delete().eq("wallet", identity.wallet);
-      await auditEvent(supabase, identity.wallet, "blocked_login_attempt", {
-        reason: blocked.reason,
-        action: "email_login",
-      });
-      return json({ ok: false, error: BLOCKED_ERROR_MESSAGE });
-    }
-
-    await supabase
-      .from("wallet_sessions")
-      .delete()
-      .eq("wallet", identity.wallet)
-      .lte("expires_at", now.toISOString());
-
-    const token = randomToken(32);
-    const expiresAt = new Date(now.getTime() + SESSION_TTL_SECONDS * 1000).toISOString();
-    const { error: sessionError } = await supabase.from("wallet_sessions").insert({
-      token,
-      wallet: identity.wallet,
-      expires_at: expiresAt,
-      updated_at: now.toISOString(),
-    });
-    if (sessionError) return json({ ok: false, error: "Failed to create session." });
-
-    await auditEvent(supabase, identity.wallet, "email_login_success", {
-      email: identity.email,
-    });
-
-    return json({
-      ok: true,
-      token,
-      expiresAt,
-      wallet: identity.wallet,
-      authType: "email",
-      email: identity.email,
-    });
-  }
 
   if (action === "challenge") {
     const wallet = String(body.wallet ?? "");
@@ -752,6 +710,14 @@ serve(async (req) => {
   const auth = await getSessionWallet(supabase, req, now);
   if (!auth.ok) return json({ ok: false, error: auth.error });
 
+  if (action === "logout") {
+    if (auth.token) {
+      await supabase.from("wallet_sessions").delete().eq("token", auth.token);
+    }
+    await auditEvent(supabase, auth.wallet, "wallet_logout");
+    return json({ ok: true });
+  }
+
   if (action === "status") {
     const stateResult = await ensureDungeonState(supabase, auth.wallet, now);
     if (!stateResult.ok) return json({ ok: false, error: stateResult.error });
@@ -887,3 +853,4 @@ serve(async (req) => {
 
   return json({ ok: false, error: "Unknown action." });
 });
+

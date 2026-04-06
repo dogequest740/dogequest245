@@ -66,6 +66,14 @@ const PREMIUM_PLANS = [
 const PREMIUM_SALE_START_MS = Date.parse("2026-02-28T00:00:00Z");
 const PREMIUM_SALE_END_MS = Date.parse("2026-03-02T00:00:00Z");
 const PREMIUM_SALE_DISCOUNT_RATE = 0.5;
+const XP_BASE = 200;
+const XP_SCALE = 3;
+const XP_POWER = 1.2;
+const XP_LEVEL_REQUIREMENT_MULTIPLIER = 1.4;
+const ENERGY_MAX = 50;
+const ITEM_TIER_SCORE_BASE = 18;
+const ITEM_TIER_SCORE_PER_LEVEL = 14;
+const INVENTORY_ITEM_CAP = 512;
 const VILLAGE_CASTLE_MAX_LEVEL = 3;
 const VILLAGE_OTHER_MAX_LEVEL = 25;
 const VILLAGE_PREMIUM_UPGRADE_TIME_MULTIPLIER = 0.5;
@@ -168,6 +176,9 @@ type StakeEntryState = {
 };
 
 type ConsumableType = "energy-small" | "energy-full" | "speed" | "attack" | "key";
+type EquipmentSlot = "weapon" | "armor" | "head" | "legs" | "boots" | "artifact";
+type EquipmentStatKey = "attack" | "speed" | "attackSpeed" | "range";
+type EquipmentStats = Record<EquipmentStatKey, number>;
 type ConsumableRow = {
   id: number;
   type: ConsumableType;
@@ -251,6 +262,42 @@ const CONSUMABLE_DEFS: Record<ConsumableType, { name: string; description: strin
   speed: { name: "Swift Draught", description: "+50% speed for 5 minutes." },
   attack: { name: "Battle Tonic", description: "+50% attack speed for 5 minutes." },
   key: { name: "Dungeon Key", description: "+1 dungeon entry." },
+};
+
+const CHARACTER_CLASS_STATS = {
+  knight: { attack: 16, attackSpeed: 0.9, speed: 58, range: 16 },
+  mage: { attack: 18, attackSpeed: 1.1, speed: 62, range: 22 },
+  archer: { attack: 14, attackSpeed: 1.4, speed: 78, range: 20 },
+  elon: { attack: 17, attackSpeed: 1.05, speed: 68, range: 24 },
+  gake: { attack: 15, attackSpeed: 1.25, speed: 82, range: 18 },
+} as const;
+
+const EQUIPMENT_SLOT_IDS: EquipmentSlot[] = ["weapon", "armor", "head", "legs", "boots", "artifact"];
+const EQUIPMENT_RARITIES = [
+  { name: "Common", color: "#c7c7c7", tier: 1, power: 1, sellValue: 10 },
+  { name: "Uncommon", color: "#7bd88f", tier: 2, power: 1.2, sellValue: 20 },
+  { name: "Rare", color: "#5aa7ff", tier: 3, power: 1.45, sellValue: 40 },
+  { name: "Epic", color: "#b36bff", tier: 4, power: 1.8, sellValue: 75 },
+  { name: "Legendary", color: "#ffb347", tier: 5, power: 2.3, sellValue: 130 },
+  { name: "Mythic", color: "#ff6bd6", tier: 6, power: 2.9, sellValue: 210 },
+  { name: "Ancient", color: "#ffe36b", tier: 7, power: 3.6, sellValue: 320 },
+] as const;
+const EQUIPMENT_PREFIXES = ["Warden", "Ashen", "Starbound", "Hallowed", "Ironroot", "Mistveil", "Sunfire", "Voidborn"] as const;
+const EQUIPMENT_BASE_NAMES: Record<EquipmentSlot, readonly string[]> = {
+  weapon: ["Blade", "Staff", "Bow", "Axe", "Spear"],
+  armor: ["Plate", "Tunic", "Carapace", "Mail", "Robe"],
+  head: ["Helm", "Hood", "Circlet", "Mask", "Crown"],
+  legs: ["Greaves", "Legwraps", "Pants", "Kilt", "Leggings"],
+  boots: ["Boots", "Sabatons", "Treads", "Sandals", "Shoes"],
+  artifact: ["Charm", "Relic", "Sigil", "Gem", "Talisman"],
+};
+const EQUIPMENT_BONUS_TEMPLATES: Record<EquipmentSlot, Partial<Record<EquipmentStatKey, number>>> = {
+  weapon: { attack: 4, attackSpeed: 0.05 },
+  armor: { attack: 1 },
+  head: { attack: 2 },
+  legs: { speed: 3 },
+  boots: { speed: 6 },
+  artifact: { attackSpeed: 0.06, range: 2 },
 };
 
 type SecurityEventRow = {
@@ -596,14 +643,16 @@ const normalizeConsumables = (raw: unknown) => {
   if (!Array.isArray(raw)) return { rows: [] as ConsumableRow[], maxId: 0 };
 
   const rows: ConsumableRow[] = [];
+  const seenIds = new Set<number>();
   let maxId = 0;
   for (const entry of raw) {
     if (!entry || typeof entry !== "object") continue;
     const row = entry as Record<string, unknown>;
     const id = Math.max(1, asInt(row.id, 0));
     const typeRaw = String(row.type ?? "");
-    if (!id || !isConsumableType(typeRaw)) continue;
+    if (!id || seenIds.has(id) || !isConsumableType(typeRaw)) continue;
     const def = CONSUMABLE_DEFS[typeRaw];
+    seenIds.add(id);
     maxId = Math.max(maxId, id);
     rows.push({
       id,
@@ -615,6 +664,190 @@ const normalizeConsumables = (raw: unknown) => {
   }
 
   return { rows, maxId };
+};
+
+const getXpForLevel = (levelRaw: number) => {
+  const level = Math.max(1, Math.floor(levelRaw));
+  return Math.round((XP_BASE + XP_SCALE * Math.pow(level, XP_POWER)) * XP_LEVEL_REQUIREMENT_MULTIPLIER);
+};
+
+const emptyEquipmentStats = (): EquipmentStats => ({ attack: 0, speed: 0, attackSpeed: 0, range: 0 });
+
+const getCharacterClassStats = (classIdRaw: unknown) => {
+  const classId = String(classIdRaw ?? "").trim() as keyof typeof CHARACTER_CLASS_STATS;
+  return classId && classId in CHARACTER_CLASS_STATS
+    ? { classId, stats: CHARACTER_CLASS_STATS[classId] }
+    : null;
+};
+
+const computeItemTierScore = (level: number, rarity: (typeof EQUIPMENT_RARITIES)[number]) => {
+  const rarityMultiplier = 1 + (rarity.tier - 1) * 0.07;
+  const levelMultiplier = 1 + (level - 1) * 0.004;
+  const levelLinear = ITEM_TIER_SCORE_BASE + ITEM_TIER_SCORE_PER_LEVEL * (level - 1);
+  return Math.round(levelLinear * levelMultiplier * rarityMultiplier);
+};
+
+const computeSellValue = (level: number, rarity: (typeof EQUIPMENT_RARITIES)[number]) => {
+  const levelMultiplier = 1 + (level - 1) * 0.003;
+  const levelBonus = (level - 1) * 0.25;
+  return Math.round((rarity.sellValue * levelMultiplier + levelBonus) * 0.6);
+};
+
+const normalizeEquipmentBonuses = (
+  slot: EquipmentSlot,
+  rarity: (typeof EQUIPMENT_RARITIES)[number],
+  level: number,
+  raw: unknown,
+) => {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const source = raw as Record<string, unknown>;
+  const template = EQUIPMENT_BONUS_TEMPLATES[slot];
+  const levelScale = 1 + level * 0.015;
+  const result = emptyEquipmentStats();
+
+  for (const key of ["attack", "speed", "attackSpeed", "range"] as EquipmentStatKey[]) {
+    const templateValue = template[key] ?? 0;
+    const providedRaw = source[key];
+    const provided = key === "attackSpeed" ? Number(providedRaw ?? 0) : asInt(providedRaw, 0);
+    if (!Number.isFinite(provided)) return null;
+
+    if (!templateValue) {
+      if (Math.abs(provided) > (key === "attackSpeed" ? 0.001 : 0)) return null;
+      result[key] = 0;
+      continue;
+    }
+
+    const variance = key === "attackSpeed" ? 0.02 : key === "speed" ? 2 : 4;
+    const minScaled = Math.max(0, (templateValue - variance) * rarity.power * levelScale);
+    const maxScaled = Math.max(0, (templateValue + variance) * rarity.power * levelScale);
+    if (key === "attackSpeed") {
+      const minRounded = Number(minScaled.toFixed(2));
+      const maxRounded = Number(maxScaled.toFixed(2));
+      const rounded = Number(provided.toFixed(2));
+      if (rounded < minRounded || rounded > maxRounded) return null;
+      result[key] = rounded;
+    } else {
+      const rounded = Math.round(provided);
+      if (rounded < Math.round(minScaled) || rounded > Math.round(maxScaled)) return null;
+      result[key] = rounded;
+    }
+  }
+
+  return result;
+};
+
+const normalizeEquipmentItem = (
+  raw: unknown,
+  playerLevelRaw: number,
+  expectedSlot?: EquipmentSlot,
+) => {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const item = raw as Record<string, unknown>;
+  const id = Math.max(1, asInt(item.id, 0));
+  const slot = String(item.slot ?? "") as EquipmentSlot;
+  if (!id || !EQUIPMENT_SLOT_IDS.includes(slot)) return null;
+  if (expectedSlot && slot !== expectedSlot) return null;
+
+  const level = Math.max(1, asInt(item.level, 0));
+  const playerLevel = Math.max(1, Math.floor(playerLevelRaw));
+  if (level > playerLevel) return null;
+
+  const rarity = EQUIPMENT_RARITIES.find((entry) => entry.name === String(item.rarity ?? ""));
+  if (!rarity) return null;
+  if (String(item.color ?? "") !== rarity.color) return null;
+
+  const name = String(item.name ?? "").trim();
+  const validName = EQUIPMENT_PREFIXES.some((prefix) =>
+    EQUIPMENT_BASE_NAMES[slot].some((baseName) => name === `${prefix} ${baseName}`)
+  );
+  if (!validName) return null;
+
+  const bonuses = normalizeEquipmentBonuses(slot, rarity, level, item.bonuses);
+  if (!bonuses) return null;
+
+  const tierScore = Math.max(0, asInt(item.tierScore, 0));
+  if (tierScore !== computeItemTierScore(level, rarity)) return null;
+
+  const sellValue = Math.max(0, asInt(item.sellValue, 0));
+  if (sellValue !== computeSellValue(level, rarity)) return null;
+
+  return {
+    id,
+    name,
+    slot,
+    level,
+    rarity: rarity.name,
+    color: rarity.color,
+    bonuses,
+    tierScore,
+    sellValue,
+  };
+};
+
+const normalizeInventory = (raw: unknown, playerLevel: number) => {
+  if (!Array.isArray(raw)) return [];
+  const rows: ReturnType<typeof normalizeEquipmentItem>[] = [];
+  const seenIds = new Set<number>();
+  for (const entry of raw) {
+    if (rows.length >= INVENTORY_ITEM_CAP) break;
+    const normalized = normalizeEquipmentItem(entry, playerLevel);
+    if (!normalized || seenIds.has(normalized.id)) continue;
+    seenIds.add(normalized.id);
+    rows.push(normalized);
+  }
+  return rows.filter(Boolean) as NonNullable<ReturnType<typeof normalizeEquipmentItem>>[];
+};
+
+const normalizeEquipment = (raw: unknown, playerLevel: number, usedIds: Set<number>) => {
+  const normalized = Object.fromEntries(EQUIPMENT_SLOT_IDS.map((slot) => [slot, null])) as Record<EquipmentSlot, ReturnType<typeof normalizeEquipmentItem>>;
+  const source = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+  for (const slot of EQUIPMENT_SLOT_IDS) {
+    const item = normalizeEquipmentItem(source[slot], playerLevel, slot);
+    if (!item || usedIds.has(item.id)) continue;
+    usedIds.add(item.id);
+    normalized[slot] = item;
+  }
+  return normalized as Record<EquipmentSlot, NonNullable<ReturnType<typeof normalizeEquipmentItem>> | null>;
+};
+
+const createStarterProfileState = (seed: Record<string, unknown>, nowMs: number) => {
+  const classInfo = getCharacterClassStats(seed.classId) ?? { classId: "knight" as const, stats: CHARACTER_CLASS_STATS.knight };
+  return {
+    version: Math.max(1, asInt(seed.version, 1)),
+    name: sanitizeName(seed.name),
+    classId: classInfo.classId,
+    player: {
+      level: 1,
+      xp: 0,
+      xpNext: getXpForLevel(1),
+      baseAttack: classInfo.stats.attack,
+      baseAttackSpeed: classInfo.stats.attackSpeed,
+      baseSpeed: classInfo.stats.speed,
+      baseRange: classInfo.stats.range,
+    },
+    energy: ENERGY_MAX,
+    energyMax: ENERGY_MAX,
+    energyTimer: ENERGY_REGEN_SECONDS,
+    gold: 0,
+    crystals: 0,
+    crystalsEarned: 0,
+    tickets: DUNGEON_DAILY_TICKETS,
+    ticketDay: todayKeyUtc(new Date(nowMs)),
+    inventory: [],
+    equipment: Object.fromEntries(EQUIPMENT_SLOT_IDS.map((slot) => [slot, null])) as Record<EquipmentSlot, null>,
+    consumables: [],
+    questStates: {},
+    monsterKills: 0,
+    dungeonRuns: 0,
+    starterPackPurchased: false,
+    premiumEndsAt: 0,
+    premiumClaimDay: "",
+    worldBossTickets: 0,
+    village: createVillageState(nowMs),
+    stake: [],
+    stakeId: 0,
+    consumableId: 0,
+  } as Record<string, unknown>;
 };
 
 const addConsumableToState = (state: Record<string, unknown>, type: ConsumableType) => {
@@ -953,17 +1186,22 @@ const normalizeState = (raw: unknown) => {
     return null;
   }
   const state = structuredClone(raw) as Record<string, unknown>;
+  const classInfo = getCharacterClassStats(state.classId);
+  if (!classInfo) return null;
+
   const playerRaw = (state.player as Record<string, unknown> | undefined) ?? {};
+  const playerLevel = clampInt(playerRaw.level, 1, MAX_LEVEL);
   const player = {
     ...playerRaw,
-    level: clampInt(playerRaw.level, 1, MAX_LEVEL),
+    level: playerLevel,
     xp: Math.max(0, asInt(playerRaw.xp, 0)),
-    xpNext: Math.max(1, asInt(playerRaw.xpNext, 1)),
-    baseAttack: Math.max(1, asInt(playerRaw.baseAttack, 1)),
-    baseAttackSpeed: Math.max(0, Number(playerRaw.baseAttackSpeed ?? 0)),
-    baseSpeed: Math.max(0, asInt(playerRaw.baseSpeed, 0)),
-    baseRange: Math.max(0, asInt(playerRaw.baseRange, 0)),
+    xpNext: Math.max(getXpForLevel(playerLevel), asInt(playerRaw.xpNext, getXpForLevel(playerLevel))),
+    baseAttack: classInfo.stats.attack,
+    baseAttackSpeed: classInfo.stats.attackSpeed,
+    baseSpeed: classInfo.stats.speed,
+    baseRange: classInfo.stats.range,
   };
+  state.classId = classInfo.classId;
   state.player = player;
   state.name = sanitizeName(state.name);
   state.gold = Math.max(0, asInt(state.gold, 0));
@@ -972,7 +1210,7 @@ const normalizeState = (raw: unknown) => {
   state.monsterKills = Math.max(0, asInt(state.monsterKills, 0));
   state.dungeonRuns = Math.max(0, asInt(state.dungeonRuns, 0));
   state.energy = Math.max(0, asInt(state.energy, 0));
-  state.energyMax = Math.max(1, asInt(state.energyMax, 50));
+  state.energyMax = Math.max(1, asInt(state.energyMax, ENERGY_MAX));
   state.energyTimer = clampInt(state.energyTimer, 1, ENERGY_REGEN_SECONDS);
   if (state.energy >= state.energyMax) {
     state.energy = state.energyMax;
@@ -984,6 +1222,12 @@ const normalizeState = (raw: unknown) => {
   state.premiumEndsAt = Math.max(0, asInt(state.premiumEndsAt, 0));
   state.premiumClaimDay = String(state.premiumClaimDay ?? "").slice(0, 10);
   state.village = normalizeVillageState(state.village, Date.now());
+
+  const inventory = normalizeInventory(state.inventory, playerLevel);
+  const usedEquipmentIds = new Set<number>(inventory.map((item) => item.id));
+  state.inventory = inventory;
+  state.equipment = normalizeEquipment(state.equipment, playerLevel, usedEquipmentIds);
+
   const normalizedConsumables = normalizeConsumables(state.consumables);
   state.consumables = normalizedConsumables.rows;
   state.consumableId = Math.max(asInt(state.consumableId, 0), normalizedConsumables.maxId);
@@ -1016,13 +1260,17 @@ const validateStateTransition = (
   }
 
   if (!prev) {
-    if (next.level > 30) return "Initial profile level is too high.";
-    if (next.crystals > 10000) return "Initial profile crystals are too high.";
-    if (next.gold > 500000) return "Initial profile gold is too high.";
-    if (nextPremiumEndsAt > nowMs + PREMIUM_MAX_EXTENSION_DAYS * 24 * 60 * 60 * 1000) {
-      return "Initial premium duration is too high.";
-    }
-    if (nextStake.total > 5000) return "Initial stake balance is too high.";
+    if (next.level !== 1) return "Initial profile level must start at 1.";
+    if (next.xp !== 0) return "Initial XP must start at 0.";
+    if (next.crystals !== 0 || next.crystalsEarned !== 0) return "Initial crystals must start at 0.";
+    if (next.gold !== 0) return "Initial gold must start at 0.";
+    if (next.monsterKills !== 0 || next.dungeonRuns !== 0) return "Initial progress must start at 0.";
+    if (nextPremiumEndsAt > 0) return "Initial premium must start inactive.";
+    if (nextStake.total > 0) return "Initial stake balance must start at 0.";
+    if (Array.isArray(nextState.inventory) && nextState.inventory.length > 0) return "Initial inventory must start empty.";
+    if (Array.isArray(nextState.consumables) && nextState.consumables.length > 0) return "Initial consumables must start empty.";
+    const equipment = nextState.equipment as Record<string, unknown> | undefined;
+    if (equipment && Object.values(equipment).some((entry) => entry)) return "Initial equipment must start empty.";
     return null;
   }
 
@@ -2297,7 +2545,7 @@ serve(async (req) => {
   }
 
   if (action === "profile_save") {
-    const normalizedState = normalizeState(body.state);
+    let normalizedState = normalizeState(body.state);
     if (!normalizedState) {
       return json({ ok: false, error: "Invalid profile payload." });
     }
@@ -2356,6 +2604,16 @@ serve(async (req) => {
     const prevState = prevStateRaw ? normalizeState(prevStateRaw) : null;
     // Never allow client saves to roll premium back (stale client state can otherwise erase active premium).
     if (prevState) {
+      normalizedState.classId = String(prevState.classId ?? normalizedState.classId ?? "");
+      const nextPlayer = (normalizedState.player as Record<string, unknown> | undefined) ?? {};
+      const prevPlayer = (prevState.player as Record<string, unknown> | undefined) ?? {};
+      normalizedState.player = {
+        ...nextPlayer,
+        ...prevPlayer,
+        level: asInt(nextPlayer.level, asInt(prevPlayer.level, 1)),
+        xp: asInt(nextPlayer.xp, asInt(prevPlayer.xp, 0)),
+        xpNext: asInt(nextPlayer.xpNext, asInt(prevPlayer.xpNext, 1)),
+      };
       const prevPremiumEndsAt = Math.max(0, asInt(prevState.premiumEndsAt, 0));
       const nextPremiumEndsAt = Math.max(0, asInt(normalizedState.premiumEndsAt, 0));
       if (nextPremiumEndsAt < prevPremiumEndsAt) {
@@ -2369,8 +2627,7 @@ serve(async (req) => {
       // Village writes are server-authoritative and must never be accepted from client profile_save.
       normalizedState.village = normalizeVillageState(prevState.village, now.getTime());
     } else if (!existing) {
-      // Initial village state is server-owned; never accept custom client seed values.
-      normalizedState.village = createVillageState(now.getTime());
+      normalizedState = createStarterProfileState(normalizedState, now.getTime());
     } else {
       return json({ ok: false, error: "Invalid previous profile state. Contact support." });
     }

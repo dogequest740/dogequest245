@@ -3293,6 +3293,10 @@ function App() {
   const signOutWalletAuth = async () => {
     setWalletLogoutBusy(true)
     try {
+      const token = dungeonSessionRef.current?.token ?? ''
+      if (token) {
+        await callDungeonSecure({ action: 'logout' }, { 'x-session-token': token }).catch(() => ({ ok: false }))
+      }
       dungeonSessionRef.current = null
       dungeonSessionRequestRef.current = null
       secureSessionInitRef.current = false
