@@ -5961,174 +5961,29 @@ button.ghost {
   }
 }
 
-.resources-actions-row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: center;
+.app:not(.auth-mode):not(.mobile) {
+  height: auto;
+  min-height: 100vh;
+  overflow: auto;
 }
 
-@media (min-width: 921px) {
-  .topbar {
-    align-items: flex-start;
-  }
-
-  .top-actions {
-    gap: 8px;
-  }
-
-  .resources {
-    gap: 6px;
-    align-items: center;
-  }
-
-  .resource-chip {
-    padding: 8px 12px;
-    border-radius: 12px;
-  }
-
-  .resource-chip .icon-img {
-    width: 22px;
-    height: 22px;
-  }
-
-  .resource-chip strong {
-    font-size: 16px;
-  }
-
-  .resource-timer {
-    font-size: 10px;
-  }
-
-  .resource-action {
-    min-height: 32px;
-    padding: 5px 10px;
-    font-size: 10px;
-  }
-
-  .resource-action.buy-gold {
-    min-height: 34px;
-    padding: 3px 8px;
-  }
-
-  .resource-action .icon-img,
-  .resource-action .icon-img.tiny,
-  .resource-action.buy-gold .icon-img,
-  .resource-action.buy-gold .icon-img.tiny {
-    width: 32px;
-    height: 32px;
-  }
-
-  .game-section {
-    overflow: auto;
-    padding-right: 4px;
-  }
-
-  .game-layout {
-    align-items: start;
-  }
-
-  .left-panel {
-    max-height: 100%;
-    overflow: auto;
-    align-content: start;
-    padding: 10px;
-    gap: 10px;
-    scrollbar-width: thin;
-  }
-
-  .player-card {
-    gap: 4px;
-    padding: 8px;
-  }
-
-  .player-name {
-    font-size: 18px;
-  }
-
-  .player-class {
-    font-size: 12px;
-  }
-
-  .player-level {
-    font-size: 16px;
-  }
-
-  .player-xp {
-    font-size: 12px;
-    padding: 3px 7px;
-  }
-
-  .player-stats {
-    gap: 6px;
-    padding: 10px;
-  }
-
-  .player-stat-button {
-    padding: 5px 7px;
-  }
-
-  .menu-stack {
-    gap: 8px;
-  }
-
-  .menu-big {
-    padding: 8px 10px;
-    font-size: 11px;
-    gap: 8px;
-  }
-
-  .menu-big .icon-img {
-    width: 30px;
-    height: 30px;
-  }
-
-  .game-main {
-    grid-template-rows: minmax(0, 1fr) auto;
-  }
-
-  .battle-controls {
-    position: sticky;
-    bottom: 0;
-    z-index: 4;
-    margin-top: 0;
-    padding: 8px 0 2px;
-    background: linear-gradient(180deg, rgba(8, 12, 18, 0), rgba(8, 12, 18, 0.86) 35%, rgba(8, 12, 18, 0.98));
-  }
-
-  .battle-btn {
-    padding: 10px 16px;
-    font-size: 13px;
-  }
-
-  .battle-btn .battle-icon {
-    width: 26px;
-    height: 26px;
-  }
+.app:not(.auth-mode):not(.mobile) .game-section {
+  flex: 0 0 auto;
+  min-height: auto;
 }
 
-@media (min-width: 921px) and (max-height: 920px) {
-  .app {
-    padding: 10px 14px 14px;
-    gap: 10px;
-  }
+.app:not(.auth-mode):not(.mobile) .game-layout {
+  align-items: start;
+  min-height: auto;
+}
 
-  .game-layout {
-    grid-template-columns: 214px minmax(0, 1fr);
-    gap: 10px;
-  }
+.app:not(.auth-mode):not(.mobile) .left-panel,
+.app:not(.auth-mode):not(.mobile) .game-main {
+  min-height: auto;
+}
 
-  .resource-chip {
-    padding: 7px 10px;
-  }
-
-  .menu-big {
-    padding: 7px 9px;
-    font-size: 10px;
-  }
-
-  .menu-big .icon-img {
-    width: 26px;
-    height: 26px;
+@media (max-height: 920px) and (min-width: 921px) {
+  .app:not(.auth-mode):not(.mobile) {
+    padding-bottom: 20px;
   }
 }
