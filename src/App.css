@@ -6158,9 +6158,9 @@ button.ghost {
   font-weight: 800;
   line-height: 1.05;
   letter-spacing: 0.9px;
-  color: #f7f3ea;
+  color: #ffe39a;
   text-transform: uppercase;
-  text-shadow: 0 0 8px rgba(120, 190, 255, 0.16);
+  text-shadow: 0 0 10px rgba(255, 214, 122, 0.22), 0 0 8px rgba(120, 190, 255, 0.14);
   white-space: nowrap;
 }
 
@@ -6181,5 +6181,3 @@ button.ghost {
     letter-spacing: 0.7px;
   }
 }
-
-

@@ -6230,7 +6230,7 @@ function App() {
       {stage === 'auth' && (
         <section className="auth-page">
           <div className="auth-social-buttons">
-            <a className="auth-social-button auth-discord-button" href="https://discord.gg/HQYQXADW8h" target="_blank" rel="noreferrer">
+            <a className="auth-social-button auth-discord-button" href="https://discord.gg/jmSgBw8s75" target="_blank" rel="noreferrer">
               Discord
             </a>
             <a className="auth-social-button auth-x-button" href="https://x.com/Doge_mmorpg" target="_blank" rel="noreferrer">
@@ -8727,9 +8727,3 @@ function App() {
   )
 }
 export default App
-
-
-
-
-
-
