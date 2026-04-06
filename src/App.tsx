@@ -6038,18 +6038,34 @@ function App() {
   const resourceChips = hud ? (
     <>
       <div className="resource-gold-crystal-group">
-        <div className="resource-chip gold">
+        <div className="resource-chip gold with-action">
           <img className="icon-img" src={iconGold} alt="" />
           <div className="resource-text">
-            <span>Gold</span>
-            <strong>{hud.gold}</strong>
+            <div className="resource-main">
+              <span>Gold</span>
+              <strong>{hud.gold}</strong>
+            </div>
+            <div className="resource-actions">
+              <button type="button" className="resource-action buy-gold inline" onClick={() => setActivePanel('buygold')}>
+                <img className="icon-img tiny" src={iconBuyGold} alt="" />
+                Buy Gold
+              </button>
+            </div>
           </div>
         </div>
-        <div className="resource-chip crystals">
+        <div className="resource-chip crystals with-action">
           <img className="icon-img" src={iconCrystals} alt="" />
           <div className="resource-text">
-            <span>Crystals</span>
-            <strong>{hud.crystals}</strong>
+            <div className="resource-main">
+              <span>Crystals</span>
+              <strong>{hud.crystals}</strong>
+            </div>
+            <div className="resource-actions">
+              <button type="button" className="resource-action secondary inline" onClick={() => setActivePanel('stake')}>
+                <img className="icon-img tiny" src={iconStacking} alt="" />
+                Staking
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -6072,17 +6088,9 @@ function App() {
   ) : null
   const resourceActionRow = (
     <div className="resources-actions-row">
-      <button type="button" className="resource-action buy-gold" onClick={() => setActivePanel('buygold')}>
-        <img className="icon-img tiny" src={iconBuyGold} alt="" />
-        Buy Gold
-      </button>
       <button type="button" className="resource-action" onClick={() => setActivePanel('season')}>
         <img className="icon-img tiny" src={iconCrystals} alt="" />
         Season
-      </button>
-      <button type="button" className="resource-action secondary" onClick={() => setActivePanel('stake')}>
-        <img className="icon-img tiny" src={iconStacking} alt="" />
-        Staking
       </button>
     </div>
   )

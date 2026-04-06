@@ -62,7 +62,27 @@
 }
 
 .app.mobile .resource-chip.with-action .resource-actions {
-  display: none;
+  display: flex;
+  width: 100%;
+}
+
+.app.mobile .resource-chip.with-action .resource-text {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+}
+
+.app.mobile .resource-chip.with-action .resource-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app.mobile .resource-chip.with-action .resource-actions .resource-action {
+  width: 100%;
+  justify-content: center;
 }
 
 .app.mobile .resources-strip {
@@ -81,7 +101,7 @@
 .app.mobile .resources-strip .resource-gold-crystal-group {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 64px minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   align-items: stretch;
 }
@@ -650,6 +670,34 @@
   line-height: 1.1;
 }
 
+.resource-chip.with-action {
+  align-items: center;
+}
+
+.resource-chip.with-action .resource-text {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.resource-chip.with-action .resource-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 78px;
+}
+
+.resource-chip.with-action .resource-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.resource-chip.with-action .resource-actions .resource-action {
+  margin: 0;
+  align-self: center;
+}
+
 
 .resource-timer {
   font-size: 11px;
@@ -754,6 +802,12 @@
 .resource-action.buy-gold {
   min-height: 40px;
   padding: 4px 10px;
+}
+
+.resource-action.inline {
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 10px;
 }
 
 .resource-action.buy-gold .icon-img,
