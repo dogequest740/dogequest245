@@ -8003,15 +8003,25 @@ function App() {
                     {seasonLeaderboard.map((row) => {
                       const isCurrentPlayer = row.wallet === accountIdentity
                       const rankTone = row.rank <= 3 ? `top-${row.rank}` : 'standard'
+                      const hasMedal = row.rank <= 3
                       return (
                         <div key={row.wallet} className={`season-leaderboard-row ${rankTone} ${isCurrentPlayer ? 'current-player' : ''}`}>
-                          <div className="season-rank-pill">#{row.rank}</div>
+                          <div className="season-rank-pill">
+                            {hasMedal ? (
+                              <span className={`season-medal top-${row.rank}`}>{row.rank}</span>
+                            ) : (
+                              `#${row.rank}`
+                            )}
+                          </div>
                           <div className="season-player-block">
                             <div className="season-player-name-row">
                               <strong>{row.name}</strong>
                               {isCurrentPlayer && <span className="season-you-badge">You</span>}
                             </div>
-                            <span className="season-player-crystals">{formatNumber(row.crystals)} crystals</span>
+                          </div>
+                          <div className="season-player-score">
+                            <img src={iconCrystals} alt="" className="icon-img season-score-icon" />
+                            <strong>{formatNumber(row.crystals)}</strong>
                           </div>
                         </div>
                       )

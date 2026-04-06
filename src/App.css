@@ -5407,16 +5407,16 @@ button.ghost {
 
 .season-leaderboard-list {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .season-leaderboard-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: 50px minmax(0, 1fr) auto;
+  gap: 10px;
   align-items: center;
-  padding: 12px 14px;
-  border-radius: 14px;
+  padding: 10px 12px;
+  border-radius: 13px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: linear-gradient(150deg, rgba(18, 26, 40, 0.95), rgba(11, 17, 26, 0.92));
 }
@@ -5442,22 +5442,51 @@ button.ghost {
 }
 
 .season-rank-pill {
-  min-width: 54px;
-  padding: 9px 10px;
+  min-width: 46px;
+  min-height: 40px;
+  padding: 0 6px;
   border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   text-align: center;
   font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
-  font-size: 13px;
-  letter-spacing: 0.5px;
+  font-size: 12px;
+  letter-spacing: 0.4px;
   color: #f8f6ef;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.06);
 }
 
+.season-medal {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  line-height: 1;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.season-medal.top-1 {
+  background: linear-gradient(180deg, #ffe7a3, #d29a23);
+  color: #402708;
+}
+
+.season-medal.top-2 {
+  background: linear-gradient(180deg, #f4f7fb, #98a7b8);
+  color: #233142;
+}
+
+.season-medal.top-3 {
+  background: linear-gradient(180deg, #f0b58b, #a95f33);
+  color: #2f1709;
+}
+
 .season-player-block {
   min-width: 0;
-  display: grid;
-  gap: 4px;
 }
 
 .season-player-name-row {
@@ -5488,10 +5517,27 @@ button.ghost {
   letter-spacing: 0.4px;
 }
 
-.season-player-crystals {
-  font-family: 'Manrope', system-ui, sans-serif;
-  font-size: 12px;
-  color: rgba(231, 240, 245, 0.78);
+.season-player-score {
+  display: inline-flex;
+  align-items: center;
+  justify-self: end;
+  gap: 6px;
+  padding-left: 8px;
+  white-space: nowrap;
+  color: #dff6ff;
+}
+
+.season-player-score strong {
+  font-size: 13px;
+  letter-spacing: 0.2px;
+  color: #f8f6ef;
+}
+
+.season-score-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 6px rgba(110, 208, 255, 0.24));
 }
 
 .season-admin-block {
@@ -5505,13 +5551,44 @@ button.ghost {
 }
 
 @media (max-width: 720px) {
+  .season-leaderboard {
+    padding: 12px;
+  }
+
   .season-leaderboard-row {
-    grid-template-columns: 1fr;
-    gap: 10px;
+    grid-template-columns: 42px minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 9px 10px;
   }
 
   .season-rank-pill {
-    width: fit-content;
+    min-width: 40px;
+    min-height: 36px;
+    font-size: 11px;
+  }
+
+  .season-medal {
+    width: 24px;
+    height: 24px;
+    font-size: 12px;
+  }
+
+  .season-player-name-row strong {
+    font-size: 13px;
+  }
+
+  .season-player-score {
+    gap: 5px;
+    padding-left: 4px;
+  }
+
+  .season-player-score strong {
+    font-size: 12px;
+  }
+
+  .season-score-icon {
+    width: 16px;
+    height: 16px;
   }
 }
 
