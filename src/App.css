@@ -6090,3 +6090,35 @@ button.ghost {
     gap: 8px;
   }
 }
+
+@media (min-width: 921px) {
+  .app:not(.auth-mode):not(.mobile) .topbar {
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .resources {
+    padding-bottom: 0;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .wallet {
+    gap: 4px;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .wallet-row,
+  .app:not(.auth-mode):not(.mobile) .wallet-hint-row {
+    gap: 6px;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .wallet-hint {
+    font-size: 11px;
+    line-height: 1.1;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .music-toggle,
+  .app:not(.auth-mode):not(.mobile) .wallet-logout-btn,
+  .app:not(.auth-mode):not(.mobile) .admin-inline {
+    padding: 5px 8px;
+    font-size: 10px;
+  }
+}
