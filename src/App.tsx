@@ -6053,6 +6053,8 @@ function App() {
   const premiumActive = Boolean(hud && isPremiumActiveAt(hud.premiumEndsAt))
   const premiumDaysLeft = hud ? getPremiumDaysLeft(hud.premiumEndsAt) : 0
   const premiumClaimReady = Boolean(hud && premiumActive && hud.premiumClaimDay !== currentDayKey)
+  const seasonRemainingSec = seasonInfo ? Math.max(0, Math.floor((new Date(seasonInfo.endAt).getTime() - Date.now()) / 1000)) : 0
+  const seasonPlayerCrystals = seasonPlayer?.crystals ?? hud?.crystals ?? 0
   const fortuneCanSpin = fortuneFreeSpinAvailable || fortunePaidSpins > 0
   const villagePending = hud ? getVillagePendingRewards(hud.village, Date.now()) : null
   const villageRates = hud ? getVillageProductionRates(hud.village) : null
@@ -7975,42 +7977,97 @@ function App() {
             </div>
             <div className="withdraw-body season-body">
               {seasonInfo ? (
-                <>
-                  <div className="withdraw-info">
-                    <span className="withdraw-info-label">
-                      <img className="icon-img small" src={iconCrystals} alt="" />
-                      Active season
-                    </span>
-                    <strong>{seasonInfo.name}</strong>
-                  </div>
-                  <div className="withdraw-info season-grid-two">
-                    <span className="withdraw-info-label">Pool</span>
-                    <strong>{seasonInfo.poolUsdt.toFixed(3)} USDT</strong>
-                  </div>
-                  <div className="withdraw-info season-grid-two">
-                    <span className="withdraw-info-label">Ends</span>
-                    <strong>{formatDateTime(seasonInfo.endAt)}</strong>
-                  </div>
-                  <div className="withdraw-info season-grid-two">
-                    <span className="withdraw-info-label">Your crystals</span>
-                    <strong>{formatNumber(seasonPlayer?.crystals ?? hud.crystals)}</strong>
-                  </div>
-                  <div className="withdraw-info season-grid-two">
-                    <span className="withdraw-info-label">Participants</span>
-                    <strong>{formatNumber(seasonTotalPlayers)}</strong>
-                  </div>
-                  {seasonPlayer && (
-                    <div className="withdraw-info season-player-summary">
-                      <span className="withdraw-info-label">Your rank</span>
-                      <strong>#{seasonPlayer.rank}</strong>
+                <div className="season-hero">
+                  <div className="season-hero-header">
+                    <div className="season-hero-copy">
+                      <span className="season-kicker">
+                        <img className="icon-img small" src={iconCrystals} alt="" />
+                        Active season
+                      </span>
+                      <h4>{seasonInfo.name}</h4>
+                      <p>Keep as many crystals as you can on your balance until the season closes. At the snapshot, the full USDT pool is split between players according to their crystal share.</p>
                     </div>
-                  )}
-                  <div className="withdraw-note">
-                    Snapshot uses your current crystal balance. Premium players receive a 1.5x multiplier at season close.
+                    <div className="season-status-card">
+                      <span className="season-status-label">Ends in</span>
+                      <strong>{formatLongTimer(seasonRemainingSec)}</strong>
+                      <span>{formatDateTime(seasonInfo.endAt)}</span>
+                    </div>
                   </div>
-                </>
+
+                  <div className="season-summary-grid">
+                    <div className="season-summary-card season-summary-pool">
+                      <span className="season-summary-label">Season pool</span>
+                      <strong>{seasonInfo.poolUsdt.toFixed(3)} USDT</strong>
+                      <small>Manual payouts are calculated from the final snapshot.</small>
+                    </div>
+                    <div className="season-summary-card">
+                      <span className="season-summary-label">Your crystals</span>
+                      <strong>{formatNumber(seasonPlayerCrystals)}</strong>
+                      <small>Only crystals on your balance count.</small>
+                    </div>
+                    <div className="season-summary-card">
+                      <span className="season-summary-label">Your rank</span>
+                      <strong>{seasonPlayer ? `#${seasonPlayer.rank}` : 'Unranked'}</strong>
+                      <small>Current place in the live leaderboard.</small>
+                    </div>
+                    <div className="season-summary-card">
+                      <span className="season-summary-label">Participants</span>
+                      <strong>{formatNumber(seasonTotalPlayers)}</strong>
+                      <small>Players currently counted in this season.</small>
+                    </div>
+                  </div>
+
+                  <div className="season-explainer-grid">
+                    <div className="season-mechanics-card">
+                      <div className="season-section-heading">How the season works</div>
+                      <div className="season-steps">
+                        <div className="season-step">
+                          <span className="season-step-index">1</span>
+                          <div>
+                            <strong>Farm crystals all month</strong>
+                            <p>Earn crystals from your normal gameplay: dungeons, world boss, village, and everything else already in the game.</p>
+                          </div>
+                        </div>
+                        <div className="season-step">
+                          <span className="season-step-index">2</span>
+                          <div>
+                            <strong>Keep them on your balance</strong>
+                            <p>When the season ends, the snapshot uses the exact amount of crystals on your account at that moment.</p>
+                          </div>
+                        </div>
+                        <div className="season-step">
+                          <span className="season-step-index">3</span>
+                          <div>
+                            <strong>Split the USDT pool by share</strong>
+                            <p>Your payout is based on how many crystals you hold compared with the rest of the season's players.</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className={`season-premium-card ${premiumActive ? 'active' : ''}`}>
+                      <div className="season-section-heading">Premium bonus</div>
+                      <div className="season-premium-top">
+                        <img className="season-premium-icon" src={iconPremium} alt="" />
+                        <div>
+                          <strong>x1.5 payout multiplier</strong>
+                          <p>Premium does not create extra crystals. It boosts your season payout weight at the snapshot.</p>
+                        </div>
+                      </div>
+                      <div className="season-premium-badge">
+                        {premiumActive ? `Premium active now: ${premiumDaysLeft} day${premiumDaysLeft === 1 ? '' : 's'} left` : 'Premium inactive right now'}
+                      </div>
+                      <div className="season-premium-note">
+                        Example: 1,000 crystals with Premium are counted as 1,500 snapshot crystals for season rewards.
+                      </div>
+                    </div>
+                  </div>
+                </div>
               ) : (
-                <div className="withdraw-note">No active season right now.</div>
+                <div className="season-empty-state">
+                  <div className="season-section-heading">No active season right now</div>
+                  <p>The next season will appear here with its pool, rules, and live leaderboard as soon as it starts.</p>
+                </div>
               )}
 
               {seasonError && <div className="withdraw-error">{seasonError}</div>}
