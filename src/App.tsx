@@ -1030,7 +1030,7 @@ const GOLD_PACKAGES_SOL = [
   { id: 'gold-500k', gold: 500000, sol: 0.4, image: goldLargeImage },
   { id: 'gold-1200k', gold: 1200000, sol: 0.63, image: gold1200kImage },
 ] as const
-const STARTER_PACK_PRICE = 0.35
+const STARTER_PACK_PRICE = 0.25
 const STARTER_PACK_GOLD = 300000
 const STARTER_PACK_WORLD_BOSS_TICKETS = 5
 const SHOP_DUNGEON_KEY_COST = 50000
@@ -1040,8 +1040,8 @@ const SHOP_CRYSTAL_FLASK_COST = 7500
 const WORLD_BOSS_TICKET_COST = 18000
 const SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT = 2
 const PREMIUM_PLANS = [
-  { id: 'premium-30', days: 30, sol: 0.5 },
-  { id: 'premium-90', days: 90, sol: 1 },
+  { id: 'premium-30', days: 30, sol: 0.3 },
+  { id: 'premium-90', days: 90, sol: 0.7 },
 ] as const
 const PREMIUM_SALE_START_MS = Date.parse('2026-02-28T00:00:00Z')
 const PREMIUM_SALE_END_MS = Date.parse('2026-03-02T00:00:00Z')
@@ -6251,6 +6251,7 @@ function App() {
                 Stack crystals in dungeons, World Boss raids, and your village, then compete in 30-day seasons for your share of the live USDT reward pool.
               </p>
               <div className="auth-cta">
+                <span className="auth-wallet-label">Login with Solana wallet</span>
                 <div className="auth-cta-row">
                   <WalletModalButton className="wallet-button auth-wallet" />
                 </div>

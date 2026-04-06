@@ -30,7 +30,7 @@ const PREMIUM_DAILY_SMALL_POTIONS = 5;
 const PREMIUM_DAILY_BIG_POTIONS = 3;
 const SOL_LAMPORTS = 1_000_000_000;
 const STARTER_PACK_GOLD = 300000;
-const STARTER_PACK_PRICE_LAMPORTS = Math.round(0.35 * SOL_LAMPORTS);
+const STARTER_PACK_PRICE_LAMPORTS = Math.round(0.25 * SOL_LAMPORTS);
 const STARTER_PACK_ITEMS: Array<{ type: ConsumableType; qty: number }> = [
   { type: "energy-small", qty: 20 },
   { type: "energy-full", qty: 5 },
@@ -58,8 +58,8 @@ const FORTUNE_SPIN_PRICES_LAMPORTS: Record<(typeof FORTUNE_SPIN_PACKS_SOL)[numbe
 const MIN_SEASON_SNAPSHOT_CRYSTALS = 500;
 const ENERGY_REGEN_SECONDS = 420;
 const PREMIUM_PLANS = [
-  { id: "premium-30", days: 30, lamports: Math.round(0.5 * SOL_LAMPORTS) },
-  { id: "premium-90", days: 90, lamports: Math.round(1 * SOL_LAMPORTS) },
+  { id: "premium-30", days: 30, lamports: Math.round(0.3 * SOL_LAMPORTS) },
+  { id: "premium-90", days: 90, lamports: Math.round(0.7 * SOL_LAMPORTS) },
 ] as const;
 const PREMIUM_SALE_START_MS = Date.parse("2026-02-28T00:00:00Z");
 const PREMIUM_SALE_END_MS = Date.parse("2026-03-02T00:00:00Z");
