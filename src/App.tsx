@@ -4149,7 +4149,7 @@ function App() {
 
   const applySeasonStatus = (result: GameSecureResponse) => {
     setSeasonInfo(result.season ?? null)
-    setSeasonAdminEditPool(result.season ? result.season.poolUsdt.toFixed(3) : '0')
+    setSeasonAdminEditPool(result.season ? String(Math.max(0, Math.round(result.season.poolUsdt))) : '0')
     setSeasonLeaderboard(result.seasonLeaderboard ?? [])
     setSeasonPlayer(result.seasonPlayer ?? null)
     setSeasonTotalPlayers(Math.max(0, Math.floor(Number(result.seasonTotalPlayers ?? 0))))
@@ -4307,7 +4307,7 @@ function App() {
     }
     if (result.season) {
       setSeasonInfo(result.season)
-      setSeasonAdminEditPool(result.season.poolUsdt.toFixed(3))
+      setSeasonAdminEditPool(String(Math.max(0, Math.round(result.season.poolUsdt))))
     }
     await loadSeasonStatus(false)
     setSeasonAdminBusy(false)
@@ -7419,6 +7419,10 @@ function App() {
               </div>
               <div className="starterpack-list premium-list">
                 <div className="starterpack-item">
+                  <img className="icon-img" src={iconPremium} alt="" />
+                  <span>x1.5 season payout multiplier</span>
+                </div>
+                <div className="starterpack-item">
                   <img className="icon-img" src={iconKey} alt="" />
                   <span>+{PREMIUM_DAILY_KEYS} dungeon keys daily</span>
                 </div>
@@ -8000,7 +8004,7 @@ function App() {
                   <div className="season-summary-grid">
                     <div className="season-summary-card season-summary-pool">
                       <span className="season-summary-label">Current pool</span>
-                      <strong>{seasonInfo.poolUsdt.toFixed(3)} USDT</strong>
+                      <strong>{formatNumber(Math.max(0, Math.round(seasonInfo.poolUsdt)))} USDT</strong>
                       <small>The pool is topped up with player donations during the season.</small>
                     </div>
                     <div className="season-summary-card">
@@ -8128,7 +8132,7 @@ function App() {
                       </label>
                       <label className="withdraw-label">
                         Pool (USDT)
-                        <input type="number" min={0} step="0.001" value={seasonAdminPool} onChange={(event) => setSeasonAdminPool(event.target.value)} placeholder="100" />
+                        <input type="number" min={0} step={1} value={seasonAdminPool} onChange={(event) => setSeasonAdminPool(event.target.value.replace(/[^0-9]/g, ''))} placeholder="100" />
                       </label>
                       <label className="withdraw-label">
                         Duration (days)
@@ -8144,7 +8148,7 @@ function App() {
                       <div className="season-admin-start-grid season-admin-pool-grid">
                         <label className="withdraw-label">
                           Current pool (USDT)
-                          <input type="number" min={0} step="0.001" value={seasonAdminEditPool} onChange={(event) => setSeasonAdminEditPool(event.target.value)} placeholder="0" />
+                          <input type="number" min={0} step={1} value={seasonAdminEditPool} onChange={(event) => setSeasonAdminEditPool(event.target.value.replace(/[^0-9]/g, ''))} placeholder="0" />
                         </label>
                         <button type="button" className="withdraw-submit" onClick={updateSeasonPool} disabled={seasonAdminBusy}>
                           {seasonAdminBusy ? 'Saving...' : 'Update Pool'}
