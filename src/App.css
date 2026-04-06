@@ -6071,13 +6071,13 @@ button.ghost {
   }
 
   .app:not(.auth-mode):not(.mobile) .game-canvas {
-    max-width: 700px;
+    max-width: 680px;
   }
 }
 
 @media (max-height: 920px) and (min-width: 921px) {
   .app:not(.auth-mode):not(.mobile) .game-canvas {
-    max-width: 660px;
+    max-width: 640px;
   }
 }
 
@@ -6128,3 +6128,4 @@ button.ghost {
     margin-top: -6px;
   }
 }
+
