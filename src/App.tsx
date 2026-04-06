@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { WalletModalButton } from '@solana/wallet-adapter-react-ui'
 import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
-import QRCode from 'qrcode'
 import knightSprite from './assets/knight.png'
 import mageSprite from './assets/mage.png'
 import archerSprite from './assets/archer.png'
@@ -79,7 +78,6 @@ import landingBanner2Png from './assets/landing-banners/banner-2.png'
 import landingBanner3Png from './assets/landing-banners/banner-3.png'
 import landingBanner4Png from './assets/landing-banners/banner-4.png'
 import landingBanner5Png from './assets/landing-banners/banner-5.png'
-import { supabase } from './lib/supabase'
 import './App.css'
 
 const VILLAGE_FEATURE_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_VILLAGE === '1'
@@ -356,24 +354,6 @@ type WithdrawalRow = {
   created_at: string
 }
 
-type NowpayPayment = {
-  id: string
-  providerPaymentId: string
-  providerOrderId: string
-  kind: string
-  productRef: string
-  usdtAmount: number
-  payCurrency: string
-  payAmount: string
-  payAddress: string
-  status: string
-  credited: boolean
-  txHash?: string
-  expiresAt?: string
-  createdAt: string
-  updatedAt: string
-}
-
 type BlockedWalletRow = {
   wallet: string
   reason: string
@@ -406,7 +386,6 @@ type DungeonSecureResponse = {
   expiresAt?: string
   authType?: string
   wallet?: string
-  email?: string
   message?: string
   tickets?: number
   ticketDay?: string
@@ -491,12 +470,6 @@ type GameSecureResponse = {
   shopWorldBossTicketDailyLimit?: number
   shopWorldBossTicketBuysToday?: number
   shopWorldBossTicketsLeftToday?: number
-  nowpayPayment?: NowpayPayment | null
-  nowpayReused?: boolean
-  nowpayPaid?: boolean
-  nowpayTerminal?: boolean
-  nowpayCredited?: boolean
-  nowpayCreditedNow?: boolean
 }
 
 type ReferralEntry = {
@@ -1037,21 +1010,7 @@ const GOLD_PACKAGES_SOL = [
   { id: 'gold-500k', gold: 500000, sol: 0.4, image: goldLargeImage },
   { id: 'gold-1200k', gold: 1200000, sol: 0.63, image: gold1200kImage },
 ] as const
-const GOLD_PACKAGES_USDT = [
-  { id: 'gold-150k', gold: 150000, usdt: 11, image: goldMiddleImage },
-  { id: 'gold-500k', gold: 500000, usdt: 34, image: goldLargeImage },
-  { id: 'gold-1200k', gold: 1200000, usdt: 53.55, image: gold1200kImage },
-] as const
-const NOWPAY_USDT_NETWORKS = [
-  { id: 'usdttrc20', label: 'USDT TRC20' },
-  { id: 'usdtmatic', label: 'USDT Polygon' },
-] as const
-const NOWPAY_MIN_USDT = 0
-type NowpayNetworkId = (typeof NOWPAY_USDT_NETWORKS)[number]['id']
-type BuyGoldMethod = 'sol' | 'usdt'
-type NowpayKind = 'buy_gold' | 'starter_pack_buy' | 'premium_buy' | 'fortune_buy'
 const STARTER_PACK_PRICE = 0.35
-const STARTER_PACK_PRICE_USDT = 29.75
 const STARTER_PACK_GOLD = 300000
 const STARTER_PACK_WORLD_BOSS_TICKETS = 5
 const SHOP_DUNGEON_KEY_COST = 50000
@@ -1059,8 +1018,8 @@ const SHOP_DUNGEON_KEY_DAILY_LIMIT = 10
 const WORLD_BOSS_TICKET_COST = 7000
 const SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT = 2
 const PREMIUM_PLANS = [
-  { id: 'premium-30', days: 30, sol: 0.5, usdt: 42.5 },
-  { id: 'premium-90', days: 90, sol: 1, usdt: 85 },
+  { id: 'premium-30', days: 30, sol: 0.5 },
+  { id: 'premium-90', days: 90, sol: 1 },
 ] as const
 const PREMIUM_SALE_START_MS = Date.parse('2026-02-28T00:00:00Z')
 const PREMIUM_SALE_END_MS = Date.parse('2026-03-02T00:00:00Z')
@@ -1080,13 +1039,7 @@ const FORTUNE_SPIN_PRICES = {
   10: 0.06,
 } as const
 const FORTUNE_SPIN_PACKS_SOL = [1, 10] as const
-const FORTUNE_SPIN_PRICES_USDT = {
-  20: 11,
-  50: 17,
-} as const
-const FORTUNE_SPIN_PACKS_USDT = [20, 50] as const
 type FortunePackId = keyof typeof FORTUNE_SPIN_PRICES
-type FortuneUsdtPackId = keyof typeof FORTUNE_SPIN_PRICES_USDT
 const FORTUNE_REWARDS: FortuneReward[] = [
   { id: 'speed_draught', label: 'Swift Draught', kind: 'consumable', consumableType: 'speed', amount: 1, chance: 24.915 },
   { id: 'battle_tonic', label: 'Battle Tonic', kind: 'consumable', consumableType: 'attack', amount: 1, chance: 24.915 },
@@ -1921,37 +1874,6 @@ const formatLongTimer = (seconds: number) => {
 }
 
 const formatNumber = (value: number) => value.toLocaleString('en-US')
-const formatUsdt = (value: number) =>
-  Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 3 })
-const formatExactUsdt = (value: number) =>
-  Number(value).toLocaleString('en-US', { minimumFractionDigits: 6, maximumFractionDigits: 6 })
-const resolveNowpayAmount = (payAmountRaw: string, fallbackUsdt: number) => {
-  const parsed = Number(String(payAmountRaw ?? '').trim().replace(',', '.'))
-  if (Number.isFinite(parsed) && parsed > 0) return parsed
-  const fallback = Number(fallbackUsdt)
-  return Number.isFinite(fallback) && fallback > 0 ? fallback : 0
-}
-const formatNowpayAmountDisplay = (payAmountRaw: string, fallbackUsdt: number) =>
-  `${formatExactUsdt(resolveNowpayAmount(payAmountRaw, fallbackUsdt))} USDT`
-const formatNowpayAmountCopy = (payAmountRaw: string, fallbackUsdt: number) =>
-  formatExactUsdt(resolveNowpayAmount(payAmountRaw, fallbackUsdt))
-const formatNowpayNetwork = (payCurrencyRaw: string) => {
-  const normalized = String(payCurrencyRaw ?? '').trim().toLowerCase()
-  switch (normalized) {
-    case 'usdttrc20':
-      return 'trc20'
-    case 'usdterc20':
-      return 'erc20'
-    case 'usdtmatic':
-      return 'polygon'
-    case 'usdtbsc':
-      return 'bsc'
-    case 'usdtsol':
-      return 'solana'
-    default:
-      return normalized.replace(/^usdt/, '') || normalized || 'unknown'
-  }
-}
 const formatShortWallet = (wallet: string) => `${wallet.slice(0, 4)}...${wallet.slice(-4)}`
 const formatDateTime = (value: string) => {
   const date = new Date(value)
@@ -1975,16 +1897,6 @@ const isBlockedAuthError = (value: string) => {
   const normalized = value.toLowerCase()
   return normalized.includes('заблок') || normalized.includes('blocked')
 }
-const toConfirmedEmailUser = (
-  user: { id?: string; email?: string | null; email_confirmed_at?: string | null; confirmed_at?: string | null } | null | undefined,
-) => {
-  if (!user?.id) return null
-  return {
-    id: String(user.id),
-    email: String(user.email ?? ''),
-  }
-}
-
 const sanitizePlayerName = (value: string) => value.replace(/[^A-Za-z]/g, '').slice(0, 10)
 const sanitizeSettlementName = (value: string) =>
   value
@@ -2058,18 +1970,14 @@ const getPremiumPlanPrice = (plan: (typeof PREMIUM_PLANS)[number], nowMs = Date.
     return {
       saleActive: false,
       sol: plan.sol,
-      usdt: plan.usdt,
       baseSol: plan.sol,
-      baseUsdt: plan.usdt,
     }
   }
   const factor = 1 - PREMIUM_SALE_DISCOUNT_RATE
   return {
     saleActive: true,
     sol: Number((plan.sol * factor).toFixed(3)),
-    usdt: Number((plan.usdt * factor).toFixed(2)),
     baseSol: plan.sol,
-    baseUsdt: plan.usdt,
   }
 }
 const getFortuneRewardById = (id: string) => FORTUNE_REWARDS.find((reward) => reward.id === id) ?? null
@@ -3185,292 +3093,6 @@ const drawGame = (
 }
 
 
-const NOWPAY_EVM_DEEP_LINKS: Partial<Record<NowpayNetworkId, { chainId: number; tokenContract: string; decimals: number }>> = {
-  usdtmatic: {
-    chainId: 137,
-    tokenContract: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
-    decimals: 6,
-  },
-}
-
-type NowpayPaymentModalProps = {
-  title: string
-  payment: NowpayPayment
-  fallbackUsdtAmount: number
-  isMobile: boolean
-  statusLoading: boolean
-  onClose: () => void
-  onCheck: () => void
-  onCopy: (value: string) => Promise<void>
-}
-
-const formatNowpayNetworkLabel = (payCurrencyRaw: string) => {
-  const normalized = String(payCurrencyRaw ?? '').trim().toLowerCase()
-  switch (normalized) {
-    case 'usdttrc20':
-      return 'TRC20'
-    case 'usdterc20':
-      return 'ERC20'
-    case 'usdtmatic':
-      return 'Polygon'
-    case 'usdtbsc':
-      return 'BSC'
-    case 'usdtsol':
-      return 'Solana'
-    default:
-      return formatNowpayNetwork(payCurrencyRaw).toUpperCase()
-  }
-}
-
-const formatNowpayStatusLabel = (statusRaw: string) => {
-  const normalized = String(statusRaw ?? '').trim().toLowerCase()
-  switch (normalized) {
-    case 'waiting':
-      return 'Awaiting payment'
-    case 'confirming':
-      return 'Confirming'
-    case 'sending':
-      return 'Broadcasting'
-    case 'partially_paid':
-      return 'Partially paid'
-    case 'confirmed':
-    case 'finished':
-      return 'Paid'
-    case 'failed':
-      return 'Failed'
-    case 'expired':
-      return 'Expired'
-    case 'refunded':
-      return 'Refunded'
-    default:
-      return normalized ? normalized.replace(/_/g, ' ') : 'Awaiting payment'
-  }
-}
-
-const getNowpayStatusTone = (statusRaw: string) => {
-  const normalized = String(statusRaw ?? '').trim().toLowerCase()
-  if (normalized === 'confirmed' || normalized === 'finished') return 'success'
-  if (normalized === 'failed' || normalized === 'expired' || normalized === 'refunded') return 'danger'
-  if (normalized === 'confirming' || normalized === 'sending' || normalized === 'partially_paid') return 'progress'
-  return 'waiting'
-}
-
-const getNowpayNetworkHint = (payCurrencyRaw: string) => {
-  const normalized = String(payCurrencyRaw ?? '').trim().toLowerCase()
-  switch (normalized) {
-    case 'usdttrc20':
-      return 'Best with TronLink or another TRON wallet. QR shares the payment address for quick scan.'
-    case 'usdterc20':
-      return 'Direct wallet opening is available for ERC20 wallets that support EIP-681 payment links.'
-    case 'usdtmatic':
-      return 'Direct wallet opening is available for Polygon-compatible wallets that support EIP-681 payment links.'
-    case 'usdtbsc':
-      return 'Direct wallet opening is available for BSC-compatible wallets that support EIP-681 payment links.'
-    case 'usdtsol':
-      return 'Best with Phantom or Solflare. QR shares the destination address for quick copy or scan.'
-    default:
-      return 'Scan the QR code or copy the payment details into your wallet.'
-  }
-}
-
-const toTokenAtomicUnits = (amount: number, decimals: number) => {
-  const safeAmount = Number.isFinite(amount) && amount > 0 ? amount : 0
-  const fixed = safeAmount.toFixed(decimals)
-  const parts = fixed.split('.')
-  const whole = parts[0] || '0'
-  const fraction = (parts[1] || '').padEnd(decimals, '0').slice(0, decimals)
-  const base = 10n ** BigInt(decimals)
-  const wholePart = BigInt(whole) * base
-  const fractionalPart = fraction ? BigInt(fraction) : 0n
-  return String(wholePart + fractionalPart)
-}
-
-const buildNowpayDeepLink = (payment: NowpayPayment, fallbackUsdtAmount: number) => {
-  const normalized = String(payment.payCurrency ?? '').trim().toLowerCase() as NowpayNetworkId
-  const evm = NOWPAY_EVM_DEEP_LINKS[normalized]
-  const payAddress = String(payment.payAddress ?? '').trim()
-  if (!evm || !payAddress) return ''
-  const atomicAmount = toTokenAtomicUnits(resolveNowpayAmount(payment.payAmount, fallbackUsdtAmount), evm.decimals)
-  return (
-    'ethereum:' +
-    evm.tokenContract +
-    '@' +
-    String(evm.chainId) +
-    '/transfer?address=' +
-    encodeURIComponent(payAddress) +
-    '&uint256=' +
-    atomicAmount
-  )
-}
-
-const buildNowpayQrValue = (payment: NowpayPayment, fallbackUsdtAmount: number) => {
-  const deepLink = buildNowpayDeepLink(payment, fallbackUsdtAmount)
-  if (deepLink) return deepLink
-  const payAddress = String(payment.payAddress ?? '').trim()
-  if (payAddress) return payAddress
-  return (
-    'USDT payment\n' +
-    'Amount: ' + formatNowpayAmountDisplay(payment.payAmount, fallbackUsdtAmount) + '\n' +
-    'Network: ' + formatNowpayNetworkLabel(payment.payCurrency)
-  )
-}
-
-function NowpayPaymentModal({
-  title,
-  payment,
-  fallbackUsdtAmount,
-  isMobile,
-  statusLoading,
-  onClose,
-  onCheck,
-  onCopy,
-}: NowpayPaymentModalProps) {
-  const [qrDataUrl, setQrDataUrl] = useState('')
-  const [qrReady, setQrReady] = useState(false)
-  const amountDisplay = formatNowpayAmountDisplay(payment.payAmount, fallbackUsdtAmount)
-  const amountCopy = formatNowpayAmountCopy(payment.payAmount, fallbackUsdtAmount)
-  const networkLabel = formatNowpayNetworkLabel(payment.payCurrency)
-  const statusLabel = formatNowpayStatusLabel(payment.status)
-  const statusTone = getNowpayStatusTone(payment.status)
-  const networkHint = getNowpayNetworkHint(payment.payCurrency)
-  const deepLink = useMemo(
-    () => buildNowpayDeepLink(payment, fallbackUsdtAmount),
-    [payment, fallbackUsdtAmount],
-  )
-  const qrValue = useMemo(
-    () => buildNowpayQrValue(payment, fallbackUsdtAmount),
-    [payment, fallbackUsdtAmount],
-  )
-
-  useEffect(() => {
-    let active = true
-    setQrReady(false)
-    if (!qrValue) {
-      setQrDataUrl('')
-      setQrReady(true)
-      return () => {
-        active = false
-      }
-    }
-    void QRCode.toDataURL(qrValue, {
-      width: isMobile ? 208 : 244,
-      margin: 1,
-      errorCorrectionLevel: 'M',
-      color: {
-        dark: '#0f141b',
-        light: '#fff8ea',
-      },
-    }).then((dataUrl: string) => {
-      if (!active) return
-      setQrDataUrl(dataUrl)
-      setQrReady(true)
-    }).catch(() => {
-      if (!active) return
-      setQrDataUrl('')
-      setQrReady(true)
-    })
-    return () => {
-      active = false
-    }
-  }, [isMobile, qrValue])
-
-  const openWallet = () => {
-    if (!deepLink || typeof window === 'undefined') return
-    window.location.href = deepLink
-  }
-
-  return (
-    <div className="modal-backdrop modal-backdrop-top nowpay-modal-backdrop" onClick={onClose}>
-      <div className="modal nowpay-modal nowpay-modal-enhanced" onClick={(event) => event.stopPropagation()}>
-        <div className="modal-header">
-          <h3>USDT Payment</h3>
-          <button type="button" className="ghost" onClick={onClose}>
-            Close
-          </button>
-        </div>
-        <div className="nowpay-layout">
-          <div className="nowpay-qr-card">
-            <div className="nowpay-qr-head">
-              <span className="withdraw-info-label">Scan to pay</span>
-              <span className={'nowpay-status-badge ' + statusTone}>{statusLabel}</span>
-            </div>
-            <div className="nowpay-qr-shell">
-              {qrReady && qrDataUrl ? (
-                <img className="nowpay-qr-image" src={qrDataUrl} alt={title + ' payment QR'} />
-              ) : (
-                <div className="nowpay-qr-placeholder">Preparing QR...</div>
-              )}
-            </div>
-            <div className="nowpay-qr-help">{networkHint}</div>
-            {deepLink && (
-              <button type="button" className="withdraw-submit nowpay-open-wallet" onClick={openWallet}>
-                {isMobile ? 'Open wallet' : 'Open wallet app'}
-              </button>
-            )}
-          </div>
-
-          <div className="nowpay-summary-card">
-            <div className="nowpay-summary-title">{title}</div>
-            <div className="nowpay-meta-grid">
-              <div className="nowpay-meta-item">
-                <span>Amount</span>
-                <strong>{amountDisplay}</strong>
-              </div>
-              <div className="nowpay-meta-item">
-                <span>Network</span>
-                <strong>{networkLabel}</strong>
-              </div>
-              <div className="nowpay-meta-item">
-                <span>Created</span>
-                <strong>{formatDateTime(payment.createdAt)}</strong>
-              </div>
-              <div className="nowpay-meta-item">
-                <span>Order ID</span>
-                <strong>{payment.providerOrderId || 'Pending'}</strong>
-              </div>
-            </div>
-
-            <div className="nowpay-address-card">
-              <span className="withdraw-info-label">Send to address</span>
-              <div className="nowpay-address-value">{payment.payAddress || 'Pending...'}</div>
-            </div>
-
-            <div className="nowpay-action-grid">
-              <button
-                type="button"
-                className="ghost"
-                disabled={!payment.payAddress}
-                onClick={() => void onCopy(payment.payAddress)}
-              >
-                Copy address
-              </button>
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => void onCopy(amountCopy)}
-              >
-                Copy amount
-              </button>
-              <button
-                type="button"
-                className="ghost"
-                onClick={onCheck}
-                disabled={statusLoading}
-              >
-                {statusLoading ? 'Checking...' : 'I paid, check status'}
-              </button>
-            </div>
-
-            <div className="nowpay-footnote">
-              Use the exact amount and selected network. Credit is applied only after the server confirms the payment.
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function App() {
   const { publicKey, sendTransaction, signMessage, disconnect } = useWallet()
   const { connection } = useConnection()
@@ -3503,17 +3125,7 @@ function App() {
   const [adminError, setAdminError] = useState('')
   const [securityAuthError, setSecurityAuthError] = useState('')
   const [walletSessionVerified, setWalletSessionVerified] = useState(false)
-  const [authLoginMethod, setAuthLoginMethod] = useState<'wallet' | 'email'>('wallet')
-  const [emailAuthUser, setEmailAuthUser] = useState<{ id: string; email: string } | null>(null)
-  const [emailAuthLoading, setEmailAuthLoading] = useState(Boolean(supabase))
   const [walletLogoutBusy, setWalletLogoutBusy] = useState(false)
-  const [emailAuthMode, setEmailAuthMode] = useState<'signin' | 'signup'>('signin')
-  const [emailAuthEmail, setEmailAuthEmail] = useState('')
-  const [emailAuthPassword, setEmailAuthPassword] = useState('')
-  const [emailAuthPasswordConfirm, setEmailAuthPasswordConfirm] = useState('')
-  const [emailAuthBusy, setEmailAuthBusy] = useState(false)
-  const [emailAuthError, setEmailAuthError] = useState('')
-  const [emailAuthInfo, setEmailAuthInfo] = useState('')
   const [adminEventWalletFilter, setAdminEventWalletFilter] = useState('')
   const [adminEventKindFilter, setAdminEventKindFilter] = useState('')
   const [adminEventLimit, setAdminEventLimit] = useState('300')
@@ -3529,27 +3141,6 @@ function App() {
   const [playerWithdrawalsError, setPlayerWithdrawalsError] = useState('')
   const [buyGoldError, setBuyGoldError] = useState('')
   const [buyGoldLoading, setBuyGoldLoading] = useState<string | null>(null)
-  const [buyGoldMethod, setBuyGoldMethod] = useState<BuyGoldMethod>('sol')
-  const [nowpayNetwork, setNowpayNetwork] = useState<NowpayNetworkId>(NOWPAY_USDT_NETWORKS[0].id)
-  const [nowpayPayment, setNowpayPayment] = useState<NowpayPayment | null>(null)
-  const [showNowpayGoldModal, setShowNowpayGoldModal] = useState(false)
-  const [nowpayLoading, setNowpayLoading] = useState(false)
-  const [nowpayStatusLoading, setNowpayStatusLoading] = useState(false)
-  const [starterPayMethod, setStarterPayMethod] = useState<BuyGoldMethod>('sol')
-  const [starterNowpayPayment, setStarterNowpayPayment] = useState<NowpayPayment | null>(null)
-  const [showNowpayStarterModal, setShowNowpayStarterModal] = useState(false)
-  const [starterNowpayLoading, setStarterNowpayLoading] = useState(false)
-  const [starterNowpayStatusLoading, setStarterNowpayStatusLoading] = useState(false)
-  const [premiumPayMethod, setPremiumPayMethod] = useState<BuyGoldMethod>('sol')
-  const [premiumNowpayPayment, setPremiumNowpayPayment] = useState<NowpayPayment | null>(null)
-  const [showNowpayPremiumModal, setShowNowpayPremiumModal] = useState(false)
-  const [premiumNowpayLoading, setPremiumNowpayLoading] = useState(false)
-  const [premiumNowpayStatusLoading, setPremiumNowpayStatusLoading] = useState(false)
-  const [fortunePayMethod, setFortunePayMethod] = useState<BuyGoldMethod>('sol')
-  const [fortuneNowpayPayment, setFortuneNowpayPayment] = useState<NowpayPayment | null>(null)
-  const [showNowpayFortuneModal, setShowNowpayFortuneModal] = useState(false)
-  const [fortuneNowpayLoading, setFortuneNowpayLoading] = useState(false)
-  const [fortuneNowpayStatusLoading, setFortuneNowpayStatusLoading] = useState(false)
   const [starterPackError, setStarterPackError] = useState('')
   const [starterPackLoading, setStarterPackLoading] = useState(false)
   const [dungeonKeyBuyLoading, setDungeonKeyBuyLoading] = useState(false)
@@ -3666,10 +3257,8 @@ function App() {
 
   const walletAddress = publicKey?.toBase58() ?? ''
   const walletAuthReady = Boolean(walletAddress && signMessage)
-  const emailIdentity = emailAuthUser ? `email:${emailAuthUser.id}` : ''
-  const accountIdentity = walletAuthReady ? walletAddress : emailIdentity
+  const accountIdentity = walletAuthReady ? walletAddress : ''
   const usingWalletAuth = walletAuthReady
-  const usingEmailAuth = !usingWalletAuth && Boolean(emailIdentity)
 
   const isAdmin = useMemo(() => {
     if (!walletAddress || !walletSessionVerified) return false
@@ -3700,118 +3289,6 @@ function App() {
     }, 6000)
     return () => window.clearTimeout(timeoutId)
   }, [securityAuthError])
-
-  useEffect(() => {
-    if (!supabase) {
-      setEmailAuthLoading(false)
-      return
-    }
-    let active = true
-    const applySession = (
-      session: { user?: { id?: string; email?: string | null; email_confirmed_at?: string | null; confirmed_at?: string | null } | null } | null,
-    ) => {
-      if (!active) return
-      const user = toConfirmedEmailUser(session?.user ?? null)
-      setEmailAuthUser(user)
-      if (user) {
-        setEmailAuthError('')
-      }
-    }
-
-    void supabase.auth.getSession().then(({ data }) => {
-      applySession(data.session)
-      if (active) setEmailAuthLoading(false)
-    })
-
-    const { data: authSub } = supabase.auth.onAuthStateChange((_event, session) => {
-      applySession(session)
-      if (active) setEmailAuthLoading(false)
-    })
-
-    return () => {
-      active = false
-      authSub.subscription.unsubscribe()
-    }
-  }, [])
-
-  const signInWithEmailPassword = async () => {
-    if (!supabase) {
-      setEmailAuthError('Supabase not configured.')
-      return
-    }
-    const email = emailAuthEmail.trim().toLowerCase()
-    const password = emailAuthPassword
-    if (!email || !password) {
-      setEmailAuthError('Enter email and password.')
-      return
-    }
-    setEmailAuthBusy(true)
-    setEmailAuthError('')
-    setEmailAuthInfo('')
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) {
-      setEmailAuthError(error.message || 'Failed to sign in.')
-    } else {
-      setEmailAuthInfo('Signed in successfully.')
-      setAuthLoginMethod('email')
-    }
-    setEmailAuthBusy(false)
-  }
-
-  const signUpWithEmailPassword = async () => {
-    if (!supabase) {
-      setEmailAuthError('Supabase not configured.')
-      return
-    }
-    const email = emailAuthEmail.trim().toLowerCase()
-    const password = emailAuthPassword
-    const passwordConfirm = emailAuthPasswordConfirm
-    if (!email || !password) {
-      setEmailAuthError('Enter email and password.')
-      return
-    }
-    if (password.length < 6) {
-      setEmailAuthError('Password must be at least 6 characters.')
-      return
-    }
-    if (password !== passwordConfirm) {
-      setEmailAuthError('Passwords do not match.')
-      return
-    }
-    setEmailAuthBusy(true)
-    setEmailAuthError('')
-    setEmailAuthInfo('')
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
-      },
-    })
-    if (error) {
-      setEmailAuthError(error.message || 'Failed to sign up.')
-      setEmailAuthBusy(false)
-      return
-    }
-    if (!data.session) {
-      setEmailAuthInfo('Check your email and confirm registration, then sign in.')
-    } else {
-      setEmailAuthInfo('Account created and signed in.')
-      setAuthLoginMethod('email')
-    }
-    setEmailAuthBusy(false)
-  }
-
-  const signOutEmailAuth = async () => {
-    if (!supabase) return
-    setEmailAuthBusy(true)
-    await supabase.auth.signOut()
-    setEmailAuthBusy(false)
-    setEmailAuthInfo('')
-    setEmailAuthError('')
-    setActivePanel(null)
-    setHud(null)
-  }
 
   const signOutWalletAuth = async () => {
     setWalletLogoutBusy(true)
@@ -3900,8 +3377,7 @@ function App() {
 
   const ensureDungeonSession = async (interactive = true) => {
     const wallet = walletAuthReady ? walletAddress : ''
-    const identity = wallet || emailIdentity
-    if (!identity) return null
+    if (!wallet) return null
 
     const cached = dungeonSessionRef.current
     if (cached && cached.expiresAt > Date.now() + 5000) {
@@ -3912,98 +3388,41 @@ function App() {
       return dungeonSessionRequestRef.current
     }
 
-    if (!interactive) {
+    if (!interactive || !signMessage) {
+      setWalletSessionVerified(false)
       return null
     }
 
     const request = (async () => {
-      if (wallet) {
-        if (!signMessage) {
-          setWalletSessionVerified(false)
-          return null
-        }
-        const challenge = await callDungeonSecure({ action: 'challenge', wallet })
-        if (!challenge.ok || !challenge.message) {
-          handleSecurityAuthFailure(challenge.error || 'Wallet login failed.', interactive)
-          return null
-        }
-
-        let signature: Uint8Array
-        try {
-          signature = await signMessage(new TextEncoder().encode(challenge.message))
-        } catch {
-          setWalletSessionVerified(false)
-          dungeonSessionRef.current = null
-          dungeonSessionRequestRef.current = null
-          secureSessionInitRef.current = false
-          setActivePanel(null)
-          setStage('auth')
-          if (interactive) {
-            setSecurityAuthError('Wallet signature was rejected.')
-          }
-          return null
-        }
-
-        const login = await callDungeonSecure({
-          action: 'login',
-          wallet,
-          signature: bytesToBase64(signature),
-        })
-        if (!login.ok || !login.token) {
-          handleSecurityAuthFailure(login.error || 'Wallet login failed.', interactive)
-          return null
-        }
-
-        const expiresAtMs = login.expiresAt ? new Date(login.expiresAt).getTime() : Number.NaN
-        dungeonSessionRef.current = {
-          token: login.token,
-          expiresAt: Number.isFinite(expiresAtMs) ? expiresAtMs : Date.now() + 24 * 60 * 60 * 1000,
-        }
-        setWalletSessionVerified(true)
-        setSecurityAuthError('')
-        return login.token
-      }
-
-      if (!supabase || !emailAuthUser) return null
-      const sb = supabase
-      const getFreshEmailAccessToken = async (forceRefresh = false) => {
-        if (forceRefresh) {
-          const { data: refreshedData, error: refreshError } = await sb.auth.refreshSession()
-          if (refreshError || !refreshedData.session?.access_token) return ''
-          return refreshedData.session.access_token
-        }
-        const { data: sessionData, error: sessionError } = await sb.auth.getSession()
-        if (sessionError || !sessionData.session?.access_token) return ''
-        const expiresAtMs = sessionData.session.expires_at ? sessionData.session.expires_at * 1000 : 0
-        if (expiresAtMs > 0 && expiresAtMs <= Date.now() + 30_000) {
-          const { data: refreshedData, error: refreshError } = await sb.auth.refreshSession()
-          if (refreshError || !refreshedData.session?.access_token) return ''
-          return refreshedData.session.access_token
-        }
-        return sessionData.session.access_token
-      }
-
-      let accessToken = await getFreshEmailAccessToken(false)
-      if (!accessToken) {
-        handleSecurityAuthFailure('Email session expired. Sign in again.', interactive)
+      const challenge = await callDungeonSecure({ action: 'challenge', wallet })
+      if (!challenge.ok || !challenge.message) {
+        handleSecurityAuthFailure(challenge.error || 'Wallet login failed.', interactive)
         return null
       }
 
-      let login = await callDungeonSecure(
-        { action: 'email_login' },
-        { authorization: `Bearer ${accessToken}` },
-      )
-      if (!login.ok && String(login.error ?? '').toLowerCase().includes('invalid jwt')) {
-        accessToken = await getFreshEmailAccessToken(true)
-        if (accessToken) {
-          login = await callDungeonSecure(
-            { action: 'email_login' },
-            { authorization: `Bearer ${accessToken}` },
-          )
+      let signature: Uint8Array
+      try {
+        signature = await signMessage(new TextEncoder().encode(challenge.message))
+      } catch {
+        setWalletSessionVerified(false)
+        dungeonSessionRef.current = null
+        dungeonSessionRequestRef.current = null
+        secureSessionInitRef.current = false
+        setActivePanel(null)
+        setStage('auth')
+        if (interactive) {
+          setSecurityAuthError('Wallet signature was rejected.')
         }
+        return null
       }
+
+      const login = await callDungeonSecure({
+        action: 'login',
+        wallet,
+        signature: bytesToBase64(signature),
+      })
       if (!login.ok || !login.token) {
-        handleSecurityAuthFailure(login.error || 'Email login failed.', interactive)
+        handleSecurityAuthFailure(login.error || 'Wallet login failed.', interactive)
         return null
       }
 
@@ -4013,8 +3432,8 @@ function App() {
         expiresAt: Number.isFinite(expiresAtMs) ? expiresAtMs : Date.now() + 24 * 60 * 60 * 1000,
       }
       setWalletSessionVerified(true)
-        setSecurityAuthError('')
-        return login.token
+      setSecurityAuthError('')
+      return login.token
     })()
 
     dungeonSessionRequestRef.current = request
@@ -4032,51 +3451,6 @@ function App() {
     payload: Record<string, unknown> = {},
     interactive = true,
   ): Promise<DungeonSecureResponse> => {
-    if (usingEmailAuth && supabase) {
-      const sb = supabase
-      const getFreshEmailAccessToken = async (forceRefresh = false) => {
-        if (forceRefresh) {
-          const { data: refreshedData, error: refreshError } = await sb.auth.refreshSession()
-          if (refreshError || !refreshedData.session?.access_token) return ''
-          return refreshedData.session.access_token
-        }
-        const { data: sessionData, error: sessionError } = await sb.auth.getSession()
-        if (sessionError || !sessionData.session?.access_token) return ''
-        const expiresAtMs = sessionData.session.expires_at ? sessionData.session.expires_at * 1000 : 0
-        if (expiresAtMs > 0 && expiresAtMs <= Date.now() + 30_000) {
-          const { data: refreshedData, error: refreshError } = await sb.auth.refreshSession()
-          if (refreshError || !refreshedData.session?.access_token) return ''
-          return refreshedData.session.access_token
-        }
-        return sessionData.session.access_token
-      }
-
-      let accessToken = await getFreshEmailAccessToken(false)
-      if (!accessToken) {
-        return { ok: false, error: 'Sign-in required for dungeon actions.' }
-      }
-      let result = await callDungeonSecure(
-        { action, ...payload },
-        { authorization: `Bearer ${accessToken}` },
-      )
-      if (!result.ok && String(result.error ?? '').toLowerCase().includes('invalid jwt')) {
-        accessToken = await getFreshEmailAccessToken(true)
-        if (accessToken) {
-          result = await callDungeonSecure(
-            { action, ...payload },
-            { authorization: `Bearer ${accessToken}` },
-          )
-        }
-      }
-      if (!result.ok && result.error) {
-        handleSecurityAuthFailure(result.error, interactive)
-      }
-      if (result.ok && typeof result.savedAt === 'string' && result.savedAt.trim()) {
-        profileUpdatedAtRef.current = result.savedAt
-      }
-      return result
-    }
-
     let token = await ensureDungeonSession(interactive)
     if (!token) {
       return { ok: false, error: 'Sign-in required for dungeon actions.' }
@@ -4156,54 +3530,6 @@ function App() {
     payload: Record<string, unknown> = {},
     interactive = true,
   ): Promise<GameSecureResponse> => {
-    if (usingEmailAuth && supabase) {
-      const sb = supabase
-      const getFreshEmailAccessToken = async (forceRefresh = false) => {
-        if (forceRefresh) {
-          const { data: refreshedData, error: refreshError } = await sb.auth.refreshSession()
-          if (refreshError || !refreshedData.session?.access_token) return ''
-          return refreshedData.session.access_token
-        }
-        const { data: sessionData, error: sessionError } = await sb.auth.getSession()
-        if (sessionError || !sessionData.session?.access_token) return ''
-        const expiresAtMs = sessionData.session.expires_at ? sessionData.session.expires_at * 1000 : 0
-        if (expiresAtMs > 0 && expiresAtMs <= Date.now() + 30_000) {
-          const { data: refreshedData, error: refreshError } = await sb.auth.refreshSession()
-          if (refreshError || !refreshedData.session?.access_token) return ''
-          return refreshedData.session.access_token
-        }
-        return sessionData.session.access_token
-      }
-
-      let accessToken = await getFreshEmailAccessToken(false)
-      if (!accessToken) {
-        return { ok: false, error: 'Sign-in required for secure actions.' }
-      }
-      let result = await callGameSecure(
-        { action, ...payload },
-        { authorization: `Bearer ${accessToken}` },
-      )
-      if (!result.ok && String(result.error ?? '').toLowerCase().includes('invalid jwt')) {
-        accessToken = await getFreshEmailAccessToken(true)
-        if (accessToken) {
-          result = await callGameSecure(
-            { action, ...payload },
-            { authorization: `Bearer ${accessToken}` },
-          )
-        }
-      }
-      if (!result.ok && result.error) {
-        handleSecurityAuthFailure(result.error, interactive)
-      }
-      if (result.ok && typeof result.savedAt === 'string' && result.savedAt.trim()) {
-        profileUpdatedAtRef.current = result.savedAt
-      }
-      if (result.ok && result.profile && typeof result.profile.updated_at === 'string' && result.profile.updated_at.trim()) {
-        profileUpdatedAtRef.current = result.profile.updated_at
-      }
-      return result
-    }
-
     let token = await ensureDungeonSession(interactive)
     if (!token) {
       return { ok: false, error: 'Sign-in required for secure actions.' }
@@ -4329,7 +3655,7 @@ function App() {
 
   const syncDungeonStateFromServer = async () => {
     const state = gameStateRef.current
-    if (!state || !accountIdentity || !supabase) return
+    if (!state || !accountIdentity) return
     if (usingWalletAuth && !signMessage) return
 
     const result = await callDungeonSecureAuthed('status', {}, false)
@@ -4847,11 +4173,6 @@ function App() {
 
   useEffect(() => {
     let active = true
-    if (emailAuthLoading) {
-      return () => {
-        active = false
-      }
-    }
 
     if (!accountIdentity) {
       dungeonSessionRef.current = null
@@ -4889,35 +4210,20 @@ function App() {
     dungeonSessionRequestRef.current = null
     secureSessionInitRef.current = false
     setWalletSessionVerified(false)
-    if (!supabase) {
-      isNewProfileRef.current = false
-      referralProcessedRef.current = false
-      fortuneAutoOpenRef.current = false
-      profileUpdatedAtRef.current = ''
-      setSecurityAuthError('')
-      setStage('select')
-      return () => {
-        active = false
-      }
-    }
-    if (usingWalletAuth && !signMessage) {
+    if (!usingWalletAuth || !signMessage) {
       return () => {
         active = false
       }
     }
 
     ;(async () => {
-      let walletSessionOk = false
-      if (usingWalletAuth) {
-        const token = await ensureDungeonSession(true)
-        if (!active) return
-        if (!token) {
-          isNewProfileRef.current = false
-          pendingProfileRef.current = null
-          setStage('auth')
-          return
-        }
-        walletSessionOk = true
+      const token = await ensureDungeonSession(true)
+      if (!active) return
+      if (!token) {
+        isNewProfileRef.current = false
+        pendingProfileRef.current = null
+        setStage('auth')
+        return
       }
 
       const saved = await loadProfileStateSecure(false)
@@ -4931,10 +4237,6 @@ function App() {
         setPlayerName(sanitizePlayerName(saved.state.name || ''))
         setStage('game')
       } else {
-        if (usingWalletAuth && !walletSessionOk) {
-          setStage('auth')
-          return
-        }
         isNewProfileRef.current = true
         referralProcessedRef.current = false
         profileUpdatedAtRef.current = ''
@@ -4946,7 +4248,7 @@ function App() {
     return () => {
       active = false
     }
-  }, [accountIdentity, usingWalletAuth, signMessage, emailAuthLoading])
+  }, [accountIdentity, usingWalletAuth, signMessage])
 
   useEffect(() => {
     if (stage !== 'game') return
@@ -5066,7 +4368,7 @@ function App() {
       serverLoadedRef.current = true
       syncHud()
       void syncDungeonStateFromServer()
-    } else if (accountIdentity && supabase) {
+    } else if (accountIdentity) {
       loadProfileStateSecure(false).then((saved) => {
         if (!gameStateRef.current) return
         if (saved) {
@@ -5197,18 +4499,10 @@ function App() {
     if (activePanel !== 'buygold') {
       setBuyGoldError('')
       setBuyGoldLoading(null)
-      setNowpayLoading(false)
-      setNowpayStatusLoading(false)
-      setNowpayPayment(null)
-      setShowNowpayGoldModal(false)
     }
     if (activePanel !== 'starterpack') {
       setStarterPackError('')
       setStarterPackLoading(false)
-      setStarterNowpayLoading(false)
-      setStarterNowpayStatusLoading(false)
-      setStarterNowpayPayment(null)
-      setShowNowpayStarterModal(false)
     }
     if (activePanel !== 'shop') {
       setDungeonKeyBuyLoading(false)
@@ -5218,10 +4512,6 @@ function App() {
       setPremiumError('')
       setPremiumLoading(null)
       setPremiumClaimLoading(false)
-      setPremiumNowpayLoading(false)
-      setPremiumNowpayStatusLoading(false)
-      setPremiumNowpayPayment(null)
-      setShowNowpayPremiumModal(false)
     }
     if (activePanel !== 'stake') {
       setStakeError('')
@@ -5241,28 +4531,8 @@ function App() {
       setFortuneStatusLoading(false)
       setFortuneSpinLoading(false)
       setFortuneBuyLoading(null)
-      setFortuneNowpayLoading(false)
-      setFortuneNowpayStatusLoading(false)
-      setFortuneNowpayPayment(null)
-      setShowNowpayFortuneModal(false)
     }
   }, [activePanel])
-
-  useEffect(() => {
-    const preferredMethod: BuyGoldMethod = usingWalletAuth ? 'sol' : 'usdt'
-    if (activePanel === 'buygold') {
-      setBuyGoldMethod((prev) => (prev === preferredMethod ? prev : preferredMethod))
-    }
-    if (activePanel === 'starterpack') {
-      setStarterPayMethod((prev) => (prev === preferredMethod ? prev : preferredMethod))
-    }
-    if (activePanel === 'premium') {
-      setPremiumPayMethod((prev) => (prev === preferredMethod ? prev : preferredMethod))
-    }
-    if (activePanel === 'fortune') {
-      setFortunePayMethod((prev) => (prev === preferredMethod ? prev : preferredMethod))
-    }
-  }, [activePanel, usingWalletAuth])
 
   useEffect(() => {
     if (activePanel !== 'village') return
@@ -5319,116 +4589,6 @@ function App() {
     if (activePanel !== 'shop') return
     void syncShopLimitsFromServer(false)
   }, [activePanel, accountIdentity])
-
-  useEffect(() => {
-    if (activePanel !== 'buygold') return
-    if (!accountIdentity) {
-      setNowpayPayment(null)
-      setShowNowpayGoldModal(false)
-      return
-    }
-    void loadNowpayLatest('buy_gold').then((payment) => setNowpayPayment(payment))
-  }, [activePanel, accountIdentity])
-
-  useEffect(() => {
-    if (activePanel !== 'buygold') return
-    if (!nowpayPayment) return
-    if (nowpayPayment.credited) return
-    const status = String(nowpayPayment.status ?? '').toLowerCase()
-    if (!['waiting', 'confirming', 'sending', 'partially_paid'].includes(status)) return
-    const interval = window.setInterval(() => {
-      void checkNowpayGoldPayment(nowpayPayment.providerPaymentId, false)
-    }, 12000)
-    return () => window.clearInterval(interval)
-  }, [activePanel, nowpayPayment?.providerPaymentId, nowpayPayment?.status, nowpayPayment?.credited])
-
-  useEffect(() => {
-    if (activePanel !== 'starterpack') return
-    if (!accountIdentity) {
-      setStarterNowpayPayment(null)
-      setShowNowpayStarterModal(false)
-      return
-    }
-    void loadNowpayLatest('starter_pack_buy').then((payment) => setStarterNowpayPayment(payment))
-  }, [activePanel, accountIdentity])
-
-  useEffect(() => {
-    if (activePanel !== 'starterpack') return
-    if (!starterNowpayPayment) return
-    if (starterNowpayPayment.credited) return
-    const status = String(starterNowpayPayment.status ?? '').toLowerCase()
-    if (!['waiting', 'confirming', 'sending', 'partially_paid'].includes(status)) return
-    const interval = window.setInterval(() => {
-      void checkNowpayStarterPayment(starterNowpayPayment.providerPaymentId, false)
-    }, 12000)
-    return () => window.clearInterval(interval)
-  }, [activePanel, starterNowpayPayment?.providerPaymentId, starterNowpayPayment?.status, starterNowpayPayment?.credited])
-
-  useEffect(() => {
-    if (activePanel !== 'premium') return
-    if (!accountIdentity) {
-      setPremiumNowpayPayment(null)
-      setShowNowpayPremiumModal(false)
-      return
-    }
-    void loadNowpayLatest('premium_buy').then((payment) => setPremiumNowpayPayment(payment))
-  }, [activePanel, accountIdentity])
-
-  useEffect(() => {
-    if (activePanel !== 'premium') return
-    if (!premiumNowpayPayment) return
-    if (premiumNowpayPayment.credited) return
-    const status = String(premiumNowpayPayment.status ?? '').toLowerCase()
-    if (!['waiting', 'confirming', 'sending', 'partially_paid'].includes(status)) return
-    const interval = window.setInterval(() => {
-      void checkNowpayPremiumPayment(premiumNowpayPayment.providerPaymentId, false)
-    }, 12000)
-    return () => window.clearInterval(interval)
-  }, [activePanel, premiumNowpayPayment?.providerPaymentId, premiumNowpayPayment?.status, premiumNowpayPayment?.credited])
-
-  useEffect(() => {
-    if (activePanel !== 'worldboss') return
-    const interval = window.setInterval(() => {
-      void syncWorldBossFromServer(false)
-    }, 5000)
-    return () => window.clearInterval(interval)
-  }, [activePanel, accountIdentity])
-
-  useEffect(() => {
-    if (activePanel !== 'referrals') return
-    if (!accountIdentity) {
-      setReferralEntries([])
-      setReferralPendingKeys(0)
-      setReferralPendingCrystals(0)
-      return
-    }
-    void loadReferralEntries(accountIdentity)
-  }, [activePanel, accountIdentity, hud?.level])
-
-  useEffect(() => {
-    if (activePanel !== 'fortune') return
-    if (!accountIdentity) {
-      setFortuneFreeSpinAvailable(false)
-      setFortunePaidSpins(0)
-      setFortuneNowpayPayment(null)
-      setShowNowpayFortuneModal(false)
-      return
-    }
-    void loadFortuneStatus(true)
-    void loadNowpayLatest('fortune_buy').then((payment) => setFortuneNowpayPayment(payment))
-  }, [activePanel, accountIdentity])
-
-  useEffect(() => {
-    if (activePanel !== 'fortune') return
-    if (!fortuneNowpayPayment) return
-    if (fortuneNowpayPayment.credited) return
-    const status = String(fortuneNowpayPayment.status ?? '').toLowerCase()
-    if (!['waiting', 'confirming', 'sending', 'partially_paid'].includes(status)) return
-    const interval = window.setInterval(() => {
-      void checkNowpayFortunePayment(fortuneNowpayPayment.providerPaymentId, false)
-    }, 12000)
-    return () => window.clearInterval(interval)
-  }, [activePanel, fortuneNowpayPayment?.providerPaymentId, fortuneNowpayPayment?.status, fortuneNowpayPayment?.credited])
 
   useEffect(() => {
     if (activePanel !== 'admin') return
@@ -5619,10 +4779,6 @@ function App() {
   const loadAdminData = async () => {
     if (!isAdmin) {
       setAdminError('Admin access required.')
-      return
-    }
-    if (!supabase) {
-      setAdminError('Supabase not configured.')
       return
     }
     setAdminLoading(true)
@@ -5941,221 +5097,6 @@ function App() {
       setSwapLoading(false)
     }
   }
-
-  const loadNowpayLatest = async (kind: NowpayKind, productRef = '') => {
-    if (!accountIdentity) return null
-    const result = await callGameSecureAuthed('nowpay_latest', { kind, productRef }, false)
-    if (!result.ok) return null
-    return result.nowpayPayment ?? null
-  }
-
-  const createNowpayPayment = async (
-    kind: NowpayKind,
-    payload: Record<string, unknown>,
-    setLoading: (value: boolean) => void,
-    setError: (value: string) => void,
-    setPayment: (value: NowpayPayment | null) => void,
-    createErrorText: string,
-  ) => {
-    const state = gameStateRef.current
-    if (!state || !accountIdentity) {
-      setError('Sign in before creating payment.')
-      return null
-    }
-    setLoading(true)
-    setError('')
-    try {
-      const result = await callGameSecureAuthed(
-        'nowpay_create',
-        { kind, payCurrency: nowpayNetwork, ...payload },
-        true,
-      )
-      if (!result.ok || !result.nowpayPayment) {
-        setError(result.error || createErrorText)
-        return null
-      }
-      setPayment(result.nowpayPayment)
-      return result.nowpayPayment
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const applyNowpayCreditResult = (result: GameSecureResponse) => {
-    const state = gameStateRef.current
-    if (!state) return
-    if (typeof result.gold === 'number') {
-      state.gold = Math.max(0, Math.floor(Number(result.gold)))
-    }
-    if (typeof result.premiumEndsAt === 'number') {
-      state.premiumEndsAt = Math.max(0, Math.floor(Number(result.premiumEndsAt)))
-    }
-    if (result.premiumClaimDay) {
-      state.premiumClaimDay = result.premiumClaimDay
-    }
-    if (typeof result.starterPackPurchased === 'boolean') {
-      state.starterPackPurchased = result.starterPackPurchased
-    }
-    applyServerConsumables(state, result.consumables)
-    if (typeof result.fortunePaidSpins === 'number') {
-      setFortunePaidSpins(Math.max(0, Math.floor(Number(result.fortunePaidSpins))))
-    }
-    if (typeof result.fortuneFreeSpinAvailable === 'boolean') {
-      setFortuneFreeSpinAvailable(result.fortuneFreeSpinAvailable)
-    }
-    syncHud()
-  }
-
-  const checkNowpayPayment = async (
-    providerPaymentIdRaw: string | undefined,
-    setLoading: (value: boolean) => void,
-    setError: (value: string) => void,
-    setPayment: (value: NowpayPayment | null) => void,
-    interactive = true,
-  ) => {
-    const state = gameStateRef.current
-    if (!state || !accountIdentity) return
-    const providerPaymentId = String(providerPaymentIdRaw ?? '').trim()
-    if (!providerPaymentId) {
-      if (interactive) setError('No active payment to check.')
-      return
-    }
-    setLoading(true)
-    if (interactive) setError('')
-    try {
-      const result = await callGameSecureAuthed('nowpay_payment_status', { providerPaymentId }, interactive)
-      if (!result.ok) {
-        if (interactive) setError(result.error || 'Failed to check payment status.')
-        return
-      }
-      if (result.nowpayPayment) {
-        setPayment(result.nowpayPayment)
-      }
-      if (result.nowpayCredited || result.nowpayCreditedNow) {
-        applyNowpayCreditResult(result)
-        pushLog(state.eventLog, 'USDT payment credited.')
-        setError('')
-        void saveGameState()
-        return
-      }
-      if (interactive) {
-        const status = String(result.nowpayPayment?.status ?? 'waiting')
-        setError(`Payment status: ${status}.`)
-      }
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const createNowpayGoldPayment = async (packId: string) => {
-    const pack = GOLD_PACKAGES_USDT.find((entry) => entry.id === packId)
-    if (!pack) {
-      setBuyGoldError('Invalid gold package.')
-      return null
-    }
-    if (pack.usdt < NOWPAY_MIN_USDT) {
-      setBuyGoldError(`NOWPayments minimum is ${NOWPAY_MIN_USDT} USDT. Use SOL or a larger package.`)
-      return null
-    }
-    const payment = await createNowpayPayment(
-      'buy_gold',
-      { packId },
-      setNowpayLoading,
-      setBuyGoldError,
-      setNowpayPayment,
-      'Failed to create USDT payment.',
-    )
-    if (payment) {
-      setShowNowpayGoldModal(true)
-    }
-    return payment
-  }
-
-  const checkNowpayGoldPayment = async (providerPaymentIdRaw?: string, interactive = true) =>
-    checkNowpayPayment(
-      String(providerPaymentIdRaw ?? nowpayPayment?.providerPaymentId ?? ''),
-      setNowpayStatusLoading,
-      setBuyGoldError,
-      setNowpayPayment,
-      interactive,
-    )
-
-  const createNowpayStarterPayment = async () => {
-    const payment = await createNowpayPayment(
-      'starter_pack_buy',
-      {},
-      setStarterNowpayLoading,
-      setStarterPackError,
-      setStarterNowpayPayment,
-      'Failed to create USDT payment.',
-    )
-    if (payment) {
-      setShowNowpayStarterModal(true)
-    }
-    return payment
-  }
-
-  const checkNowpayStarterPayment = async (providerPaymentIdRaw?: string, interactive = true) =>
-    checkNowpayPayment(
-      String(providerPaymentIdRaw ?? starterNowpayPayment?.providerPaymentId ?? ''),
-      setStarterNowpayStatusLoading,
-      setStarterPackError,
-      setStarterNowpayPayment,
-      interactive,
-    )
-
-  const createNowpayPremiumPayment = async (planId: PremiumPlanId, days: number) => {
-    const payment = await createNowpayPayment(
-      'premium_buy',
-      { planId, days },
-      setPremiumNowpayLoading,
-      setPremiumError,
-      setPremiumNowpayPayment,
-      'Failed to create USDT payment.',
-    )
-    if (payment) {
-      setShowNowpayPremiumModal(true)
-    }
-    return payment
-  }
-
-  const checkNowpayPremiumPayment = async (providerPaymentIdRaw?: string, interactive = true) =>
-    checkNowpayPayment(
-      String(providerPaymentIdRaw ?? premiumNowpayPayment?.providerPaymentId ?? ''),
-      setPremiumNowpayStatusLoading,
-      setPremiumError,
-      setPremiumNowpayPayment,
-      interactive,
-    )
-
-  const createNowpayFortunePayment = async (spins: FortuneUsdtPackId) => {
-    const usdtPrice = Number(FORTUNE_SPIN_PRICES_USDT[spins] ?? 0)
-    if (usdtPrice < NOWPAY_MIN_USDT) {
-      setFortuneError(`NOWPayments minimum is ${NOWPAY_MIN_USDT} USDT. Use SOL for this pack.`)
-      return null
-    }
-    const payment = await createNowpayPayment(
-      'fortune_buy',
-      { spins },
-      setFortuneNowpayLoading,
-      setFortuneError,
-      setFortuneNowpayPayment,
-      'Failed to create USDT payment.',
-    )
-    if (payment) {
-      setShowNowpayFortuneModal(true)
-    }
-    return payment
-  }
-
-  const checkNowpayFortunePayment = async (providerPaymentIdRaw?: string, interactive = true) =>
-    checkNowpayPayment(
-      String(providerPaymentIdRaw ?? fortuneNowpayPayment?.providerPaymentId ?? ''),
-      setFortuneNowpayStatusLoading,
-      setFortuneError,
-      setFortuneNowpayPayment,
-      interactive,
-    )
 
   const buyGoldPackage = async (packId: string) => {
     const state = gameStateRef.current
@@ -6925,11 +5866,7 @@ function App() {
   const shortKey = walletAddress
     ? `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`
     : ''
-  const accountHint = usingWalletAuth
-    ? `Wallet: ${shortKey}`
-    : usingEmailAuth && emailAuthUser?.email
-      ? `Email: ${emailAuthUser.email}`
-      : ''
+  const accountHint = usingWalletAuth ? `Wallet: ${shortKey}` : ''
 
   const levelUpNotice = hud?.levelUpNotice ?? null
   const currentDayKey = getDayKey()
@@ -7087,7 +6024,7 @@ function App() {
               </div>
             )}
           </div>
-            <div className="wallet">
+          <div className="wallet">
             <div className="wallet-row">
               <button
                 type="button"
@@ -7097,17 +6034,12 @@ function App() {
                 {musicEnabled ? 'Music On' : 'Music Off'}
               </button>
               {usingWalletAuth && (
-                <button type="button" className="wallet-button email-logout-btn" onClick={signOutWalletAuth} disabled={walletLogoutBusy}>
+                <button type="button" className="wallet-button wallet-logout-btn" onClick={signOutWalletAuth} disabled={walletLogoutBusy}>
                   {walletLogoutBusy ? '...' : 'Log out'}
                 </button>
               )}
-              {usingEmailAuth && !usingWalletAuth && (
-                <button type="button" className="wallet-button email-logout-btn" onClick={signOutEmailAuth} disabled={emailAuthBusy}>
-                  {emailAuthBusy ? '...' : 'Log out'}
-                </button>
-              )}
             </div>
-            {(usingWalletAuth || usingEmailAuth || isAdmin) && (
+            {(usingWalletAuth || isAdmin) && (
               <div className="wallet-hint-row">
                 {isAdmin && (
                   <button type="button" className="admin-inline" onClick={() => setActivePanel('admin')}>
@@ -7161,86 +6093,10 @@ function App() {
                 earn passive income, then convert rewards to SOL. The deeper you push, the larger the payouts.
               </p>
               <div className="auth-cta">
-                <div className="auth-login-methods">
-                  <button
-                    type="button"
-                    className={`auth-login-method ${authLoginMethod === 'wallet' ? 'active' : ''}`}
-                    onClick={() => setAuthLoginMethod('wallet')}
-                  >
-                    Solana Wallet
-                  </button>
-                  <button
-                    type="button"
-                    className={`auth-login-method ${authLoginMethod === 'email' ? 'active' : ''}`}
-                    onClick={() => setAuthLoginMethod('email')}
-                  >
-                    Login / Password
-                  </button>
+                <div className="auth-cta-row">
+                  <WalletModalButton className="wallet-button auth-wallet" />
                 </div>
-                {authLoginMethod === 'wallet' ? (
-                  <>
-                    <div className="auth-cta-row">
-                      <WalletModalButton className="wallet-button auth-wallet" />
-                    </div>
-                    <span className="auth-note">Connect wallet to continue. We only read your address.</span>
-                  </>
-                ) : (
-                  <div className="auth-email-panel">
-                    <div className="auth-email-mode-row">
-                      <button
-                        type="button"
-                        className={`auth-email-mode ${emailAuthMode === 'signin' ? 'active' : ''}`}
-                        onClick={() => setEmailAuthMode('signin')}
-                      >
-                        Sign In
-                      </button>
-                      <button
-                        type="button"
-                        className={`auth-email-mode ${emailAuthMode === 'signup' ? 'active' : ''}`}
-                        onClick={() => setEmailAuthMode('signup')}
-                      >
-                        Sign Up
-                      </button>
-                    </div>
-                    <input
-                      type="email"
-                      className="auth-email-input"
-                      placeholder="Email"
-                      autoComplete="email"
-                      value={emailAuthEmail}
-                      onChange={(event) => setEmailAuthEmail(event.target.value)}
-                    />
-                    <input
-                      type="password"
-                      className="auth-email-input"
-                      placeholder="Password"
-                      autoComplete={emailAuthMode === 'signup' ? 'new-password' : 'current-password'}
-                      value={emailAuthPassword}
-                      onChange={(event) => setEmailAuthPassword(event.target.value)}
-                    />
-                    {emailAuthMode === 'signup' && (
-                      <input
-                        type="password"
-                        className="auth-email-input"
-                        placeholder="Confirm password"
-                        autoComplete="new-password"
-                        value={emailAuthPasswordConfirm}
-                        onChange={(event) => setEmailAuthPasswordConfirm(event.target.value)}
-                      />
-                    )}
-                    <button
-                      type="button"
-                      className="auth-email-submit"
-                      onClick={emailAuthMode === 'signup' ? signUpWithEmailPassword : signInWithEmailPassword}
-                      disabled={emailAuthBusy || emailAuthLoading}
-                    >
-                      {emailAuthBusy ? 'Please wait...' : emailAuthMode === 'signup' ? 'Create Account' : 'Sign In'}
-                    </button>
-                    <span className="auth-note">Email confirmation is required before first login.</span>
-                    {emailAuthError && <div className="auth-email-error">{emailAuthError}</div>}
-                    {emailAuthInfo && <div className="auth-email-info">{emailAuthInfo}</div>}
-                  </div>
-                )}
+                <span className="auth-note">Connect your Solana wallet to continue. We only read your public address.</span>
               </div>
               <div className="auth-stats">
                 <div className="stat-card">
@@ -7511,7 +6367,7 @@ function App() {
           <div className="auth-footer reveal delay-9">
             <div>
               <div className="auth-footer-title">Ready to enter the realm?</div>
-              <div className="auth-footer-copy">Sign in with wallet or email, then choose a class to begin.</div>
+              <div className="auth-footer-copy">Sign in with your Solana wallet, then choose a class to begin.</div>
             </div>
             <WalletModalButton className="wallet-button auth-wallet" />
           </div>
@@ -8208,102 +7064,37 @@ function App() {
               </button>
             </div>
             <div className="withdraw-body buygold-body">
-              <div className="buygold-method-row">
-                <button
-                  type="button"
-                  className={`auth-method-btn ${buyGoldMethod === 'sol' ? 'active' : ''}`}
-                  onClick={() => setBuyGoldMethod('sol')}
-                  disabled={!publicKey}
-                >
-                  Solana Wallet
-                </button>
-                <button
-                  type="button"
-                  className={`auth-method-btn ${buyGoldMethod === 'usdt' ? 'active' : ''}`}
-                  onClick={() => setBuyGoldMethod('usdt')}
-                >
-                  USDT
-                </button>
+              <div className="withdraw-info">
+                <span className="withdraw-info-label">
+                  <img className="icon-img small" src={iconSolana} alt="" />
+                  Wallet balance
+                </span>
+                <strong>{solBalanceLoading ? 'Loading...' : `${solBalance.toFixed(4)} SOL`}</strong>
               </div>
-              {buyGoldMethod === 'sol' ? (
-                <div className="withdraw-info">
-                  <span className="withdraw-info-label">
-                    <img className="icon-img small" src={iconSolana} alt="" />
-                    Wallet balance
-                  </span>
-                  <strong>{solBalanceLoading ? 'Loading...' : `${solBalance.toFixed(4)} SOL`}</strong>
-                </div>
-              ) : (
-                <label className="buygold-network">
-                  <span>USDT network</span>
-                  <select value={nowpayNetwork} onChange={(event) => setNowpayNetwork(event.target.value as NowpayNetworkId)}>
-                    {NOWPAY_USDT_NETWORKS.map((network) => (
-                      <option key={network.id} value={network.id}>
-                        {network.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
               <div className="buygold-grid">
-                {(buyGoldMethod === 'sol' ? GOLD_PACKAGES_SOL : GOLD_PACKAGES_USDT).map((pack) => {
-                  const usdtPrice = buyGoldMethod === 'usdt' ? Number('usdt' in pack ? pack.usdt : 0) : 0
-                  const usdtUnavailable = buyGoldMethod === 'usdt' && usdtPrice < NOWPAY_MIN_USDT
-                  return (
-                    <div key={pack.id} className="shop-card buygold-card">
-                      <img className="shop-icon" src={pack.image} alt="Gold pack" />
-                      <div className="shop-title">{formatNumber(pack.gold)} Gold</div>
-                      <div className="shop-desc">Instant delivery</div>
-                      {buyGoldMethod === 'sol' ? (
-                        <div className="shop-meta">
-                          <img className="icon-img small" src={iconSolana} alt="" />
-                          Price: {'sol' in pack ? pack.sol : 0} SOL
-                        </div>
-                      ) : (
-                        <div className="shop-meta buygold-usdt-meta">Price: {formatUsdt(usdtPrice)} USDT</div>
-                      )}
-                      {buyGoldMethod === 'usdt' && usdtUnavailable && (
-                        <div className="withdraw-note">USDT unavailable (min {NOWPAY_MIN_USDT} USDT)</div>
-                      )}
-                      <button
-                        type="button"
-                        disabled={buyGoldMethod === 'sol'
-                          ? buyGoldLoading === pack.id
-                          : nowpayLoading || nowpayStatusLoading || usdtUnavailable}
-                        onClick={() => {
-                          if (buyGoldMethod === 'sol') {
-                            void buyGoldPackage(pack.id)
-                            return
-                          }
-                          void createNowpayGoldPayment(pack.id)
-                        }}
-                      >
-                        {buyGoldMethod === 'sol'
-                          ? (buyGoldLoading === pack.id ? 'Processing...' : 'Buy with SOL')
-                          : (usdtUnavailable ? 'Use SOL' : (nowpayLoading ? 'Creating...' : 'Buy with USDT'))}
-                      </button>
+                {GOLD_PACKAGES_SOL.map((pack) => (
+                  <div key={pack.id} className="shop-card buygold-card">
+                    <img className="shop-icon" src={pack.image} alt="Gold pack" />
+                    <div className="shop-title">{formatNumber(pack.gold)} Gold</div>
+                    <div className="shop-desc">Instant delivery</div>
+                    <div className="shop-meta">
+                      <img className="icon-img small" src={iconSolana} alt="" />
+                      Price: {pack.sol} SOL
                     </div>
-                  )
-                })}
+                    <button
+                      type="button"
+                      disabled={buyGoldLoading === pack.id}
+                      onClick={() => {
+                        void buyGoldPackage(pack.id)
+                      }}
+                    >
+                      {buyGoldLoading === pack.id ? 'Processing...' : 'Buy with SOL'}
+                    </button>
+                  </div>
+                ))}
               </div>
-              {buyGoldMethod === 'usdt' && showNowpayGoldModal && nowpayPayment && (
-                <NowpayPaymentModal
-                  title="Gold purchase"
-                  payment={nowpayPayment}
-                  fallbackUsdtAmount={nowpayPayment.usdtAmount}
-                  isMobile={isMobile}
-                  statusLoading={nowpayStatusLoading}
-                  onClose={() => setShowNowpayGoldModal(false)}
-                  onCheck={() => void checkNowpayGoldPayment(nowpayPayment.providerPaymentId, true)}
-                  onCopy={copyToClipboard}
-                />
-              )}
               {buyGoldError && <div className="withdraw-error">{buyGoldError}</div>}
-              <div className="withdraw-note">
-                {buyGoldMethod === 'sol'
-                  ? 'Gold is added instantly after the SOL transaction confirms.'
-                  : 'For USDT, send exact amount to the address and then click "I paid, check status".'}
-              </div>
+              <div className="withdraw-note">Gold is added instantly after the SOL transaction confirms.</div>
             </div>
           </div>
         </div>
@@ -8327,38 +7118,8 @@ function App() {
                     <img className="icon-img small" src={iconSolana} alt="" />
                     {STARTER_PACK_PRICE} SOL
                   </div>
-                  <div className="shop-meta buygold-usdt-meta">{formatUsdt(STARTER_PACK_PRICE_USDT)} USDT</div>
                 </div>
               </div>
-              <div className="buygold-method-row">
-                <button
-                  type="button"
-                  className={`auth-method-btn ${starterPayMethod === 'sol' ? 'active' : ''}`}
-                  onClick={() => setStarterPayMethod('sol')}
-                  disabled={!publicKey}
-                >
-                  Solana Wallet
-                </button>
-                <button
-                  type="button"
-                  className={`auth-method-btn ${starterPayMethod === 'usdt' ? 'active' : ''}`}
-                  onClick={() => setStarterPayMethod('usdt')}
-                >
-                  USDT
-                </button>
-              </div>
-              {starterPayMethod === 'usdt' && (
-                <label className="buygold-network">
-                  <span>USDT network</span>
-                  <select value={nowpayNetwork} onChange={(event) => setNowpayNetwork(event.target.value as NowpayNetworkId)}>
-                    {NOWPAY_USDT_NETWORKS.map((network) => (
-                      <option key={network.id} value={network.id}>
-                        {network.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
               <div className="starterpack-list">
                 <div className="starterpack-item">
                   <img className="icon-img" src={iconGold} alt="" />
@@ -8393,39 +7154,17 @@ function App() {
               <button
                 type="button"
                 className="withdraw-submit"
-                disabled={
-                  starterPayMethod === 'sol'
-                    ? starterPackLoading
-                    : starterNowpayLoading || starterNowpayStatusLoading
-                }
+                disabled={starterPackLoading}
                 onClick={() => {
-                  if (starterPayMethod === 'sol') {
-                    void buyStarterPack()
-                    return
-                  }
-                  void createNowpayStarterPayment()
+                  void buyStarterPack()
                 }}
               >
-                {starterPayMethod === 'sol'
-                  ? (starterPackLoading ? 'Processing...' : 'Buy Starter Pack (SOL)')
-                  : (starterNowpayLoading ? 'Creating...' : 'Buy Starter Pack (USDT)')}
+                {starterPackLoading ? 'Processing...' : 'Buy Starter Pack (SOL)'}
               </button>
-              {starterPayMethod === 'usdt' && showNowpayStarterModal && starterNowpayPayment && (
-                <NowpayPaymentModal
-                  title="Starter Pack"
-                  payment={starterNowpayPayment}
-                  fallbackUsdtAmount={STARTER_PACK_PRICE_USDT}
-                  isMobile={isMobile}
-                  statusLoading={starterNowpayStatusLoading}
-                  onClose={() => setShowNowpayStarterModal(false)}
-                  onCheck={() => void checkNowpayStarterPayment(starterNowpayPayment.providerPaymentId, true)}
-                  onCopy={copyToClipboard}
-                />
-              )}
               <div className="withdraw-note">This pack can be purchased only once.</div>
             </div>
+            </div>
           </div>
-        </div>
       )}
 
       {activePanel === 'premium' && hud && (
@@ -8454,43 +7193,13 @@ function App() {
                   )}
                 </div>
               </div>
-              <div className="buygold-method-row">
-                <button
-                  type="button"
-                  className={`auth-method-btn ${premiumPayMethod === 'sol' ? 'active' : ''}`}
-                  onClick={() => setPremiumPayMethod('sol')}
-                  disabled={!publicKey}
-                >
-                  Solana Wallet
-                </button>
-                <button
-                  type="button"
-                  className={`auth-method-btn ${premiumPayMethod === 'usdt' ? 'active' : ''}`}
-                  onClick={() => setPremiumPayMethod('usdt')}
-                >
-                  USDT
-                </button>
+              <div className="withdraw-info">
+                <span className="withdraw-info-label">
+                  <img className="icon-img small" src={iconSolana} alt="" />
+                  Wallet balance
+                </span>
+                <strong>{solBalanceLoading ? 'Loading...' : `${solBalance.toFixed(4)} SOL`}</strong>
               </div>
-              {premiumPayMethod === 'sol' ? (
-                <div className="withdraw-info">
-                  <span className="withdraw-info-label">
-                    <img className="icon-img small" src={iconSolana} alt="" />
-                    Wallet balance
-                  </span>
-                  <strong>{solBalanceLoading ? 'Loading...' : `${solBalance.toFixed(4)} SOL`}</strong>
-                </div>
-              ) : (
-                <label className="buygold-network">
-                  <span>USDT network</span>
-                  <select value={nowpayNetwork} onChange={(event) => setNowpayNetwork(event.target.value as NowpayNetworkId)}>
-                    {NOWPAY_USDT_NETWORKS.map((network) => (
-                      <option key={network.id} value={network.id}>
-                        {network.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
               <div className="shop-grid premium-plans">
                 {PREMIUM_PLANS.map((plan) => {
                   const pricing = getPremiumPlanPrice(plan, premiumSaleNowMs)
@@ -8501,57 +7210,29 @@ function App() {
                     {pricing.saleActive && (
                       <div className="premium-price-old">
                         <img className="icon-img tiny" src={iconSolana} alt="" />
-                        {plan.sol} SOL
-                        <span className="premium-price-old-usdt"> / {formatUsdt(plan.usdt)} USDT</span>
+                        {pricing.baseSol} SOL
                       </div>
                     )}
                     <div className="shop-meta premium-price-new">
                       <img className="icon-img small" src={iconSolana} alt="" />
                       {pricing.sol} SOL
                     </div>
-                    <div className="shop-meta buygold-usdt-meta premium-price-new-usdt">{formatUsdt(pricing.usdt)} USDT</div>
                     <button
                       type="button"
-                      disabled={
-                        premiumPayMethod === 'sol'
-                          ? premiumLoading === plan.id
-                          : premiumNowpayLoading || premiumNowpayStatusLoading
-                      }
+                      disabled={premiumLoading === plan.id}
                       onClick={() => {
-                        if (premiumPayMethod === 'sol') {
-                          void buyPremiumPlan(plan.id)
-                          return
-                        }
-                        void createNowpayPremiumPayment(plan.id, plan.days)
+                        void buyPremiumPlan(plan.id)
                       }}
                     >
-                      {premiumPayMethod === 'sol'
-                        ? (premiumLoading === plan.id
-                          ? 'PROCESSING...'
-                          : premiumActive
-                            ? `EXTEND +${plan.days}D`
-                            : `BUY ${plan.days}D`)
-                        : (premiumNowpayLoading
-                          ? 'CREATING...'
-                          : premiumActive
-                            ? `EXTEND +${plan.days}D (USDT)`
-                            : `BUY ${plan.days}D (USDT)`)}
+                      {premiumLoading === plan.id
+                        ? 'PROCESSING...'
+                        : premiumActive
+                          ? `EXTEND +${plan.days}D`
+                          : `BUY ${plan.days}D`}
                     </button>
                   </div>
                 )})}
               </div>
-              {premiumPayMethod === 'usdt' && showNowpayPremiumModal && premiumNowpayPayment && (
-                <NowpayPaymentModal
-                  title="Premium Membership"
-                  payment={premiumNowpayPayment}
-                  fallbackUsdtAmount={premiumNowpayPayment.usdtAmount}
-                  isMobile={isMobile}
-                  statusLoading={premiumNowpayStatusLoading}
-                  onClose={() => setShowNowpayPremiumModal(false)}
-                  onCheck={() => void checkNowpayPremiumPayment(premiumNowpayPayment.providerPaymentId, true)}
-                  onCopy={copyToClipboard}
-                />
-              )}
               <div className="starterpack-list premium-list">
                 <div className="starterpack-item">
                   <img className="icon-img" src={iconKey} alt="" />
@@ -8685,39 +7366,9 @@ function App() {
                 <img className="starterpack-image fortune-image" src={iconFortuneWheel} alt="" />
                 <div className="starterpack-meta">
                   <div className="starterpack-title">Wheel of Fortune</div>
-                  <div className="withdraw-note">1 free spin daily at 00:00 UTC. Extra spins are bought with SOL or USDT.</div>
+                  <div className="withdraw-note">1 free spin daily at 00:00 UTC. Extra spins are bought only with SOL.</div>
                 </div>
               </div>
-
-              <div className="buygold-method-row">
-                <button
-                  type="button"
-                  className={`auth-method-btn ${fortunePayMethod === 'sol' ? 'active' : ''}`}
-                  onClick={() => setFortunePayMethod('sol')}
-                  disabled={!publicKey}
-                >
-                  Solana Wallet
-                </button>
-                <button
-                  type="button"
-                  className={`auth-method-btn ${fortunePayMethod === 'usdt' ? 'active' : ''}`}
-                  onClick={() => setFortunePayMethod('usdt')}
-                >
-                  USDT
-                </button>
-              </div>
-              {fortunePayMethod === 'usdt' && (
-                <label className="buygold-network">
-                  <span>USDT network</span>
-                  <select value={nowpayNetwork} onChange={(event) => setNowpayNetwork(event.target.value as NowpayNetworkId)}>
-                    {NOWPAY_USDT_NETWORKS.map((network) => (
-                      <option key={network.id} value={network.id}>
-                        {network.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
 
               <div className="withdraw-info fortune-summary">
                 <span>
@@ -8734,9 +7385,7 @@ function App() {
                   Paid spins: <strong>{formatNumber(fortunePaidSpins)}</strong>
                 </span>
                 <span>
-                  {fortunePayMethod === 'sol'
-                    ? <>Wallet: <strong>{solBalanceLoading ? 'Loading...' : `${solBalance.toFixed(4)} SOL`}</strong></>
-                    : <>Currency: <strong>USDT</strong></>}
+                  Wallet: <strong>{solBalanceLoading ? 'Loading...' : `${solBalance.toFixed(4)} SOL`}</strong>
                 </span>
               </div>
 
@@ -8792,64 +7441,30 @@ function App() {
               </button>
 
               <div className="fortune-buy-row">
-                {(fortunePayMethod === 'sol' ? FORTUNE_SPIN_PACKS_SOL : FORTUNE_SPIN_PACKS_USDT).map((spins) => {
-                  const isSolPack = fortunePayMethod === 'sol'
-                  const usdtPrice = isSolPack ? 0 : Number(FORTUNE_SPIN_PRICES_USDT[spins as FortuneUsdtPackId] ?? 0)
-                  const usdtUnavailable = !isSolPack && usdtPrice < NOWPAY_MIN_USDT
-                  return (
-                    <button
-                      key={`${fortunePayMethod}-${spins}`}
-                      type="button"
-                      className="fortune-buy-btn"
-                      disabled={isSolPack
-                        ? fortuneBuyLoading !== null
-                        : fortuneNowpayLoading || fortuneNowpayStatusLoading || usdtUnavailable}
-                      onClick={() => {
-                        if (isSolPack) {
-                          void buyFortuneSpins(spins as FortunePackId)
-                          return
-                        }
-                        void createNowpayFortunePayment(spins as FortuneUsdtPackId)
-                      }}
-                    >
-                      {isSolPack ? (
-                        fortuneBuyLoading === spins ? (
-                          'Processing...'
-                        ) : (
-                          <>
-                            <span className="fortune-buy-title">Buy {spins} {spins === 1 ? 'Spin' : 'Spins'}</span>
-                            <span className="fortune-buy-price">
-                              <img className="icon-img tiny" src={iconSolana} alt="" />
-                              {FORTUNE_SPIN_PRICES[spins as FortunePackId]} SOL
-                            </span>
-                          </>
-                        )
-                      ) : (
-                        usdtUnavailable
-                          ? 'Use SOL'
-                          : fortuneNowpayLoading
-                            ? 'Creating...'
-                            : <>
-                              <span className="fortune-buy-title">Buy {spins} Spins</span>
-                              <span className="fortune-buy-price">{formatUsdt(usdtPrice)} USDT</span>
-                            </>
-                      )}
-                    </button>
-                  )
-                })}
+                {FORTUNE_SPIN_PACKS_SOL.map((spins) => (
+                  <button
+                    key={spins}
+                    type="button"
+                    className="fortune-buy-btn"
+                    disabled={fortuneBuyLoading !== null}
+                    onClick={() => {
+                      void buyFortuneSpins(spins as FortunePackId)
+                    }}
+                  >
+                    {fortuneBuyLoading === spins ? (
+                      'Processing...'
+                    ) : (
+                      <>
+                        <span className="fortune-buy-title">Buy {spins} {spins === 1 ? 'Spin' : 'Spins'}</span>
+                        <span className="fortune-buy-price">
+                          <img className="icon-img tiny" src={iconSolana} alt="" />
+                          {FORTUNE_SPIN_PRICES[spins as FortunePackId]} SOL
+                        </span>
+                      </>
+                    )}
+                  </button>
+                ))}
               </div>
-              {fortunePayMethod === 'usdt' && showNowpayFortuneModal && fortuneNowpayPayment && (
-                <NowpayPaymentModal
-                  title="Wheel of Fortune"
-                  payment={fortuneNowpayPayment}
-                  fallbackUsdtAmount={fortuneNowpayPayment.usdtAmount}
-                  isMobile={isMobile}
-                  statusLoading={fortuneNowpayStatusLoading}
-                  onClose={() => setShowNowpayFortuneModal(false)}
-                  onCheck={() => void checkNowpayFortunePayment(fortuneNowpayPayment.providerPaymentId, true)}
-                  onCopy={copyToClipboard}
-                />
-              )}
 
               {fortuneSpinResult && (
                 <div className="withdraw-info fortune-result">
