@@ -6160,6 +6160,7 @@ function App() {
     <div className="resources-actions-row">
       <button type="button" className="resource-action season-action" onClick={() => setActivePanel('season')} aria-label="Open season panel">
         <img className="season-action-art" src={iconCrystalSeason} alt="Crystal Season" />
+        <span className="season-action-label">Crystal Seasons</span>
       </button>
     </div>
   )
@@ -8726,6 +8727,8 @@ function App() {
   )
 }
 export default App
+
+
 
 
 
