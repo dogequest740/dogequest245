@@ -289,7 +289,7 @@ begin
     '',
     snapshot_time
   from public.profiles p
-  where greatest(0, floor(coalesce((p.state ->> 'crystals')::numeric, 0)))::bigint >= 1000;
+  where greatest(0, floor(coalesce((p.state ->> 'crystals')::numeric, 0)))::bigint >= 500;
 
   select coalesce(sum(effective_crystals), 0)
   into total_effective

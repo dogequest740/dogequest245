@@ -99,7 +99,7 @@ const LANDING_BANNERS = [
 ] as const
 const EDGE_BASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || ''
 const EDGE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() || ''
-const SEASON_SNAPSHOT_MIN_CRYSTALS = 1000
+const SEASON_SNAPSHOT_MIN_CRYSTALS = 500
 
 type CharacterClass = {
   id: string

@@ -55,7 +55,7 @@ const FORTUNE_SPIN_PRICES_LAMPORTS: Record<(typeof FORTUNE_SPIN_PACKS_SOL)[numbe
   1: Math.round(0.007 * SOL_LAMPORTS),
   10: Math.round(0.06 * SOL_LAMPORTS),
 };
-const MIN_SEASON_SNAPSHOT_CRYSTALS = 1000;
+const MIN_SEASON_SNAPSHOT_CRYSTALS = 500;
 const ENERGY_REGEN_SECONDS = 420;
 const PREMIUM_PLANS = [
   { id: "premium-30", days: 30, lamports: Math.round(0.5 * SOL_LAMPORTS) },
@@ -1539,7 +1539,7 @@ const buildSeasonComputedRows = (
       const state = normalizeState(row.state ?? null);
       if (!wallet || !state) return null;
       const crystalsSnapshot = Math.max(0, asInt(state.crystals, 0));
-      if (crystalsSnapshot < MIN_SEASON_SNAPSHOT_CRYSTALS) return null;
+      if (crystalsSnapshot < minCrystals) return null;
       const premiumActive = Math.max(0, asInt(state.premiumEndsAt, 0)) > nowMs;
       const effectiveCrystals = Number((crystalsSnapshot * (premiumActive ? 1.5 : 1)).toFixed(3));
       return {
@@ -4842,7 +4842,12 @@ serve(async (req) => {
       .select("wallet, state, updated_at");
     if (error) return json({ ok: false, error: "Failed to build season preview." });
 
-    const computed = buildSeasonComputedRows(((data as Array<Record<string, unknown>> | null) ?? []), Number(activeSeasonResult.season.poolUsdt ?? 0), now.getTime());
+    const computed = buildSeasonComputedRows(
+      ((data as Array<Record<string, unknown>> | null) ?? []),
+      Number(activeSeasonResult.season.poolUsdt ?? 0),
+      now.getTime(),
+      MIN_SEASON_SNAPSHOT_CRYSTALS,
+    );
 
     return json({
       ok: true,
