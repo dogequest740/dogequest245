@@ -1052,8 +1052,8 @@ type FortunePackId = keyof typeof FORTUNE_SPIN_PRICES
 const FORTUNE_REWARDS: FortuneReward[] = [
   { id: 'energy_tonic', label: 'Energy Tonic', kind: 'consumable', consumableType: 'energy-small', amount: 1, chance: 24 },
   { id: 'grand_energy_elixir', label: 'Grand Energy Elixir', kind: 'consumable', consumableType: 'energy-full', amount: 1, chance: 9 },
-  { id: 'crystal_flask', label: 'Crystal Flask', kind: 'consumable', consumableType: 'crystal-flask', amount: 1, chance: 5 },
-  { id: 'boss_mark', label: 'Boss Mark', kind: 'consumable', consumableType: 'boss-mark', amount: 1, chance: 5 },
+  { id: 'crystal_flask', label: 'Crystal Flask', kind: 'consumable', consumableType: 'crystal-flask', amount: 1, chance: 2.676111111111111 },
+  { id: 'boss_mark', label: 'Boss Mark', kind: 'consumable', consumableType: 'boss-mark', amount: 1, chance: 2.676111111111111 },
   { id: 'crystals_100', label: '100 Crystals', kind: 'crystals', amount: 100, chance: 2 },
   { id: 'crystals_50', label: '50 Crystals', kind: 'crystals', amount: 50, chance: 3 },
   { id: 'crystals_10', label: '10 Crystals', kind: 'crystals', amount: 10, chance: 5 },
@@ -8769,5 +8769,4 @@ function App() {
     </div>
   )
 }
-
 export default App
