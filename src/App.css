@@ -6064,3 +6064,19 @@ button.ghost {
     gap: 8px;
   }
 }
+
+@media (min-width: 921px) {
+  .app:not(.auth-mode):not(.mobile) .canvas-wrap {
+    padding: 6px;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .game-canvas {
+    max-width: 700px;
+  }
+}
+
+@media (max-height: 920px) and (min-width: 921px) {
+  .app:not(.auth-mode):not(.mobile) .game-canvas {
+    max-width: 660px;
+  }
+}
