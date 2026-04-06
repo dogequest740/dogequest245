@@ -1532,6 +1532,7 @@ const buildSeasonComputedRows = (
   profileRows: Array<Record<string, unknown>>,
   poolUsdt: number,
   nowMs: number,
+  minCrystals = 0,
 ) => {
   const rows: SeasonComputedRow[] = profileRows
     .map((row) => {
