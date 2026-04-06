@@ -4789,7 +4789,7 @@ serve(async (req) => {
       return json({ ok: false, error: "No active season to preview." });
     }
 
-    const limit = clampInt(body.limit, 20, 1000);
+    const limit = clampInt(body.limit, 1, 10000);
     const { data, error } = await supabase
       .from("profiles")
       .select("wallet, state, updated_at");

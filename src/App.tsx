@@ -4195,11 +4195,45 @@ function App() {
     setSeasonAdminBusy(false)
   }
 
+  const downloadSeasonSnapshotText = (season: SeasonInfo | null, rows: SeasonSnapshotEntry[]) => {
+    if (!rows.length) return
+    const safeName = (season?.name || 'season')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'season'
+    const lines = [
+      `Season: ${season?.name || 'Unknown'}`,
+      `Status: ${season?.status || 'closed'}`,
+      `Start: ${season?.startAt || ''}`,
+      `End: ${season?.endAt || ''}`,
+      `Closed: ${season?.closedAt || ''}`,
+      '',
+      ['Rank', 'Player', 'Crystals', 'Premium', 'Wallet', 'Payout SOL'].join('	'),
+      ...rows.map((row) => [
+        String(row.rank),
+        row.name,
+        String(Math.max(0, Math.floor(row.crystals))),
+        row.premiumActive ? 'Yes' : 'No',
+        row.wallet,
+        row.payoutSol.toFixed(9),
+      ].join('	'))
+    ]
+    const blob = new Blob([lines.join('\r\n')], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${safeName}-snapshot.txt`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
   const loadLatestSeasonSnapshot = async () => {
     if (!isAdmin) return
     setSeasonAdminBusy(true)
     setSeasonError('')
-    const result = await callGameSecureAuthed('admin_season_snapshot', { limit: 300 }, true)
+    const result = await callGameSecureAuthed('admin_season_snapshot', { limit: 10000 }, true)
     if (!result.ok) {
       setSeasonError(result.error || 'Failed to load latest season snapshot.')
       setSeasonAdminBusy(false)
@@ -4208,6 +4242,7 @@ function App() {
     setSeasonInfo(result.season ?? null)
     setSeasonSnapshotRows(result.seasonSnapshot ?? [])
     setSeasonPreviewRows([])
+    downloadSeasonSnapshotText(result.season ?? null, result.seasonSnapshot ?? [])
     setSeasonTotalPlayers(Math.max(0, Math.floor(Number(result.seasonTotalPlayers ?? 0))))
     setSeasonTotalCrystals(Math.max(0, Math.floor(Number(result.seasonTotalCrystals ?? 0))))
     setSeasonTotalEffectiveCrystals(Math.max(0, Number(result.seasonTotalEffectiveCrystals ?? 0)))
