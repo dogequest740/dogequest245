@@ -6080,3 +6080,13 @@ button.ghost {
     max-width: 660px;
   }
 }
+
+@media (min-width: 921px) {
+  .app:not(.auth-mode):not(.mobile) {
+    gap: 10px;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .top-actions {
+    gap: 8px;
+  }
+}
