@@ -99,6 +99,7 @@ const LANDING_BANNERS = [
 ] as const
 const EDGE_BASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || ''
 const EDGE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() || ''
+const SEASON_SNAPSHOT_MIN_CRYSTALS = 1000
 
 type CharacterClass = {
   id: string
@@ -4206,7 +4207,8 @@ function App() {
   }
 
   const downloadSeasonSnapshotText = (season: SeasonInfo | null, rows: SeasonSnapshotEntry[]) => {
-    if (!rows.length) return
+    const eligibleRows = rows.filter((row) => Math.floor(Math.max(0, row.crystals)) >= SEASON_SNAPSHOT_MIN_CRYSTALS)
+    if (!eligibleRows.length) return
     const safeName = (season?.name || 'season')
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
@@ -4219,7 +4221,7 @@ function App() {
       `Closed: ${season?.closedAt || ''}`,
       '',
       ['Rank', 'Player', 'Crystals', 'Premium', 'Wallet', 'Payout USDT'].join('	'),
-      ...rows.map((row) => [
+      ...eligibleRows.map((row) => [
         String(row.rank),
         row.name,
         String(Math.max(0, Math.floor(row.crystals))),
@@ -8003,7 +8005,7 @@ function App() {
                     <div className="season-summary-card">
                       <span className="season-summary-label">Your crystals</span>
                       <strong>{formatNumber(seasonPlayerCrystals)}</strong>
-                      
+                      <small>Minimum for snapshot: {formatNumber(SEASON_SNAPSHOT_MIN_CRYSTALS)} crystals.</small>
                     </div>
                     <div className="season-summary-card">
                       <span className="season-summary-label">Your rank</span>

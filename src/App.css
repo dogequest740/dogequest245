@@ -6153,14 +6153,14 @@ button.ghost {
 }
 
 .season-action-label {
-  font-family: 'Manrope', system-ui, sans-serif;
-  font-size: 17px;
-  font-weight: 800;
-  line-height: 1.05;
-  letter-spacing: 0.9px;
-  color: #ffe39a;
+  font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: 0.55px;
+  color: #8ff5dc;
   text-transform: uppercase;
-  text-shadow: 0 0 10px rgba(255, 214, 122, 0.22), 0 0 8px rgba(120, 190, 255, 0.14);
+  text-shadow: 0 0 10px rgba(82, 224, 188, 0.24), 0 0 8px rgba(111, 232, 255, 0.14);
   white-space: nowrap;
 }
 

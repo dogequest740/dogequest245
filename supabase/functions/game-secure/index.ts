@@ -55,6 +55,7 @@ const FORTUNE_SPIN_PRICES_LAMPORTS: Record<(typeof FORTUNE_SPIN_PACKS_SOL)[numbe
   1: Math.round(0.007 * SOL_LAMPORTS),
   10: Math.round(0.06 * SOL_LAMPORTS),
 };
+const MIN_SEASON_SNAPSHOT_CRYSTALS = 1000;
 const ENERGY_REGEN_SECONDS = 420;
 const PREMIUM_PLANS = [
   { id: "premium-30", days: 30, lamports: Math.round(0.5 * SOL_LAMPORTS) },
@@ -1538,6 +1539,7 @@ const buildSeasonComputedRows = (
       const state = normalizeState(row.state ?? null);
       if (!wallet || !state) return null;
       const crystalsSnapshot = Math.max(0, asInt(state.crystals, 0));
+      if (crystalsSnapshot < MIN_SEASON_SNAPSHOT_CRYSTALS) return null;
       const premiumActive = Math.max(0, asInt(state.premiumEndsAt, 0)) > nowMs;
       const effectiveCrystals = Number((crystalsSnapshot * (premiumActive ? 1.5 : 1)).toFixed(3));
       return {
@@ -3142,6 +3144,7 @@ serve(async (req) => {
     return json({
       ok: true,
       season: activeSeasonResult.season,
+      seasonMinCrystals: MIN_SEASON_SNAPSHOT_CRYSTALS,
       seasonLeaderboard: leaderboard,
       seasonPlayer: playerRow,
       seasonTotalPlayers: computed.totalPlayers,
@@ -4844,6 +4847,7 @@ serve(async (req) => {
     return json({
       ok: true,
       season: activeSeasonResult.season,
+      seasonMinCrystals: MIN_SEASON_SNAPSHOT_CRYSTALS,
       seasonPreview: computed.rows.slice(0, limit).map((row, index) => ({
         rank: index + 1,
         wallet: row.wallet,
@@ -4889,6 +4893,7 @@ serve(async (req) => {
       .from("season_snapshots")
       .select("id, season_id, wallet, name, crystals_snapshot, premium_active, effective_crystals, share, payout_usdt, excluded, exclude_reason, created_at")
       .eq("season_id", season.id)
+      .gte("crystals_snapshot", MIN_SEASON_SNAPSHOT_CRYSTALS)
       .order("payout_usdt", { ascending: false })
       .limit(limit);
     if (error) return json({ ok: false, error: "Failed to load season snapshot rows." });
@@ -4909,6 +4914,7 @@ serve(async (req) => {
     return json({
       ok: true,
       season,
+      seasonMinCrystals: MIN_SEASON_SNAPSHOT_CRYSTALS,
       seasonSnapshot: rows,
       seasonTotalPlayers: rows.length,
       seasonTotalCrystals: rows.reduce((sum, row) => sum + row.crystals, 0),
@@ -4940,6 +4946,7 @@ serve(async (req) => {
       .from("season_snapshots")
       .select("id, season_id, wallet, name, crystals_snapshot, premium_active, effective_crystals, share, payout_usdt, excluded, exclude_reason, created_at")
       .eq("season_id", seasonId)
+      .gte("crystals_snapshot", MIN_SEASON_SNAPSHOT_CRYSTALS)
       .order("payout_usdt", { ascending: false })
       .limit(clampInt(body.limit, 20, 1000));
 
@@ -5119,4 +5126,3 @@ serve(async (req) => {
 
   return json({ ok: false, error: "Unknown action." });
 });
-
