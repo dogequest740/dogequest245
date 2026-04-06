@@ -32,8 +32,6 @@ import iconLevel from './assets/icons/level.png'
 import iconKey from './assets/icons/key.png'
 import iconEnergyTonic from './assets/icons/energy-tonic.png'
 import iconGrandEnergy from './assets/icons/grand-energy-elixir.png'
-import iconSwiftDraught from './assets/icons/swift-draught.png'
-import iconAttackSpeed from './assets/icons/attack-speed.png'
 import iconWorldBoss from './assets/icons/world-boss.png'
 import iconBattle from './assets/icons/battle.png'
 import iconAutoBattle from './assets/icons/autobattle.png'
@@ -128,10 +126,16 @@ type LootEntry = {
 type EquipmentSlot = 'weapon' | 'armor' | 'head' | 'legs' | 'boots' | 'artifact'
 
 type EquipmentStats = {
-  attack: number
-  speed: number
-  attackSpeed: number
-  range: number
+  power: number
+  fortune: number
+  prosperity: number
+}
+
+type EquipmentEffectKind = 'boss-damage' | 'village-gold' | 'sell-boost'
+
+type EquipmentEffect = {
+  kind: EquipmentEffectKind
+  value: number
 }
 
 type EquipmentRarity = {
@@ -159,9 +163,9 @@ type LevelUpNotice = {
 
 type QuestType = 'level' | 'kills' | 'tier' | 'dungeons'
 
-type QuestRewardItem = 'energy-small' | 'energy-full' | 'speed' | 'attack' | 'key'
+type QuestRewardItem = 'energy-small' | 'energy-full' | 'key'
 
-type ConsumableType = QuestRewardItem
+type ConsumableType = QuestRewardItem | 'boss-mark' | 'crystal-flask'
 
 type QuestDefinition = {
   id: string
@@ -185,6 +189,7 @@ type EquipmentItem = {
   rarity: string
   color: string
   bonuses: EquipmentStats
+  effect: EquipmentEffect | null
   tierScore: number
   sellValue: number
 }
@@ -285,6 +290,8 @@ type PersistedState = {
   premiumEndsAt: number
   premiumClaimDay: string
   worldBossTickets: number
+  bossMarkCycleStart: string
+  crystalFlaskRuns: number
   village?: VillageState
   stake: StakeEntry[] | { active: boolean; amount: number; endsAt: number }
   stakeId: number
@@ -393,6 +400,7 @@ type DungeonSecureResponse = {
   reward?: number
   crystals?: number
   crystalsEarned?: number
+  crystalFlaskRuns?: number
 }
 
 type GameSecureResponse = {
@@ -447,6 +455,8 @@ type GameSecureResponse = {
   worldBossParticipants?: WorldBossParticipantRow[]
   worldBossAppliedDamage?: number
   worldBossRewardShare?: number
+  bossMarkCycleStart?: string
+  crystalFlaskRuns?: number
   village?: VillageState
   villageClaimedGold?: number
   villageClaimedCrystals?: number
@@ -656,10 +666,6 @@ type GameState = {
   autoBattle: boolean
   battleQueue: number
   battleTargetId: number | null
-  speedBuffTime: number
-  speedBuffMultiplier: number
-  attackSpeedBuffTime: number
-  attackSpeedBuffMultiplier: number
   monsterKills: number
   dungeonRuns: number
   monsterHpScale: number
@@ -669,6 +675,8 @@ type GameState = {
   premiumEndsAt: number
   premiumClaimDay: string
   worldBossTickets: number
+  bossMarkCycleStart: string
+  crystalFlaskRuns: number
   village: VillageState
   stake: StakeEntry[]
   stakeId: number
@@ -684,9 +692,9 @@ type HudState = {
   xp: number
   xpNext: number
   attack: number
-  speed: number
-  attackSpeed: number
-  range: number
+  power: number
+  fortune: number
+  prosperity: number
   gold: number
   crystals: number
   tickets: number
@@ -699,10 +707,6 @@ type HudState = {
   loot: LootEntry[]
   events: string[]
   autoBattle: boolean
-  speedBuffTime: number
-  speedBuffMultiplier: number
-  attackSpeedBuffTime: number
-  attackSpeedBuffMultiplier: number
   monsterKills: number
   dungeonRuns: number
   worldBoss: WorldBossState
@@ -711,6 +715,8 @@ type HudState = {
   premiumEndsAt: number
   premiumClaimDay: string
   worldBossTickets: number
+  bossMarkCycleStart: string
+  crystalFlaskRuns: number
   village: VillageState
   stake: StakeEntry[]
 }
@@ -811,13 +817,25 @@ const EQUIPMENT_BASE_NAMES: Record<EquipmentSlot, string[]> = {
 
 const EQUIPMENT_PREFIXES = ['Warden', 'Ashen', 'Starbound', 'Hallowed', 'Ironroot', 'Mistveil', 'Sunfire', 'Voidborn']
 
-const EQUIPMENT_BONUS_TEMPLATES: Record<EquipmentSlot, Partial<EquipmentStats>> = {
-  weapon: { attack: 4, attackSpeed: 0.05 },
-  armor: { attack: 1 },
-  head: { attack: 2 },
-  legs: { speed: 3 },
-  boots: { speed: 6 },
-  artifact: { attackSpeed: 0.06, range: 2 },
+const EQUIPMENT_STAT_TEMPLATES: Record<EquipmentSlot, EquipmentStats> = {
+  weapon: { power: 10, fortune: 0, prosperity: 0 },
+  armor: { power: 5, fortune: 0, prosperity: 4 },
+  head: { power: 4, fortune: 5, prosperity: 0 },
+  legs: { power: 2, fortune: 1, prosperity: 6 },
+  boots: { power: 1, fortune: 5, prosperity: 3 },
+  artifact: { power: 4, fortune: 4, prosperity: 4 },
+}
+
+const EQUIPMENT_EFFECT_CAPS = {
+  'boss-damage': 0.1,
+  'village-gold': 0.08,
+  'sell-boost': 0.12,
+} as const
+
+const SLOT_EFFECT_POOLS: Partial<Record<EquipmentSlot, EquipmentEffectKind[]>> = {
+  weapon: ['boss-damage'],
+  armor: ['village-gold'],
+  artifact: ['boss-damage', 'village-gold', 'sell-boost'],
 }
 
 const range = (start: number, end: number, step: number) => {
@@ -845,10 +863,6 @@ const questRewardItemName = (item?: QuestRewardItem) => {
       return 'Energy Tonic'
     case 'energy-full':
       return 'Grand Energy Elixir'
-    case 'speed':
-      return 'Swift Draught'
-    case 'attack':
-      return 'Battle Tonic'
     case 'key':
       return 'Dungeon Key'
     default:
@@ -859,8 +873,8 @@ const questRewardItemName = (item?: QuestRewardItem) => {
 const CONSUMABLE_DEFS: Record<ConsumableType, { name: string; description: string; icon: string }> = {
   'energy-small': { name: 'Energy Tonic', description: 'Restore 10 energy.', icon: iconEnergyTonic },
   'energy-full': { name: 'Grand Energy Elixir', description: 'Restore energy to full.', icon: iconGrandEnergy },
-  speed: { name: 'Swift Draught', description: '+50% speed for 5 minutes.', icon: iconSwiftDraught },
-  attack: { name: 'Battle Tonic', description: '+50% attack speed for 5 minutes.', icon: iconAttackSpeed },
+  'boss-mark': { name: 'Boss Mark', description: '+25% World Boss damage for the current cycle.', icon: iconWorldBoss },
+  'crystal-flask': { name: 'Crystal Flask', description: '+25% dungeon crystals for the next 3 runs.', icon: iconCrystals },
   key: { name: 'Dungeon Key', description: '+1 dungeon entry.', icon: iconKey },
 }
 
@@ -882,7 +896,8 @@ const normalizeLoadedConsumables = (value: unknown): ConsumableItem[] => {
     if (!entry || typeof entry !== 'object') continue
     const row = entry as Partial<ConsumableItem>
     const id = Math.max(1, Math.floor(Number(row.id ?? 0)))
-    const typeRaw = String(row.type ?? '')
+    const rawType = String(row.type ?? '')
+    const typeRaw = rawType === 'speed' ? 'boss-mark' : rawType === 'attack' ? 'crystal-flask' : rawType
     if (!Number.isFinite(id) || id <= 0) continue
     if (!(typeRaw in CONSUMABLE_DEFS)) continue
     const type = typeRaw as ConsumableType
@@ -897,27 +912,14 @@ const scaleRewardGold = (index: number, total: number, min: number, max: number)
   return Math.round(min + (max - min) * ratio)
 }
 
-const normalizeQuestRewardItem = (
-  rewardItem: QuestRewardItem,
-  index: number,
-): QuestRewardItem | undefined => {
-  if (rewardItem === 'energy-small') {
-    return index % 2 === 0 ? 'speed' : undefined
-  }
-  if (rewardItem === 'energy-full') {
-    return index % 2 === 0 ? 'attack' : undefined
-  }
-  return rewardItem
-}
-
 const buildQuestList = (): QuestDefinition[] => {
   const quests: QuestDefinition[] = []
 
   LEVEL_QUEST_TARGETS.forEach((target, index) => {
     const rewardGold = Math.round(scaleRewardGold(index, LEVEL_QUEST_TARGETS.length, 200, 2200) / 12)
     const baseRewardItem: QuestRewardItem =
-      target >= 255 ? 'key' : target >= 200 ? 'energy-full' : target >= 140 ? 'attack' : target >= 80 ? 'speed' : 'energy-small'
-    const rewardItem = normalizeQuestRewardItem(baseRewardItem, index)
+      target >= 255 ? 'key' : target >= 180 ? 'energy-full' : 'energy-small'
+    const rewardItem = baseRewardItem
     quests.push({
       id: `level-${target}`,
       title: `Reach level ${target}`,
@@ -932,8 +934,8 @@ const buildQuestList = (): QuestDefinition[] => {
   KILL_QUEST_TARGETS.forEach((target, index) => {
     const rewardGold = Math.round(scaleRewardGold(index, KILL_QUEST_TARGETS.length, 250, 2500) / 12)
     const baseRewardItem: QuestRewardItem =
-      target >= 56000 ? 'key' : target >= 32000 ? 'energy-full' : target >= 16000 ? 'attack' : target >= 4500 ? 'speed' : 'energy-small'
-    const rewardItem = normalizeQuestRewardItem(baseRewardItem, index)
+      target >= 56000 ? 'key' : target >= 22000 ? 'energy-full' : 'energy-small'
+    const rewardItem = baseRewardItem
     quests.push({
       id: `kills-${target}`,
       title: `Slay ${target} monsters`,
@@ -948,8 +950,8 @@ const buildQuestList = (): QuestDefinition[] => {
   TIER_QUEST_TARGETS.forEach((target, index) => {
     const rewardGold = Math.round(scaleRewardGold(index, TIER_QUEST_TARGETS.length, 300, 3000) / 12)
     const baseRewardItem: QuestRewardItem =
-      target >= 45000 ? 'key' : target >= 32000 ? 'energy-full' : target >= 19000 ? 'attack' : target >= 8000 ? 'speed' : 'energy-small'
-    const rewardItem = normalizeQuestRewardItem(baseRewardItem, index)
+      target >= 45000 ? 'key' : target >= 26000 ? 'energy-full' : 'energy-small'
+    const rewardItem = baseRewardItem
     quests.push({
       id: `tier-${target}`,
       title: `Tier Score ${target}`,
@@ -964,8 +966,8 @@ const buildQuestList = (): QuestDefinition[] => {
   DUNGEON_QUEST_TARGETS.forEach((target, index) => {
     const rewardGold = Math.round(scaleRewardGold(index, DUNGEON_QUEST_TARGETS.length, 350, 3200) / 12)
     const baseRewardItem: QuestRewardItem =
-      target >= 165 ? 'key' : target >= 104 ? 'energy-full' : target >= 62 ? 'attack' : target >= 23 ? 'speed' : 'energy-small'
-    const rewardItem = normalizeQuestRewardItem(baseRewardItem, index)
+      target >= 165 ? 'key' : target >= 88 ? 'energy-full' : 'energy-small'
+    const rewardItem = baseRewardItem
     quests.push({
       id: `dungeons-${target}`,
       title: `Clear dungeons ${target}x`,
@@ -1015,7 +1017,9 @@ const STARTER_PACK_GOLD = 300000
 const STARTER_PACK_WORLD_BOSS_TICKETS = 5
 const SHOP_DUNGEON_KEY_COST = 50000
 const SHOP_DUNGEON_KEY_DAILY_LIMIT = 10
-const WORLD_BOSS_TICKET_COST = 7000
+const SHOP_BOSS_MARK_COST = 20000
+const SHOP_CRYSTAL_FLASK_COST = 7500
+const WORLD_BOSS_TICKET_COST = 18000
 const SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT = 2
 const PREMIUM_PLANS = [
   { id: 'premium-30', days: 30, sol: 0.5 },
@@ -1041,9 +1045,7 @@ const FORTUNE_SPIN_PRICES = {
 const FORTUNE_SPIN_PACKS_SOL = [1, 10] as const
 type FortunePackId = keyof typeof FORTUNE_SPIN_PRICES
 const FORTUNE_REWARDS: FortuneReward[] = [
-  { id: 'speed_draught', label: 'Swift Draught', kind: 'consumable', consumableType: 'speed', amount: 1, chance: 24.915 },
-  { id: 'battle_tonic', label: 'Battle Tonic', kind: 'consumable', consumableType: 'attack', amount: 1, chance: 24.915 },
-  { id: 'energy_tonic', label: 'Energy Tonic', kind: 'consumable', consumableType: 'energy-small', amount: 1, chance: 25 },
+  { id: 'energy_tonic', label: 'Energy Tonic', kind: 'consumable', consumableType: 'energy-small', amount: 1, chance: 31 },
   { id: 'grand_energy_elixir', label: 'Grand Energy Elixir', kind: 'consumable', consumableType: 'energy-full', amount: 1, chance: 10 },
   { id: 'crystals_100', label: '100 Crystals', kind: 'crystals', amount: 100, chance: 2 },
   { id: 'crystals_50', label: '50 Crystals', kind: 'crystals', amount: 50, chance: 3 },
@@ -1401,20 +1403,15 @@ const getCastleUpgradeRequirement = (village: VillageState, playerLevel: number,
   }
 }
 
-const MONSTER_HP_TIER_TARGET = 30000
-const MONSTER_HP_TIER_EXCESS = 0.2
 const MONSTER_HP_BASE_MULTIPLIER = 1.75
 const ITEM_TIER_SCORE_MULTIPLIER = 0.5
 const PERSIST_VERSION = 1
 
-const getMonsterHpMultiplier = (tierScore: number) => {
-  if (tierScore <= 0) return 1
-  const ratio = tierScore / MONSTER_HP_TIER_TARGET
-  const baseRatio = Math.min(1, ratio)
-  const base = 1 + baseRatio * 1.9 + baseRatio * baseRatio * 0.9
-  const excess = Math.max(0, ratio - 1)
-  const extra = 1 + excess * MONSTER_HP_TIER_EXCESS
-  return base * extra
+const getMonsterHpMultiplier = (player: PlayerState) => {
+  const playerDps = Math.max(12, player.attack * Math.max(0.7, player.attackSpeed))
+  const targetTime = 3.2 + Math.min(1.6, player.level * 0.01)
+  const levelPressure = 1 + player.level * 0.08
+  return Math.max(1, (playerDps * targetTime + levelPressure * 14) / 42)
 }
 
 const createWorldBossState = (playerName: string, cycleStart = '', cycleEnd = ''): WorldBossState => {
@@ -1470,6 +1467,8 @@ const buildPersistedState = (state: GameState): PersistedState => ({
   premiumEndsAt: state.premiumEndsAt,
   premiumClaimDay: state.premiumClaimDay,
   worldBossTickets: state.worldBossTickets,
+  bossMarkCycleStart: state.bossMarkCycleStart,
+  crystalFlaskRuns: state.crystalFlaskRuns,
   village: state.village,
   stake: state.stake,
   stakeId: state.stakeId,
@@ -1523,6 +1522,8 @@ const applyPersistedState = (state: GameState, saved: PersistedState, _savedUpda
   state.premiumEndsAt = Math.max(0, Number(saved.premiumEndsAt ?? state.premiumEndsAt))
   state.premiumClaimDay = saved.premiumClaimDay || state.premiumClaimDay
   state.worldBossTickets = Math.max(0, saved.worldBossTickets ?? state.worldBossTickets)
+  state.bossMarkCycleStart = String(saved.bossMarkCycleStart ?? state.bossMarkCycleStart ?? '')
+  state.crystalFlaskRuns = Math.max(0, Math.floor(Number(saved.crystalFlaskRuns ?? state.crystalFlaskRuns ?? 0)))
   state.village = normalizeVillageState(saved.village, Date.now())
   applyVillageUpgradeCompletions(state.village, Date.now())
   if (saved.stake) {
@@ -1985,8 +1986,8 @@ const getFortuneRewardIcon = (reward: FortuneReward) => {
   if (reward.kind === 'gold') return iconGold
   if (reward.kind === 'crystals') return iconCrystals
   if (reward.kind === 'keys') return iconKey
-  if (reward.consumableType === 'speed') return iconSwiftDraught
-  if (reward.consumableType === 'attack') return iconAttackSpeed
+  if (reward.consumableType === 'boss-mark') return iconWorldBoss
+  if (reward.consumableType === 'crystal-flask') return iconCrystals
   if (reward.consumableType === 'energy-full') return iconGrandEnergy
   return iconEnergyTonic
 }
@@ -2028,27 +2029,140 @@ const getRarityChances = (level: number): RarityChance[] => {
 }
 
 const emptyStats = (): EquipmentStats => ({
-  attack: 0,
-  speed: 0,
-  attackSpeed: 0,
-  range: 0,
+  power: 0,
+  fortune: 0,
+  prosperity: 0,
+})
+
+const emptyEffectTotals = (): Record<EquipmentEffectKind, number> => ({
+  'boss-damage': 0,
+  'village-gold': 0,
+  'sell-boost': 0,
 })
 
 const addStats = (a: EquipmentStats, b: Partial<EquipmentStats>) => ({
-  attack: a.attack + (b.attack ?? 0),
-  speed: a.speed + (b.speed ?? 0),
-  attackSpeed: a.attackSpeed + (b.attackSpeed ?? 0),
-  range: a.range + (b.range ?? 0),
+  power: a.power + (b.power ?? 0),
+  fortune: a.fortune + (b.fortune ?? 0),
+  prosperity: a.prosperity + (b.prosperity ?? 0),
 })
 
-const getEquipmentBonuses = (equipment: Record<EquipmentSlot, EquipmentItem | null>) => {
-  let totals = emptyStats()
+const addEffectTotals = (
+  totals: Record<EquipmentEffectKind, number>,
+  effect: EquipmentEffect | null | undefined,
+) => {
+  if (!effect) return totals
+  return {
+    ...totals,
+    [effect.kind]: Math.min(EQUIPMENT_EFFECT_CAPS[effect.kind], totals[effect.kind] + effect.value),
+  }
+}
+
+const getEquipmentStatScale = (level: number) => 1 + Math.max(0, level - 1) * 0.035
+const getEquipmentVarianceMultiplier = (roll: number) => 0.92 + Math.min(1, Math.max(0, roll)) * 0.16
+
+const buildEquipmentStats = (
+  slot: EquipmentSlot,
+  rarity: EquipmentRarity,
+  level: number,
+  rolls: Partial<Record<keyof EquipmentStats, number>> = {},
+): EquipmentStats => {
+  const template = EQUIPMENT_STAT_TEMPLATES[slot]
+  const levelScale = getEquipmentStatScale(level)
+  return {
+    power: Math.round(template.power * rarity.power * levelScale * getEquipmentVarianceMultiplier(rolls.power ?? 0.5)),
+    fortune: Math.round(template.fortune * rarity.power * levelScale * getEquipmentVarianceMultiplier(rolls.fortune ?? 0.5)),
+    prosperity: Math.round(template.prosperity * rarity.power * levelScale * getEquipmentVarianceMultiplier(rolls.prosperity ?? 0.5)),
+  }
+}
+
+const getAllowedEffectKinds = (slot: EquipmentSlot, rarityTier: number) => {
+  if (rarityTier < 3) return []
+  return SLOT_EFFECT_POOLS[slot] ?? []
+}
+
+const getEffectBaseValue = (kind: EquipmentEffectKind, rarityTier: number, level: number) => {
+  if (kind === 'boss-damage') {
+    return Math.min(EQUIPMENT_EFFECT_CAPS[kind], 0.018 + Math.max(0, rarityTier - 3) * 0.012 + level * 0.0001)
+  }
+  if (kind === 'village-gold') {
+    return Math.min(EQUIPMENT_EFFECT_CAPS[kind], 0.015 + Math.max(0, rarityTier - 3) * 0.01 + level * 0.00008)
+  }
+  return Math.min(EQUIPMENT_EFFECT_CAPS[kind], 0.025 + Math.max(0, rarityTier - 3) * 0.016 + level * 0.00012)
+}
+
+const buildEquipmentEffect = (
+  slot: EquipmentSlot,
+  rarity: EquipmentRarity,
+  level: number,
+  roll = 0.5,
+  forcedKind?: EquipmentEffectKind,
+): EquipmentEffect | null => {
+  const allowedKinds = getAllowedEffectKinds(slot, rarity.tier)
+  if (!allowedKinds.length) return null
+  const kind = forcedKind && allowedKinds.includes(forcedKind)
+    ? forcedKind
+    : allowedKinds[Math.floor(Math.min(0.999, Math.max(0, roll)) * allowedKinds.length)]
+  const base = getEffectBaseValue(kind, rarity.tier, level)
+  const varied = Math.max(0, Math.min(EQUIPMENT_EFFECT_CAPS[kind], base * (0.92 + Math.min(1, Math.max(0, roll)) * 0.16)))
+  return {
+    kind,
+    value: Number(varied.toFixed(3)),
+  }
+}
+
+const getEquipmentProfile = (equipment: Record<EquipmentSlot, EquipmentItem | null>) => {
+  let stats = emptyStats()
+  let effects = emptyEffectTotals()
   for (const slot of EQUIPMENT_SLOTS) {
     const item = equipment[slot.id]
     if (!item) continue
-    totals = addStats(totals, item.bonuses)
+    stats = addStats(stats, item.bonuses)
+    effects = addEffectTotals(effects, item.effect)
   }
-  return totals
+  return { stats, effects }
+}
+
+const getLootDropChance = (equipment: Record<EquipmentSlot, EquipmentItem | null>) => {
+  const { stats } = getEquipmentProfile(equipment)
+  return Math.min(0.38, ITEM_DROP_CHANCE + Math.min(0.08, stats.fortune * 0.00045))
+}
+
+const getLootSellMultiplier = (equipment: Record<EquipmentSlot, EquipmentItem | null>) => {
+  const profile = getEquipmentProfile(equipment)
+  const prosperityBonus = Math.min(0.15, profile.stats.prosperity * 0.0012)
+  return 1 + prosperityBonus + profile.effects['sell-boost']
+}
+
+const formatEffectPercent = (value: number) => `${Math.round(value * 100)}%`
+
+const getEquipmentEffectLabel = (effect: EquipmentEffect | null | undefined) => {
+  if (!effect) return ''
+  if (effect.kind === 'boss-damage') return `+${formatEffectPercent(effect.value)} World Boss damage`
+  if (effect.kind === 'village-gold') return `+${formatEffectPercent(effect.value)} village gold`
+  return `+${formatEffectPercent(effect.value)} sell value`
+}
+
+const getEquipmentStatRows = (item: EquipmentItem) => {
+  const rows: string[] = []
+  if (item.bonuses.power !== 0) rows.push(`+${item.bonuses.power} Power`)
+  if (item.bonuses.fortune !== 0) rows.push(`+${item.bonuses.fortune} Fortune`)
+  if (item.bonuses.prosperity !== 0) rows.push(`+${item.bonuses.prosperity} Prosperity`)
+  if (item.effect) rows.push(getEquipmentEffectLabel(item.effect))
+  return rows
+}
+
+const getEquipmentCompareRows = (next: EquipmentItem, current: EquipmentItem) => {
+  const rows: Array<[string, number | string, boolean]> = [
+    ['Power', next.bonuses.power - current.bonuses.power, true],
+    ['Fortune', next.bonuses.fortune - current.bonuses.fortune, true],
+    ['Prosperity', next.bonuses.prosperity - current.bonuses.prosperity, true],
+  ]
+  const nextEffect = next.effect ? `${Math.round(next.effect.value * 100)}%` : 'None'
+  const currentEffect = current.effect ? `${Math.round(current.effect.value * 100)}%` : 'None'
+  if (nextEffect != currentEffect || (next.effect?.kind ?? '') != (current.effect?.kind ?? '')) {
+    rows.push(['Effect', `${getEquipmentEffectLabel(next.effect) || 'None'} vs ${getEquipmentEffectLabel(current.effect) || 'None'}`, false])
+  }
+  return rows
 }
 
 const getTierScore = (equipment: Record<EquipmentSlot, EquipmentItem | null>) => {
@@ -2079,11 +2193,15 @@ const computeSellValue = (level: number, rarity: EquipmentRarity) => {
   return Math.round((rarity.sellValue * levelMultiplier + levelBonus) * 0.6)
 }
 
-const getLootSellPrice = (baseSellValue: number) =>
-  Math.max(1, Math.round(Math.max(0, baseSellValue) * LOOT_SELL_PRICE_MULTIPLIER))
+const getLootSellPrice = (baseSellValue: number, equipment: Record<EquipmentSlot, EquipmentItem | null>) =>
+  Math.max(1, Math.round(Math.max(0, baseSellValue) * LOOT_SELL_PRICE_MULTIPLIER * getLootSellMultiplier(equipment)))
 
-const rollRarity = (level: number) => {
-  const adjusted = getRarityWeights(level)
+const rollRarity = (level: number, fortune = 0) => {
+  const fortuneBoost = Math.min(0.28, fortune * 0.003)
+  const adjusted = getRarityWeights(level).map((rarity) => ({
+    ...rarity,
+    weight: rarity.weight * (1 + fortuneBoost * Math.max(0, rarity.tier - 1) * 0.35),
+  }))
   const total = adjusted.reduce((sum, item) => sum + item.weight, 0)
   let roll = Math.random() * total
   for (const rarity of adjusted) {
@@ -2093,19 +2211,20 @@ const rollRarity = (level: number) => {
   return adjusted[adjusted.length - 1]
 }
 
-const createEquipmentItem = (id: number, level: number): EquipmentItem => {
+const createEquipmentItem = (
+  id: number,
+  level: number,
+  equipment: Record<EquipmentSlot, EquipmentItem | null>,
+): EquipmentItem => {
   const slot = EQUIPMENT_SLOTS[randomInt(0, EQUIPMENT_SLOTS.length - 1)].id
-  const rarity = rollRarity(level)
-  const baseTemplate = EQUIPMENT_BONUS_TEMPLATES[slot]
-  let bonuses = emptyStats()
-  const levelScale = 1 + level * 0.015
-  for (const key of Object.keys(baseTemplate) as (keyof EquipmentStats)[]) {
-    const baseValue = baseTemplate[key] ?? 0
-    const variance = key === 'attackSpeed' ? 0.02 : key === 'speed' ? 2 : 4
-    const value = baseValue + randomBetween(-variance, variance)
-    const scaled = Math.max(0, value * rarity.power * levelScale)
-    bonuses = addStats(bonuses, { [key]: Number(key === 'attackSpeed' ? scaled.toFixed(2) : Math.round(scaled)) } as Partial<EquipmentStats>)
-  }
+  const fortune = getEquipmentProfile(equipment).stats.fortune
+  const rarity = rollRarity(level, fortune)
+  const bonuses = buildEquipmentStats(slot, rarity, level, {
+    power: Math.random(),
+    fortune: Math.random(),
+    prosperity: Math.random(),
+  })
+  const effect = buildEquipmentEffect(slot, rarity, level, Math.random())
 
   const prefix = EQUIPMENT_PREFIXES[randomInt(0, EQUIPMENT_PREFIXES.length - 1)]
   const baseName = EQUIPMENT_BASE_NAMES[slot][randomInt(0, EQUIPMENT_BASE_NAMES[slot].length - 1)]
@@ -2120,18 +2239,19 @@ const createEquipmentItem = (id: number, level: number): EquipmentItem => {
     rarity: rarity.name,
     color: rarity.color,
     bonuses,
+    effect,
     tierScore,
     sellValue: computeSellValue(level, rarity),
   }
 }
 
 const recomputePlayerStats = (state: GameState) => {
-  const bonuses = getEquipmentBonuses(state.equipment)
+  const profile = getEquipmentProfile(state.equipment)
   const player = state.player
-  player.attack = Math.max(1, Math.round(player.baseAttack + bonuses.attack))
-  player.attackSpeed = Math.max(0.2, Number((player.baseAttackSpeed + bonuses.attackSpeed).toFixed(2)))
-  player.speed = Math.max(10, Math.round(player.baseSpeed + bonuses.speed))
-  player.range = Math.max(10, Math.round(player.baseRange + bonuses.range))
+  player.attack = Math.max(1, Math.round(player.baseAttack + profile.stats.power))
+  player.attackSpeed = Math.max(0.2, Number(player.baseAttackSpeed.toFixed(2)))
+  player.speed = Math.max(10, Math.round(player.baseSpeed))
+  player.range = Math.max(10, Math.round(player.baseRange))
 }
 
 const drawSprite = (
@@ -2422,9 +2542,9 @@ const drawWorldBase = (
   }
 }
 
-const createMonster = (id: number, tierScore = 0): Monster => {
+const createMonster = (id: number, player: PlayerState): Monster => {
   const template = MONSTER_TYPES[randomInt(0, MONSTER_TYPES.length - 1)]
-  const hpMultiplier = getMonsterHpMultiplier(tierScore)
+  const hpMultiplier = getMonsterHpMultiplier(player)
   const maxHp = Math.max(1, Math.round(template.maxHp * MONSTER_HP_BASE_MULTIPLIER * hpMultiplier))
   const x = randomBetween(MAP.tile, WORLD.width - MAP.tile)
   const y = randomBetween(MAP.tile, WORLD.height - MAP.tile)
@@ -2445,20 +2565,22 @@ const createMonster = (id: number, tierScore = 0): Monster => {
   }
 }
 
-const buildHud = (state: GameState): HudState => ({
-  name: state.name,
-  classLabel: state.classLabel,
-  level: state.player.level,
-  energy: Math.round(state.energy),
-  energyMax: state.energyMax,
-  energyTimer: state.energyTimer,
-  xp: Math.round(state.player.xp),
-  xpNext: Math.round(state.player.xpNext),
-  attack: Math.round(state.player.attack),
-  speed: Math.round(state.player.speed),
-  attackSpeed: state.player.attackSpeed,
-  range: Math.round(state.player.range),
-  gold: Math.round(state.gold),
+const buildHud = (state: GameState): HudState => {
+  const profile = getEquipmentProfile(state.equipment)
+  return {
+    name: state.name,
+    classLabel: state.classLabel,
+    level: state.player.level,
+    energy: Math.round(state.energy),
+    energyMax: state.energyMax,
+    energyTimer: state.energyTimer,
+    xp: Math.round(state.player.xp),
+    xpNext: Math.round(state.player.xpNext),
+    attack: Math.round(state.player.attack),
+    power: profile.stats.power,
+    fortune: profile.stats.fortune,
+    prosperity: profile.stats.prosperity,
+    gold: Math.round(state.gold),
   crystals: Math.round(state.crystals),
   tickets: Math.round(state.tickets),
   tierScore: getTierScore(state.equipment),
@@ -2470,10 +2592,6 @@ const buildHud = (state: GameState): HudState => ({
   loot: state.lootLog,
   events: state.eventLog,
   autoBattle: state.autoBattle,
-  speedBuffTime: state.speedBuffTime,
-  speedBuffMultiplier: state.speedBuffMultiplier,
-  attackSpeedBuffTime: state.attackSpeedBuffTime,
-  attackSpeedBuffMultiplier: state.attackSpeedBuffMultiplier,
   monsterKills: state.monsterKills,
   dungeonRuns: state.dungeonRuns,
   worldBoss: state.worldBoss,
@@ -2482,9 +2600,12 @@ const buildHud = (state: GameState): HudState => ({
   premiumEndsAt: state.premiumEndsAt,
   premiumClaimDay: state.premiumClaimDay,
   worldBossTickets: state.worldBossTickets,
+  bossMarkCycleStart: state.bossMarkCycleStart,
+  crystalFlaskRuns: state.crystalFlaskRuns,
   village: state.village,
   stake: state.stake,
-})
+  }
+}
 
 const initGameState = (chosenClass: CharacterClass, name: string): GameState => {
   const player: PlayerState = {
@@ -2508,7 +2629,7 @@ const initGameState = (chosenClass: CharacterClass, name: string): GameState => 
     spriteKey: chosenClass.spriteKey,
   }
 
-  const monsters = Array.from({ length: MAX_MONSTERS }, (_, index) => createMonster(index + 1))
+  const monsters = Array.from({ length: MAX_MONSTERS }, (_, index) => createMonster(index + 1, player))
 
   return {
     player,
@@ -2549,18 +2670,16 @@ const initGameState = (chosenClass: CharacterClass, name: string): GameState => 
     autoBattle: false,
     battleQueue: 0,
     battleTargetId: null,
-    speedBuffTime: 0,
-    speedBuffMultiplier: 1.5,
-    attackSpeedBuffTime: 0,
-    attackSpeedBuffMultiplier: 1.5,
     monsterKills: 0,
     dungeonRuns: 0,
-    monsterHpScale: getMonsterHpMultiplier(0),
+    monsterHpScale: getMonsterHpMultiplier(player),
     worldBoss: createWorldBossState(name),
     starterPackPurchased: false,
     premiumEndsAt: 0,
     premiumClaimDay: '',
     worldBossTickets: 0,
+    bossMarkCycleStart: '',
+    crystalFlaskRuns: 0,
     village: createVillageState(),
     stake: [],
     stakeId: 0,
@@ -2633,8 +2752,7 @@ const updateGame = (state: GameState, dt: number) => {
     pushLog(state.eventLog, `${VILLAGE_BUILDING_META[buildingId].label} upgrade completed.`)
   }
 
-  const tierScore = getTierScore(state.equipment)
-  const newHpScale = getMonsterHpMultiplier(tierScore)
+  const newHpScale = getMonsterHpMultiplier(player)
   if (Math.abs(newHpScale - state.monsterHpScale) > 0.01) {
     for (const monster of state.monsters) {
       const baseHp = MONSTER_BASE_HP[monster.spriteKey] ?? monster.maxHp / Math.max(0.1, state.monsterHpScale)
@@ -2667,17 +2785,8 @@ const updateGame = (state: GameState, dt: number) => {
   applyEnergyRegen(state, dt)
 
   recomputePlayerStats(state)
-  if (state.speedBuffTime > 0) {
-    player.speed = Math.max(10, Math.round(player.speed * state.speedBuffMultiplier))
-  }
-  if (state.attackSpeedBuffTime > 0) {
-    player.attackSpeed = Math.max(0.2, Number((player.attackSpeed * state.attackSpeedBuffMultiplier).toFixed(2)))
-  }
-
   player.cooldown = Math.max(0, player.cooldown - dt)
   player.hitFlash = Math.max(0, player.hitFlash - dt)
-  state.speedBuffTime = Math.max(0, state.speedBuffTime - dt)
-  state.attackSpeedBuffTime = Math.max(0, state.attackSpeedBuffTime - dt)
 
   for (const effect of state.effects) {
     effect.t += dt
@@ -2789,8 +2898,8 @@ const updateGame = (state: GameState, dt: number) => {
         if (state.energy === 0) {
           pushLog(state.eventLog, 'Energy depleted. Rest to recharge.')
         }
-        if (Math.random() <= ITEM_DROP_CHANCE) {
-          const newItem = createEquipmentItem(++state.itemId, player.level)
+        if (Math.random() <= getLootDropChance(state.equipment)) {
+          const newItem = createEquipmentItem(++state.itemId, player.level, state.equipment)
           state.pendingLoot = newItem
           const loot: LootEntry = {
             id: ++state.lootId,
@@ -2831,9 +2940,8 @@ const updateGame = (state: GameState, dt: number) => {
           pushLog(state.eventLog, 'Max level reached.')
         }
 
-        const tierScore = getTierScore(state.equipment)
         state.monsters = state.monsters.filter((monster) => monster.id !== target.id)
-        state.monsters.push(createMonster(++state.monsterId, tierScore))
+        state.monsters.push(createMonster(++state.monsterId, player))
         state.battleTargetId = null
       }
     }
@@ -5333,6 +5441,16 @@ function App() {
     state.consumableId = normalized.reduce((max, item) => Math.max(max, item.id), 0)
   }
 
+  const applyConsumableEffectsFromServer = (state: GameState, result: GameSecureResponse) => {
+    if (typeof result.bossMarkCycleStart === 'string') {
+      state.bossMarkCycleStart = result.bossMarkCycleStart
+    }
+    if (typeof result.crystalFlaskRuns === 'number') {
+      state.crystalFlaskRuns = Math.max(0, Math.floor(Number(result.crystalFlaskRuns)))
+    }
+  }
+
+
   const parseServerStakeEntries = (rows: unknown): StakeEntry[] => {
     if (!Array.isArray(rows)) return []
     return rows
@@ -5485,34 +5603,66 @@ function App() {
     void saveGameState()
   }
 
-  const buySpeedPotion = (cost: number) => {
+  const buyBossMark = async () => {
     const state = gameStateRef.current
     if (!state) return
-    if (state.gold < cost) {
-      pushLog(state.eventLog, 'Not enough gold.')
+    if (!accountIdentity) {
+      pushLog(state.eventLog, 'Sign in to buy Boss Marks.')
       syncHud()
       return
     }
-    state.gold -= cost
-    addConsumable(state, 'speed')
-    pushLog(state.eventLog, 'Swift Draught added to consumables.')
-    syncHud()
-    void saveGameState()
+    if (state.gold < SHOP_BOSS_MARK_COST) {
+      pushLog(state.eventLog, `Not enough gold. Need ${SHOP_BOSS_MARK_COST}.`)
+      syncHud()
+      return
+    }
+    try {
+      const result = await callGameSecureAuthed('shop_buy_consumable', { type: 'boss-mark' }, true)
+      if (!result.ok) {
+        pushLog(state.eventLog, result.error || 'Failed to buy Boss Mark.')
+        syncHud()
+        return
+      }
+      state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
+      applyServerConsumables(state, result.consumables)
+      applyConsumableEffectsFromServer(state, result)
+      pushLog(state.eventLog, 'Boss Mark added to consumables.')
+      syncHud()
+      void saveGameState()
+    } catch (error) {
+      console.warn('Boss Mark purchase failed', error)
+    }
   }
 
-  const buyAttackSpeedPotion = (cost: number) => {
+  const buyCrystalFlask = async () => {
     const state = gameStateRef.current
     if (!state) return
-    if (state.gold < cost) {
-      pushLog(state.eventLog, 'Not enough gold.')
+    if (!accountIdentity) {
+      pushLog(state.eventLog, 'Sign in to buy Crystal Flasks.')
       syncHud()
       return
     }
-    state.gold -= cost
-    addConsumable(state, 'attack')
-    pushLog(state.eventLog, 'Battle Tonic added to consumables.')
-    syncHud()
-    void saveGameState()
+    if (state.gold < SHOP_CRYSTAL_FLASK_COST) {
+      pushLog(state.eventLog, `Not enough gold. Need ${SHOP_CRYSTAL_FLASK_COST}.`)
+      syncHud()
+      return
+    }
+    try {
+      const result = await callGameSecureAuthed('shop_buy_consumable', { type: 'crystal-flask' }, true)
+      if (!result.ok) {
+        pushLog(state.eventLog, result.error || 'Failed to buy Crystal Flask.')
+        syncHud()
+        return
+      }
+      state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
+      applyServerConsumables(state, result.consumables)
+      applyConsumableEffectsFromServer(state, result)
+      pushLog(state.eventLog, 'Crystal Flask added to consumables.')
+      syncHud()
+      void saveGameState()
+    } catch (error) {
+      console.warn('Crystal Flask purchase failed', error)
+    }
   }
 
   const buyDungeonTicket = async () => {
@@ -5702,14 +5852,34 @@ function App() {
           state.energy = state.energyMax
           message = 'Energy fully restored.'
           break
-        case 'speed':
-          state.speedBuffTime = Math.max(state.speedBuffTime, 300)
-          message = 'Speed increased for 300s.'
+        case 'boss-mark':
+        {
+          const result = await callGameSecureAuthed('use_boss_mark', { consumableId: item.id }, true)
+          if (!result.ok) {
+            applied = false
+            message = result.error || 'Failed to use Boss Mark.'
+            break
+          }
+          applyServerConsumables(state, result.consumables)
+          applyConsumableEffectsFromServer(state, result)
+          message = 'Boss Mark activated for the current World Boss cycle.'
+          applied = false
           break
-        case 'attack':
-          state.attackSpeedBuffTime = Math.max(state.attackSpeedBuffTime, 300)
-          message = 'Attack speed increased for 300s.'
+        }
+        case 'crystal-flask':
+        {
+          const result = await callGameSecureAuthed('use_crystal_flask', { consumableId: item.id }, true)
+          if (!result.ok) {
+            applied = false
+            message = result.error || 'Failed to use Crystal Flask.'
+            break
+          }
+          applyServerConsumables(state, result.consumables)
+          applyConsumableEffectsFromServer(state, result)
+          message = `Crystal Flask activated for ${Math.max(0, Math.floor(Number(result.crystalFlaskRuns ?? state.crystalFlaskRuns)))} dungeon runs.`
+          applied = false
           break
+        }
         case 'key':
         {
           const result = await callDungeonSecureAuthed('use_key', { consumableId: item.id })
@@ -5799,7 +5969,7 @@ function App() {
   const sellItem = (item: EquipmentItem, source: 'loot' | 'inventory') => {
     const state = gameStateRef.current
     if (!state) return
-    const sellValue = getLootSellPrice(item.sellValue)
+    const sellValue = getLootSellPrice(item.sellValue, state.equipment)
     state.gold += sellValue
     if (source === 'loot') {
       state.pendingLoot = null
@@ -5850,6 +6020,9 @@ function App() {
         state.dungeonRuns = Math.max(0, Math.floor(result.dungeonRuns))
       } else {
         state.dungeonRuns += 1
+      }
+      if (typeof result.crystalFlaskRuns === 'number') {
+        state.crystalFlaskRuns = Math.max(0, Math.floor(result.crystalFlaskRuns))
       }
       pushLog(state.eventLog, `${dungeon.name} cleared. +${reward} crystals.`)
       syncHud()
@@ -6499,11 +6672,11 @@ function App() {
                   </div>
                   <div className="player-stats">
                     <div>ATK {hud.attack}</div>
-                    <div>SPD {hud.speed}</div>
-                    <div>ATK SPD {hud.attackSpeed}</div>
-                    <div>RNG {hud.range}</div>
-                    {hud.speedBuffTime > 0 && <div>Speed Buff {Math.ceil(hud.speedBuffTime)}s</div>}
-                    {hud.attackSpeedBuffTime > 0 && <div>ATK SPD Buff {Math.ceil(hud.attackSpeedBuffTime)}s</div>}
+                    <div>Power {hud.power}</div>
+                    <div>Fortune {hud.fortune}</div>
+                    <div>Prosperity {hud.prosperity}</div>
+                    {hud.bossMarkCycleStart === hud.worldBoss.cycleStart && <div>Boss Mark active</div>}
+                    {hud.crystalFlaskRuns > 0 && <div>Crystal Flask {hud.crystalFlaskRuns} run(s)</div>}
                   </div>
                   <div className="menu-stack">
                     <button type="button" className="menu-big" onClick={() => setActivePanel('inventory')}>
@@ -6591,13 +6764,13 @@ function App() {
                 </div>
                 <canvas ref={canvasRef} className="game-canvas" />
                 <div className="buff-stack">
-                  <div className={`buff-chip ${hud?.speedBuffTime ? 'active' : ''}`}>
-                    <img className="icon-img" src={iconSwiftDraught} alt="Speed buff" />
-                    <span>{hud?.speedBuffTime ? `${Math.ceil(hud.speedBuffTime)}s` : '--'}</span>
+                  <div className={`buff-chip ${hud?.bossMarkCycleStart === hud?.worldBoss.cycleStart ? 'active' : ''}`}>
+                    <img className="icon-img" src={iconWorldBoss} alt="Boss Mark" />
+                    <span>{hud?.bossMarkCycleStart === hud?.worldBoss.cycleStart ? '+25%' : '--'}</span>
                   </div>
-                  <div className={`buff-chip ${hud?.attackSpeedBuffTime ? 'active' : ''}`}>
-                    <img className="icon-img" src={iconAttackSpeed} alt="Attack speed buff" />
-                    <span>{hud?.attackSpeedBuffTime ? `${Math.ceil(hud.attackSpeedBuffTime)}s` : '--'}</span>
+                  <div className={`buff-chip ${hud?.crystalFlaskRuns ? 'active' : ''}`}>
+                    <img className="icon-img" src={iconCrystals} alt="Crystal Flask" />
+                    <span>{hud?.crystalFlaskRuns ? `${hud.crystalFlaskRuns}x` : '--'}</span>
                   </div>
                 </div>
               </div>
@@ -6709,23 +6882,15 @@ function App() {
               </div>
               <div className="loot-slot">Level {hud.pendingLoot.level}</div>
               <div className="loot-stats">
-                {hud.pendingLoot.bonuses.attack !== 0 && <div>+{hud.pendingLoot.bonuses.attack} ATK</div>}
-                {hud.pendingLoot.bonuses.speed !== 0 && <div>+{hud.pendingLoot.bonuses.speed} SPD</div>}
-                {hud.pendingLoot.bonuses.attackSpeed !== 0 && (
-                  <div>+{hud.pendingLoot.bonuses.attackSpeed} ATK SPD</div>
-                )}
-                {hud.pendingLoot.bonuses.range !== 0 && <div>+{hud.pendingLoot.bonuses.range} RNG</div>}
+                {getEquipmentStatRows(hud.pendingLoot).map((row) => (
+                  <div key={row}>{row}</div>
+                ))}
               </div>
               {(() => {
                 const current = hud.equipment[hud.pendingLoot!.slot]
                 if (!current) return <div className="loot-compare">No item equipped in this slot.</div>
                 const deltaScore = getDisplayItemTierScore(hud.pendingLoot!.tierScore) - getDisplayItemTierScore(current.tierScore)
-                const compareRows = [
-                  ['ATK', hud.pendingLoot!.bonuses.attack - current.bonuses.attack],
-                  ['SPD', hud.pendingLoot!.bonuses.speed - current.bonuses.speed],
-                  ['ATK SPD', Number((hud.pendingLoot!.bonuses.attackSpeed - current.bonuses.attackSpeed).toFixed(2))],
-                  ['RNG', hud.pendingLoot!.bonuses.range - current.bonuses.range],
-                ]
+                const compareRows = getEquipmentCompareRows(hud.pendingLoot!, current)
                 return (
                   <div className="loot-compare">
                     <div className="loot-compare-title">Compared to equipped</div>
@@ -6736,12 +6901,11 @@ function App() {
                         {deltaScore}
                       </span>
                     </div>
-                    {compareRows.map(([label, value]) => (
+                    {compareRows.map(([label, value, numeric]) => (
                       <div key={label} className="loot-compare-row">
                         <span>{label}</span>
-                        <span className={Number(value) >= 0 ? 'delta up' : 'delta down'}>
-                          {Number(value) >= 0 ? '+' : ''}
-                          {value}
+                        <span className={!numeric ? '' : Number(value) >= 0 ? 'delta up' : 'delta down'}>
+                          {!numeric ? value : `${Number(value) >= 0 ? '+' : ''}${value}`}
                         </span>
                       </div>
                     ))}
@@ -6755,7 +6919,7 @@ function App() {
               </button>
               <button type="button" className="ghost" onClick={() => sellItem(hud.pendingLoot!, 'loot')}>
                 <img className="icon-img small" src={iconGold} alt="" />
-                Sell for {getLootSellPrice(hud.pendingLoot.sellValue)}
+                Sell for {getLootSellPrice(hud.pendingLoot.sellValue, hud.equipment)}
               </button>
             </div>
           </div>
@@ -6825,6 +6989,7 @@ function App() {
                               </div>
                               <div className="slot-score">Lv. {item.level}</div>
                               <div className="slot-score">Score {getDisplayItemTierScore(item.tierScore)}</div>
+                              <div className="slot-score">{getEquipmentStatRows(item).join(' · ')}</div>
                             </>
                           ) : (
                             <div className="slot-empty">Empty</div>
@@ -6855,6 +7020,7 @@ function App() {
                               <div className="inventory-slot">
                                 Lv. {item.level} - {EQUIPMENT_SLOTS.find((slot) => slot.id === item.slot)?.label ?? item.slot} - Score {getDisplayItemTierScore(item.tierScore)}
                               </div>
+                              <div className="inventory-slot">{getEquipmentStatRows(item).join(' · ')}</div>
                             </div>
                             <div className="inventory-actions">
                               <button type="button" onClick={() => equipItem(item, 'inventory')}>
@@ -6862,7 +7028,7 @@ function App() {
                               </button>
                               <button type="button" className="ghost" onClick={() => sellItem(item, 'inventory')}>
                                 <img className="icon-img small" src={iconGold} alt="" />
-                                Sell {getLootSellPrice(item.sellValue)}
+                                Sell {getLootSellPrice(item.sellValue, hud.equipment)}
                               </button>
                             </div>
                           </div>
@@ -6992,26 +7158,26 @@ function App() {
                 </button>
               </div>
               <div className="shop-card">
-                <div className="shop-title">Swift Draught</div>
-                <div className="shop-desc">+50% speed for 5 minutes.</div>
+                <div className="shop-title">Boss Mark</div>
+                <div className="shop-desc">+25% World Boss damage for the current cycle.</div>
                 <div className="shop-meta">
                   <img className="icon-img small" src={iconGold} alt="" />
-                  Cost: 1000
+                  Cost: {SHOP_BOSS_MARK_COST}
                 </div>
-                <img className="shop-icon" src={iconSwiftDraught} alt="Swift draught" />
-                <button type="button" onClick={() => buySpeedPotion(1000)}>
+                <img className="shop-icon" src={iconWorldBoss} alt="Boss Mark" />
+                <button type="button" onClick={buyBossMark}>
                   Buy
                 </button>
               </div>
               <div className="shop-card">
-                <div className="shop-title">Battle Tonic</div>
-                <div className="shop-desc">+50% attack speed for 5 minutes.</div>
+                <div className="shop-title">Crystal Flask</div>
+                <div className="shop-desc">+25% dungeon crystals for the next 3 runs.</div>
                 <div className="shop-meta">
                   <img className="icon-img small" src={iconGold} alt="" />
-                  Cost: 1000
+                  Cost: {SHOP_CRYSTAL_FLASK_COST}
                 </div>
-                <img className="shop-icon" src={iconAttackSpeed} alt="Attack speed tonic" />
-                <button type="button" onClick={() => buyAttackSpeedPotion(1000)}>
+                <img className="shop-icon" src={iconCrystals} alt="Crystal Flask" />
+                <button type="button" onClick={buyCrystalFlask}>
                   Buy
                 </button>
               </div>
@@ -7138,12 +7304,12 @@ function App() {
                   <span>5 Grand Energy Elixir</span>
                 </div>
                 <div className="starterpack-item">
-                  <img className="icon-img" src={iconSwiftDraught} alt="" />
-                  <span>10 Swift Draught</span>
+                  <img className="icon-img" src={iconWorldBoss} alt="" />
+                  <span>3 Boss Marks</span>
                 </div>
                 <div className="starterpack-item">
-                  <img className="icon-img" src={iconAttackSpeed} alt="" />
-                  <span>10 Battle Tonic</span>
+                  <img className="icon-img" src={iconCrystals} alt="" />
+                  <span>5 Crystal Flasks</span>
                 </div>
                 <div className="starterpack-item">
                   <img className="icon-img" src={iconKey} alt="" />

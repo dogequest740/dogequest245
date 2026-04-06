@@ -340,6 +340,7 @@ const creditDungeonRewardToProfile = async (
   reward: number,
   dungeonRuns: number,
   now: Date,
+  consumeCrystalFlask: boolean,
 ) => {
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const { data: profileRow, error: profileError } = await supabase
@@ -358,6 +359,8 @@ const creditDungeonRewardToProfile = async (
     nextState.crystals = currentCrystals + reward;
     nextState.crystalsEarned = currentCrystalsEarned + reward;
     nextState.dungeonRuns = Math.max(currentDungeonRuns, Math.max(0, asInt(dungeonRuns, 0)));
+    const currentCrystalFlaskRuns = Math.max(0, asInt(nextState.crystalFlaskRuns, 0));
+    nextState.crystalFlaskRuns = consumeCrystalFlask ? Math.max(0, currentCrystalFlaskRuns - 1) : currentCrystalFlaskRuns;
 
     const expectedUpdatedAt = String(profileRow.updated_at ?? "");
     const updatedAt = now.toISOString();
@@ -806,9 +809,11 @@ serve(async (req) => {
       : null;
     const premiumEndsAt = Math.max(0, asInt(profileStateForPremium?.premiumEndsAt, 0));
     const premiumActive = premiumEndsAt > now.getTime();
-    const reward = premiumActive
-      ? Math.max(0, Math.round(baseReward * PREMIUM_DUNGEON_CRYSTAL_MULTIPLIER))
-      : baseReward;
+    const crystalFlaskRuns = Math.max(0, asInt(profileStateForPremium?.crystalFlaskRuns, 0));
+    const crystalFlaskActive = crystalFlaskRuns > 0;
+    let reward = baseReward;
+    if (premiumActive) reward = Math.max(0, Math.round(reward * PREMIUM_DUNGEON_CRYSTAL_MULTIPLIER));
+    if (crystalFlaskActive) reward = Math.max(0, Math.round(reward * 1.25));
 
     const creditResult = await creditDungeonRewardToProfile(
       supabase,
@@ -816,6 +821,7 @@ serve(async (req) => {
       reward,
       ticketSpend.state.dungeon_runs,
       now,
+      crystalFlaskActive,
     );
     if (!creditResult.ok || !creditResult.state) {
       const rolledBack = await rollbackDungeonTicketSpend(supabase, auth.wallet, ticketSpend.state, now);
@@ -824,6 +830,7 @@ serve(async (req) => {
         dungeonIndex: dungeonIndex + 1,
         reward,
         premiumActive,
+        crystalFlaskActive,
         rollbackApplied: rolledBack,
         reason: creditResult.error || "credit_failed",
       });
@@ -835,6 +842,7 @@ serve(async (req) => {
       dungeonIndex: dungeonIndex + 1,
       reward,
       premiumActive,
+      crystalFlaskActive,
       tickets: ticketSpend.state.tickets,
       dungeonRuns: ticketSpend.state.dungeon_runs,
     });
@@ -847,6 +855,7 @@ serve(async (req) => {
       dungeonRuns: ticketSpend.state.dungeon_runs,
       crystals: Math.max(0, asInt(creditResult.state.crystals, 0)),
       crystalsEarned: Math.max(0, asInt(creditResult.state.crystalsEarned, 0)),
+      crystalFlaskRuns: Math.max(0, asInt(creditResult.state.crystalFlaskRuns, 0)),
       savedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
     });
   }

@@ -11,7 +11,7 @@ const DUNGEON_DAILY_TICKETS = 5;
 const WORLD_BOSS_DURATION_SECONDS = 12 * 60 * 60;
 const WORLD_BOSS_PRIZE_POOL = 500;
 const WORLD_BOSS_DAMAGE_PER_SEC_CAP = 5000;
-const WORLD_BOSS_TICKET_COST_GOLD = 7000;
+const WORLD_BOSS_TICKET_COST_GOLD = 18000;
 const WORLD_BOSS_PREMIUM_DAILY_TICKETS = 2;
 const WORLD_BOSS_STARTER_TICKETS = 5;
 const SHOP_DUNGEON_KEY_COST_GOLD = 50000;
@@ -37,8 +37,8 @@ const STARTER_PACK_PRICE_LAMPORTS = Math.round(0.35 * SOL_LAMPORTS);
 const STARTER_PACK_ITEMS: Array<{ type: ConsumableType; qty: number }> = [
   { type: "energy-small", qty: 20 },
   { type: "energy-full", qty: 5 },
-  { type: "speed", qty: 10 },
-  { type: "attack", qty: 10 },
+  { type: "boss-mark", qty: 3 },
+  { type: "crystal-flask", qty: 5 },
   { type: "key", qty: 20 },
 ];
 const PREMIUM_PAYMENT_WALLET = "6tsXjdYxaqKBf83wHM5ps5rMGvZ6wq4Fc7N1QtSQGPrg";
@@ -175,10 +175,12 @@ type StakeEntryState = {
   endsAt: number;
 };
 
-type ConsumableType = "energy-small" | "energy-full" | "speed" | "attack" | "key";
+type ConsumableType = "energy-small" | "energy-full" | "boss-mark" | "crystal-flask" | "key";
 type EquipmentSlot = "weapon" | "armor" | "head" | "legs" | "boots" | "artifact";
-type EquipmentStatKey = "attack" | "speed" | "attackSpeed" | "range";
+type EquipmentStatKey = "power" | "fortune" | "prosperity";
 type EquipmentStats = Record<EquipmentStatKey, number>;
+type EquipmentEffectKind = "boss-damage" | "village-gold" | "sell-boost";
+type EquipmentEffectState = { kind: EquipmentEffectKind; value: number };
 type ConsumableRow = {
   id: number;
   type: ConsumableType;
@@ -259,8 +261,8 @@ type VillageState = {
 const CONSUMABLE_DEFS: Record<ConsumableType, { name: string; description: string }> = {
   "energy-small": { name: "Energy Tonic", description: "Restore 10 energy." },
   "energy-full": { name: "Grand Energy Elixir", description: "Restore energy to full." },
-  speed: { name: "Swift Draught", description: "+50% speed for 5 minutes." },
-  attack: { name: "Battle Tonic", description: "+50% attack speed for 5 minutes." },
+  "boss-mark": { name: "Boss Mark", description: "+25% World Boss damage for the current cycle." },
+  "crystal-flask": { name: "Crystal Flask", description: "+25% dungeon crystals for the next 3 runs." },
   key: { name: "Dungeon Key", description: "+1 dungeon entry." },
 };
 
@@ -291,13 +293,23 @@ const EQUIPMENT_BASE_NAMES: Record<EquipmentSlot, readonly string[]> = {
   boots: ["Boots", "Sabatons", "Treads", "Sandals", "Shoes"],
   artifact: ["Charm", "Relic", "Sigil", "Gem", "Talisman"],
 };
-const EQUIPMENT_BONUS_TEMPLATES: Record<EquipmentSlot, Partial<Record<EquipmentStatKey, number>>> = {
-  weapon: { attack: 4, attackSpeed: 0.05 },
-  armor: { attack: 1 },
-  head: { attack: 2 },
-  legs: { speed: 3 },
-  boots: { speed: 6 },
-  artifact: { attackSpeed: 0.06, range: 2 },
+const EQUIPMENT_STAT_TEMPLATES: Record<EquipmentSlot, EquipmentStats> = {
+  weapon: { power: 10, fortune: 0, prosperity: 0 },
+  armor: { power: 5, fortune: 0, prosperity: 4 },
+  head: { power: 4, fortune: 5, prosperity: 0 },
+  legs: { power: 2, fortune: 1, prosperity: 6 },
+  boots: { power: 1, fortune: 5, prosperity: 3 },
+  artifact: { power: 4, fortune: 4, prosperity: 4 },
+};
+const EQUIPMENT_EFFECT_CAPS = {
+  "boss-damage": 0.1,
+  "village-gold": 0.08,
+  "sell-boost": 0.12,
+} as const;
+const SLOT_EFFECT_POOLS: Partial<Record<EquipmentSlot, EquipmentEffectKind[]>> = {
+  weapon: ["boss-damage"],
+  armor: ["village-gold"],
+  artifact: ["boss-damage", "village-gold", "sell-boost"],
 };
 
 type SecurityEventRow = {
@@ -334,9 +346,7 @@ type FortuneRewardDef = {
 };
 
 const FORTUNE_REWARDS: FortuneRewardDef[] = [
-  { id: "speed_draught", label: "Swift Draught", kind: "consumable", consumableType: "speed", amount: 1, chance: 24.915 },
-  { id: "battle_tonic", label: "Battle Tonic", kind: "consumable", consumableType: "attack", amount: 1, chance: 24.915 },
-  { id: "energy_tonic", label: "Energy Tonic", kind: "consumable", consumableType: "energy-small", amount: 1, chance: 25 },
+  { id: "energy_tonic", label: "Energy Tonic", kind: "consumable", consumableType: "energy-small", amount: 1, chance: 31 },
   { id: "grand_energy_elixir", label: "Grand Energy Elixir", kind: "consumable", consumableType: "energy-full", amount: 1, chance: 10 },
   { id: "crystals_100", label: "100 Crystals", kind: "crystals", amount: 100, chance: 2 },
   { id: "crystals_50", label: "50 Crystals", kind: "crystals", amount: 50, chance: 3 },
@@ -649,7 +659,8 @@ const normalizeConsumables = (raw: unknown) => {
     if (!entry || typeof entry !== "object") continue;
     const row = entry as Record<string, unknown>;
     const id = Math.max(1, asInt(row.id, 0));
-    const typeRaw = String(row.type ?? "");
+    const rawType = String(row.type ?? "");
+    const typeRaw = rawType === "speed" ? "boss-mark" : rawType === "attack" ? "crystal-flask" : rawType;
     if (!id || seenIds.has(id) || !isConsumableType(typeRaw)) continue;
     const def = CONSUMABLE_DEFS[typeRaw];
     seenIds.add(id);
@@ -671,7 +682,7 @@ const getXpForLevel = (levelRaw: number) => {
   return Math.round((XP_BASE + XP_SCALE * Math.pow(level, XP_POWER)) * XP_LEVEL_REQUIREMENT_MULTIPLIER);
 };
 
-const emptyEquipmentStats = (): EquipmentStats => ({ attack: 0, speed: 0, attackSpeed: 0, range: 0 });
+const emptyEquipmentStats = (): EquipmentStats => ({ power: 0, fortune: 0, prosperity: 0 });
 
 const getCharacterClassStats = (classIdRaw: unknown) => {
   const classId = String(classIdRaw ?? "").trim() as keyof typeof CHARACTER_CLASS_STATS;
@@ -693,6 +704,77 @@ const computeSellValue = (level: number, rarity: (typeof EQUIPMENT_RARITIES)[num
   return Math.round((rarity.sellValue * levelMultiplier + levelBonus) * 0.6);
 };
 
+const getEquipmentStatScale = (level: number) => 1 + Math.max(0, level - 1) * 0.035;
+const getEquipmentVarianceMultiplier = (roll: number) => 0.92 + Math.min(1, Math.max(0, roll)) * 0.16;
+
+const buildEquipmentStats = (
+  slot: EquipmentSlot,
+  rarity: (typeof EQUIPMENT_RARITIES)[number],
+  level: number,
+  rolls: Partial<Record<EquipmentStatKey, number>> = {},
+): EquipmentStats => {
+  const template = EQUIPMENT_STAT_TEMPLATES[slot];
+  const levelScale = getEquipmentStatScale(level);
+  return {
+    power: Math.round(template.power * rarity.power * levelScale * getEquipmentVarianceMultiplier(rolls.power ?? 0.5)),
+    fortune: Math.round(template.fortune * rarity.power * levelScale * getEquipmentVarianceMultiplier(rolls.fortune ?? 0.5)),
+    prosperity: Math.round(template.prosperity * rarity.power * levelScale * getEquipmentVarianceMultiplier(rolls.prosperity ?? 0.5)),
+  };
+};
+
+const getAllowedEffectKinds = (slot: EquipmentSlot, rarityTier: number) => {
+  if (rarityTier < 3) return [] as EquipmentEffectKind[];
+  return SLOT_EFFECT_POOLS[slot] ?? [];
+};
+
+const getEffectBaseValue = (kind: EquipmentEffectKind, rarityTier: number, level: number) => {
+  if (kind === "boss-damage") {
+    return Math.min(EQUIPMENT_EFFECT_CAPS[kind], 0.018 + Math.max(0, rarityTier - 3) * 0.012 + level * 0.0001);
+  }
+  if (kind === "village-gold") {
+    return Math.min(EQUIPMENT_EFFECT_CAPS[kind], 0.015 + Math.max(0, rarityTier - 3) * 0.01 + level * 0.00008);
+  }
+  return Math.min(EQUIPMENT_EFFECT_CAPS[kind], 0.025 + Math.max(0, rarityTier - 3) * 0.016 + level * 0.00012);
+};
+
+const buildEquipmentEffect = (
+  slot: EquipmentSlot,
+  rarity: (typeof EQUIPMENT_RARITIES)[number],
+  level: number,
+  roll = 0.5,
+  forcedKind?: EquipmentEffectKind,
+): EquipmentEffectState | null => {
+  const allowedKinds = getAllowedEffectKinds(slot, rarity.tier);
+  if (!allowedKinds.length) return null;
+  const kind = forcedKind && allowedKinds.includes(forcedKind)
+    ? forcedKind
+    : allowedKinds[Math.floor(Math.min(0.999, Math.max(0, roll)) * allowedKinds.length)];
+  const base = getEffectBaseValue(kind, rarity.tier, level);
+  const varied = Math.max(0, Math.min(EQUIPMENT_EFFECT_CAPS[kind], base * (0.92 + Math.min(1, Math.max(0, roll)) * 0.16)));
+  return { kind, value: Number(varied.toFixed(3)) };
+};
+
+const normalizeEquipmentEffect = (
+  slot: EquipmentSlot,
+  rarity: (typeof EQUIPMENT_RARITIES)[number],
+  level: number,
+  raw: unknown,
+) => {
+  if (raw == null) return null;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const source = raw as Record<string, unknown>;
+  const kind = String(source.kind ?? "") as EquipmentEffectKind;
+  const allowedKinds = getAllowedEffectKinds(slot, rarity.tier);
+  if (!allowedKinds.includes(kind)) return null;
+  const value = Number(source.value ?? 0);
+  if (!Number.isFinite(value)) return null;
+  const min = Number((getEffectBaseValue(kind, rarity.tier, level) * 0.92).toFixed(3));
+  const max = Number((Math.min(EQUIPMENT_EFFECT_CAPS[kind], getEffectBaseValue(kind, rarity.tier, level) * 1.08)).toFixed(3));
+  const rounded = Number(value.toFixed(3));
+  if (rounded < min || rounded > max) return null;
+  return { kind, value: rounded };
+};
+
 const normalizeEquipmentBonuses = (
   slot: EquipmentSlot,
   rarity: (typeof EQUIPMENT_RARITIES)[number],
@@ -701,38 +783,20 @@ const normalizeEquipmentBonuses = (
 ) => {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const source = raw as Record<string, unknown>;
-  const template = EQUIPMENT_BONUS_TEMPLATES[slot];
-  const levelScale = 1 + level * 0.015;
-  const result = emptyEquipmentStats();
-
-  for (const key of ["attack", "speed", "attackSpeed", "range"] as EquipmentStatKey[]) {
-    const templateValue = template[key] ?? 0;
-    const providedRaw = source[key];
-    const provided = key === "attackSpeed" ? Number(providedRaw ?? 0) : asInt(providedRaw, 0);
-    if (!Number.isFinite(provided)) return null;
-
-    if (!templateValue) {
-      if (Math.abs(provided) > (key === "attackSpeed" ? 0.001 : 0)) return null;
-      result[key] = 0;
-      continue;
-    }
-
-    const variance = key === "attackSpeed" ? 0.02 : key === "speed" ? 2 : 4;
-    const minScaled = Math.max(0, (templateValue - variance) * rarity.power * levelScale);
-    const maxScaled = Math.max(0, (templateValue + variance) * rarity.power * levelScale);
-    if (key === "attackSpeed") {
-      const minRounded = Number(minScaled.toFixed(2));
-      const maxRounded = Number(maxScaled.toFixed(2));
-      const rounded = Number(provided.toFixed(2));
-      if (rounded < minRounded || rounded > maxRounded) return null;
-      result[key] = rounded;
-    } else {
-      const rounded = Math.round(provided);
-      if (rounded < Math.round(minScaled) || rounded > Math.round(maxScaled)) return null;
-      result[key] = rounded;
-    }
+  const legacyShape = ["attack", "speed", "attackSpeed", "range"].some((key) => key in source);
+  if (legacyShape && !(["power", "fortune", "prosperity"].some((key) => key in source))) {
+    return buildEquipmentStats(slot, rarity, level);
   }
-
+  const result = emptyEquipmentStats();
+  for (const key of ["power", "fortune", "prosperity"] as EquipmentStatKey[]) {
+    const provided = asInt(source[key], 0);
+    if (!Number.isFinite(provided)) return null;
+    const template = buildEquipmentStats(slot, rarity, level, { [key]: 0.5 } as Partial<Record<EquipmentStatKey, number>>)[key];
+    const min = Math.max(0, Math.floor(template * 0.92));
+    const max = Math.max(0, Math.ceil(template * 1.08));
+    if (provided < min || provided > max) return null;
+    result[key] = provided;
+  }
   return result;
 };
 
@@ -754,7 +818,7 @@ const normalizeEquipmentItem = (
 
   const rarity = EQUIPMENT_RARITIES.find((entry) => entry.name === String(item.rarity ?? ""));
   if (!rarity) return null;
-  if (String(item.color ?? "") !== rarity.color) return null;
+  if (String(item.color ?? "") != rarity.color) return null;
 
   const name = String(item.name ?? "").trim();
   const validName = EQUIPMENT_PREFIXES.some((prefix) =>
@@ -764,6 +828,12 @@ const normalizeEquipmentItem = (
 
   const bonuses = normalizeEquipmentBonuses(slot, rarity, level, item.bonuses);
   if (!bonuses) return null;
+
+  const legacyShape = item.bonuses && typeof item.bonuses === "object" && !Array.isArray(item.bonuses)
+    ? ["attack", "speed", "attackSpeed", "range"].some((key) => key in (item.bonuses as Record<string, unknown>))
+    : false;
+  const effect = legacyShape ? null : normalizeEquipmentEffect(slot, rarity, level, item.effect ?? null);
+  if (!legacyShape && item.effect != null && !effect) return null;
 
   const tierScore = Math.max(0, asInt(item.tierScore, 0));
   if (tierScore !== computeItemTierScore(level, rarity)) return null;
@@ -779,6 +849,7 @@ const normalizeEquipmentItem = (
     rarity: rarity.name,
     color: rarity.color,
     bonuses,
+    effect,
     tierScore,
     sellValue,
   };
@@ -843,6 +914,8 @@ const createStarterProfileState = (seed: Record<string, unknown>, nowMs: number)
     premiumEndsAt: 0,
     premiumClaimDay: "",
     worldBossTickets: 0,
+    bossMarkCycleStart: "",
+    crystalFlaskRuns: 0,
     village: createVillageState(nowMs),
     stake: [],
     stakeId: 0,
@@ -871,6 +944,26 @@ const addConsumableToState = (state: Record<string, unknown>, type: ConsumableTy
 
 const countConsumablesByType = (state: Record<string, unknown>, type: ConsumableType) =>
   normalizeConsumables(state.consumables).rows.filter((entry) => entry.type === type).length;
+
+const removeConsumableFromState = (
+  state: Record<string, unknown>,
+  type: ConsumableType,
+  consumableId?: number | null,
+) => {
+  const normalized = normalizeConsumables(state.consumables);
+  let removed = false;
+  const nextRows = normalized.rows.filter((entry) => {
+    if (removed || entry.type != type) return true;
+    if (consumableId && entry.id != consumableId) return true;
+    removed = true;
+    return false;
+  });
+  if (!removed) return false;
+  state.consumables = nextRows;
+  state.consumableId = Math.max(asInt(state.consumableId, 0), normalized.maxId);
+  return true;
+};
+
 
 const normalizeStakes = (raw: unknown, fallbackId = 1): StakeEntryState[] => {
   if (Array.isArray(raw)) {
@@ -1221,6 +1314,8 @@ const normalizeState = (raw: unknown) => {
   state.starterPackPurchased = Boolean(state.starterPackPurchased);
   state.premiumEndsAt = Math.max(0, asInt(state.premiumEndsAt, 0));
   state.premiumClaimDay = String(state.premiumClaimDay ?? "").slice(0, 10);
+  state.bossMarkCycleStart = String(state.bossMarkCycleStart ?? "").slice(0, 40);
+  state.crystalFlaskRuns = clampInt(state.crystalFlaskRuns, 0, 12);
   state.village = normalizeVillageState(state.village, Date.now());
 
   const inventory = normalizeInventory(state.inventory, playerLevel);
@@ -1266,6 +1361,8 @@ const validateStateTransition = (
     if (next.gold !== 0) return "Initial gold must start at 0.";
     if (next.monsterKills !== 0 || next.dungeonRuns !== 0) return "Initial progress must start at 0.";
     if (nextPremiumEndsAt > 0) return "Initial premium must start inactive.";
+    if (String(nextState.bossMarkCycleStart ?? "")) return "Initial Boss Mark must start inactive.";
+    if (Math.max(0, asInt(nextState.crystalFlaskRuns, 0)) > 0) return "Initial Crystal Flask must start inactive.";
     if (nextStake.total > 0) return "Initial stake balance must start at 0.";
     if (Array.isArray(nextState.inventory) && nextState.inventory.length > 0) return "Initial inventory must start empty.";
     if (Array.isArray(nextState.consumables) && nextState.consumables.length > 0) return "Initial consumables must start empty.";
@@ -1337,6 +1434,22 @@ const validateStateTransition = (
   const nextKeyItems = countConsumablesByType(nextState, "key");
   if (nextKeyItems > prevKeyItems) {
     return "Dungeon key items can only be granted by secure server actions.";
+  }
+  const prevBossMarks = countConsumablesByType(prevState, "boss-mark");
+  const nextBossMarks = countConsumablesByType(nextState, "boss-mark");
+  if (nextBossMarks > prevBossMarks) {
+    return "Boss Marks can only be granted by secure server actions.";
+  }
+  const prevCrystalFlasks = countConsumablesByType(prevState, "crystal-flask");
+  const nextCrystalFlasks = countConsumablesByType(nextState, "crystal-flask");
+  if (nextCrystalFlasks > prevCrystalFlasks) {
+    return "Crystal Flasks can only be granted by secure server actions.";
+  }
+  if (String(nextState.bossMarkCycleStart ?? "") !== String(prevState.bossMarkCycleStart ?? "")) {
+    return "Boss Mark state can only change through secure server actions.";
+  }
+  if (Math.max(0, asInt(nextState.crystalFlaskRuns, 0)) > Math.max(0, asInt(prevState.crystalFlaskRuns, 0))) {
+    return "Crystal Flask state can only change through secure server actions.";
   }
 
   if (next.level === MAX_LEVEL && next.monsterKills < 20000 && next.dungeonRuns < 150) {
@@ -2127,6 +2240,44 @@ const loadWorldBossParticipants = async (
   return (data as WorldBossParticipantRow[] | null) ?? [];
 };
 
+const getEquipmentStatBonusFromState = (
+  state: Record<string, unknown>,
+  key: EquipmentStatKey,
+) => {
+  const equipment = state.equipment as Record<string, unknown> | undefined;
+  if (!equipment || typeof equipment !== "object" || Array.isArray(equipment)) return 0;
+  let total = 0;
+  for (const item of Object.values(equipment)) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const bonuses = (item as Record<string, unknown>).bonuses;
+    if (!bonuses || typeof bonuses !== "object" || Array.isArray(bonuses)) continue;
+    const value = Number((bonuses as Record<string, unknown>)[key] ?? 0);
+    if (Number.isFinite(value) && value > 0) total += value;
+  }
+  return Math.max(0, Math.round(total));
+};
+
+const getEquipmentEffectBonusFromState = (
+  state: Record<string, unknown>,
+  kind: EquipmentEffectKind,
+) => {
+  const equipment = state.equipment as Record<string, unknown> | undefined;
+  if (!equipment || typeof equipment !== "object" || Array.isArray(equipment)) return 0;
+  let total = 0;
+  for (const item of Object.values(equipment)) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const effect = (item as Record<string, unknown>).effect;
+    if (!effect || typeof effect !== "object" || Array.isArray(effect)) continue;
+    const effectRow = effect as Record<string, unknown>;
+    if (String(effectRow.kind ?? "") !== kind) continue;
+    const value = Number(effectRow.value ?? 0);
+    if (Number.isFinite(value) && value > 0) {
+      total += value;
+    }
+  }
+  return Math.min(EQUIPMENT_EFFECT_CAPS[kind], Number(total.toFixed(3)));
+};
+
 const getWorldBossAttackFromState = (state: Record<string, unknown>) => {
   const player = (state.player as Record<string, unknown> | undefined) ?? {};
   const baseAttack = Math.max(1, asInt(player.baseAttack, 1));
@@ -2138,9 +2289,9 @@ const getWorldBossAttackFromState = (state: Record<string, unknown>) => {
       if (!item || typeof item !== "object" || Array.isArray(item)) continue;
       const bonuses = (item as Record<string, unknown>).bonuses;
       if (!bonuses || typeof bonuses !== "object" || Array.isArray(bonuses)) continue;
-      const attack = Number((bonuses as Record<string, unknown>).attack ?? 0);
-      if (Number.isFinite(attack) && attack > 0) {
-        bonusAttack += attack;
+      const power = Number((bonuses as Record<string, unknown>).power ?? 0);
+      if (Number.isFinite(power) && power > 0) {
+        bonusAttack += power;
       }
     }
   }
@@ -2148,7 +2299,7 @@ const getWorldBossAttackFromState = (state: Record<string, unknown>) => {
   return Math.max(1, Math.round(baseAttack + bonusAttack));
 };
 
-const loadWorldBossAttack = async (
+const loadWorldBossCombatProfile = async (
   supabase: ReturnType<typeof createClient>,
   wallet: string,
 ) => {
@@ -2159,12 +2310,18 @@ const loadWorldBossAttack = async (
     .maybeSingle();
 
   if (error || !data || !data.state || typeof data.state !== "object") {
-    return 1;
+    return { attack: 1, multiplier: 1 };
   }
 
   const state = normalizeState(data.state as unknown);
-  if (!state) return 1;
-  return getWorldBossAttackFromState(state);
+  if (!state) return { attack: 1, multiplier: 1 };
+  const effectBonus = getEquipmentEffectBonusFromState(state, "boss-damage");
+  const bossMarkActive = String(state.bossMarkCycleStart ?? "");
+  return {
+    attack: getWorldBossAttackFromState(state),
+    multiplier: 1 + effectBonus,
+    bossMarkCycleStart: bossMarkActive,
+  };
 };
 
 const updateProfileWithRetry = async (
@@ -2190,7 +2347,11 @@ const updateProfileWithRetry = async (
     if (!normalized) return { ok: false as const, error: "Invalid profile state." };
 
     const nextState = structuredClone(normalized) as Record<string, unknown>;
-    mutate(nextState);
+    try {
+      mutate(nextState);
+    } catch (error) {
+      return { ok: false as const, error: error instanceof Error ? error.message : String(error) };
+    }
 
     const expectedUpdatedAt = String(profileRow.updated_at ?? "");
     const updatedAt = new Date().toISOString();
@@ -3711,8 +3872,11 @@ serve(async (req) => {
       }
 
       const pendingRaw = getVillagePendingRewardsRaw(village, nowMs);
+      const prosperityBonus = Math.min(0.1, getEquipmentStatBonusFromState(state, "prosperity") * 0.0008);
+      const villageGoldEffect = getEquipmentEffectBonusFromState(state, "village-gold");
+      const villageGoldMultiplier = 1 + prosperityBonus + villageGoldEffect;
       const pending = {
-        gold: Math.max(0, Math.floor(pendingRaw.goldExact)),
+        gold: Math.max(0, Math.floor(pendingRaw.goldExact * villageGoldMultiplier)),
         crystals: Math.max(0, Math.floor(pendingRaw.crystalsExact)),
       };
       if (pending.gold <= 0 && pending.crystals <= 0) {
@@ -3989,6 +4153,110 @@ serve(async (req) => {
     return json({ ok: false, error: "Profile changed concurrently, retry swap." });
   }
 
+  if (action === "shop_buy_consumable") {
+    const consumableTypeRaw = String(body.type ?? "").trim();
+    const consumableType = consumableTypeRaw === "boss-mark" || consumableTypeRaw === "crystal-flask"
+      ? consumableTypeRaw as ConsumableType
+      : null;
+    if (!consumableType) {
+      return json({ ok: false, error: "Invalid consumable type." });
+    }
+
+    const cost = consumableType === "boss-mark" ? 20000 : 7500;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const { data: profileRow, error: profileError } = await supabase
+        .from("profiles")
+        .select("state, updated_at")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+      if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+        return json({ ok: false, error: "Profile not found." });
+      }
+
+      const state = normalizeState(profileRow.state as unknown);
+      if (!state) return json({ ok: false, error: "Invalid profile state." });
+      const gold = Math.max(0, asInt(state.gold, 0));
+      if (gold < cost) {
+        return json({ ok: false, error: `Not enough gold. Need ${cost}.` });
+      }
+      state.gold = gold - cost;
+      addConsumableToState(state, consumableType);
+
+      const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+      const { data: updated, error: updateError } = await supabase
+        .from("profiles")
+        .update({ state, updated_at: now.toISOString() })
+        .eq("wallet", auth.wallet)
+        .eq("updated_at", expectedUpdatedAt)
+        .select("wallet")
+        .maybeSingle();
+      if (updateError || !updated) continue;
+
+      await auditEvent(supabase, auth.wallet, "shop_buy_consumable", {
+        consumableType,
+        cost,
+        gold: Math.max(0, asInt(state.gold, 0)),
+      });
+      return json({
+        ok: true,
+        savedAt: now.toISOString(),
+        gold: Math.max(0, asInt(state.gold, 0)),
+        consumables: normalizeConsumables(state.consumables).rows,
+        bossMarkCycleStart: String(state.bossMarkCycleStart ?? ""),
+        crystalFlaskRuns: Math.max(0, asInt(state.crystalFlaskRuns, 0)),
+      });
+    }
+    return json({ ok: false, error: "Profile changed concurrently, retry purchase." });
+  }
+
+  if (action === "use_boss_mark") {
+    const consumableId = Math.max(0, asInt(body.consumableId, 0));
+    const boss = await ensureWorldBossCycle(supabase, now);
+    if (!boss) return json({ ok: false, error: "Failed to load world boss." });
+    const updated = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
+      if (!removeConsumableFromState(state, "boss-mark", consumableId || null)) {
+        throw new Error("Boss Mark not found.");
+      }
+      if (String(state.bossMarkCycleStart ?? "") === boss.cycle_start) {
+        throw new Error("Boss Mark is already active for this cycle.");
+      }
+      state.bossMarkCycleStart = boss.cycle_start;
+    });
+    if (!updated.ok || !updated.state) {
+      return json({ ok: false, error: updated.error || "Failed to activate Boss Mark." });
+    }
+    await auditEvent(supabase, auth.wallet, "use_boss_mark", { cycleStart: boss.cycle_start });
+    return json({
+      ok: true,
+      savedAt: updated.updatedAt,
+      consumables: normalizeConsumables(updated.state.consumables).rows,
+      bossMarkCycleStart: String(updated.state.bossMarkCycleStart ?? ""),
+      crystalFlaskRuns: Math.max(0, asInt(updated.state.crystalFlaskRuns, 0)),
+    });
+  }
+
+  if (action === "use_crystal_flask") {
+    const consumableId = Math.max(0, asInt(body.consumableId, 0));
+    const updated = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
+      if (!removeConsumableFromState(state, "crystal-flask", consumableId || null)) {
+        throw new Error("Crystal Flask not found.");
+      }
+      const currentRuns = Math.max(0, asInt(state.crystalFlaskRuns, 0));
+      state.crystalFlaskRuns = Math.min(12, currentRuns + 3);
+    });
+    if (!updated.ok || !updated.state) {
+      return json({ ok: false, error: updated.error || "Failed to activate Crystal Flask." });
+    }
+    await auditEvent(supabase, auth.wallet, "use_crystal_flask", { crystalFlaskRuns: Math.max(0, asInt(updated.state.crystalFlaskRuns, 0)) });
+    return json({
+      ok: true,
+      savedAt: updated.updatedAt,
+      consumables: normalizeConsumables(updated.state.consumables).rows,
+      bossMarkCycleStart: String(updated.state.bossMarkCycleStart ?? ""),
+      crystalFlaskRuns: Math.max(0, asInt(updated.state.crystalFlaskRuns, 0)),
+    });
+  }
+
   if (action === "shop_buy_dungeon_key") {
     for (let attempt = 0; attempt < 6; attempt += 1) {
       const nowIso = new Date().toISOString();
@@ -4248,8 +4516,9 @@ serve(async (req) => {
     const maxDamageGain = Math.max(200, elapsedSec * WORLD_BOSS_DAMAGE_PER_SEC_CAP);
     let passiveDamage = 0;
     if (Boolean(existingRow?.joined) && nextJoined) {
-      const worldBossAttack = await loadWorldBossAttack(supabase, auth.wallet);
-      const passiveDamageRaw = Math.max(0, Math.floor(elapsedSec * worldBossAttack));
+      const combatProfile = await loadWorldBossCombatProfile(supabase, auth.wallet);
+      const bossMarkMultiplier = combatProfile.bossMarkCycleStart === boss.cycle_start ? 1.25 : 1;
+      const passiveDamageRaw = Math.max(0, Math.floor(elapsedSec * combatProfile.attack * combatProfile.multiplier * bossMarkMultiplier));
       passiveDamage = Math.min(passiveDamageRaw, maxDamageGain);
     }
     // Keep client pending damage only for diagnostics; server-authoritative damage prevents offline loss and tampering.
