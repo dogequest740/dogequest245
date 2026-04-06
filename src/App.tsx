@@ -35,11 +35,9 @@ import iconGrandEnergy from './assets/icons/grand-energy-elixir.png'
 import iconWorldBoss from './assets/icons/world-boss.png'
 import iconBattle from './assets/icons/battle.png'
 import iconAutoBattle from './assets/icons/autobattle.png'
-import iconWithdraw from './assets/icons/withdraw.png'
 import iconSolana from './assets/icons/solana.png'
 import iconStacking from './assets/icons/stacking.png'
 import iconBuyGold from './assets/icons/buy-gold.png'
-import iconCrystalGoldSwap from './assets/icons/crystal-gold-swap.png'
 import iconStarterPack from './assets/icons/starter-pack.png'
 import iconPremium from './assets/icons/premium.png'
 import iconReferrals from './assets/icons/referrals.png'
@@ -346,19 +344,6 @@ type AdminSummary = {
   totalKills: number
   totalDungeons: number
   maxLevel: number
-  pendingWithdrawals: number
-  pendingCrystals: number
-}
-
-type WithdrawalRow = {
-  id: string
-  wallet: string
-  payout_wallet?: string
-  name: string
-  crystals: number
-  sol_amount: number
-  status: string
-  created_at: string
 }
 
 type BlockedWalletRow = {
@@ -373,8 +358,33 @@ type AdminData = {
   summary: AdminSummary
   players: AdminPlayerRow[]
   villages: AdminVillageRow[]
-  withdrawals: WithdrawalRow[]
   events: AdminEventRow[]
+}
+
+type SeasonInfo = {
+  id: string
+  name: string
+  status: string
+  poolSol: number
+  startAt: string
+  endAt: string
+  closedAt?: string
+}
+
+type SeasonLeaderboardEntry = {
+  rank: number
+  wallet: string
+  name: string
+  crystals: number
+  premiumActive: boolean
+  effectiveCrystals: number
+  share: number
+  payoutSol: number
+}
+
+type SeasonSnapshotEntry = SeasonLeaderboardEntry & {
+  excluded?: boolean
+  excludeReason?: string
 }
 
 type AdminEventRow = {
@@ -408,8 +418,6 @@ type GameSecureResponse = {
   error?: string
   message?: string
   savedAt?: string
-  swappedCrystals?: number
-  swappedGold?: number
   buyGoldAlreadyProcessed?: boolean
   starterPackAlreadyProcessed?: boolean
   starterPackPurchased?: boolean
@@ -421,7 +429,6 @@ type GameSecureResponse = {
   profilesTotal?: number
   energy?: number
   energyTimer?: number
-  remainingCrystals?: number
   tickets?: number
   ticketDay?: string
   gold?: number
@@ -447,10 +454,16 @@ type GameSecureResponse = {
   fortunePaidSpins?: number
   fortuneReward?: FortuneReward
   fortuneUsed?: 'free' | 'paid'
-  withdrawal?: WithdrawalRow
-  withdrawals?: WithdrawalRow[]
   events?: AdminEventRow[]
   blockedWallets?: BlockedWalletRow[]
+  season?: SeasonInfo | null
+  seasonLeaderboard?: SeasonLeaderboardEntry[]
+  seasonPlayer?: SeasonLeaderboardEntry | null
+  seasonPreview?: SeasonSnapshotEntry[]
+  seasonSnapshot?: SeasonSnapshotEntry[]
+  seasonTotalPlayers?: number
+  seasonTotalCrystals?: number
+  seasonTotalEffectiveCrystals?: number
   worldBossTickets?: number
   worldBoss?: WorldBossRow
   worldBossParticipants?: WorldBossParticipantRow[]
@@ -1004,9 +1017,6 @@ const DUNGEONS = DUNGEON_REQUIREMENTS.map((tierScore, index) => ({
 
 const WORLD_BOSS_DURATION = 12 * 60 * 60
 const WORLD_BOSS_REWARD = 500
-const WITHDRAW_RATE = 15000
-const WITHDRAW_MIN = 2000
-const CRYSTAL_TO_GOLD_SWAP_RATE = 75
 const STAKE_BONUS = 0.05
 const STAKE_MIN = 50
 const STAKE_LOCK_HOURS = 24
@@ -3253,8 +3263,7 @@ function App() {
     | 'worldboss'
     | 'village'
     | 'admin'
-    | 'withdraw'
-    | 'swap'
+    | 'season'
     | 'stake'
     | 'buygold'
     | 'starterpack'
@@ -3275,15 +3284,20 @@ function App() {
   const [adminEventKindFilter, setAdminEventKindFilter] = useState('')
   const [adminEventLimit, setAdminEventLimit] = useState('300')
   const [adminStatsView, setAdminStatsView] = useState<'players' | 'villages'>('players')
-  const [withdrawAmount, setWithdrawAmount] = useState('')
-  const [withdrawAddress, setWithdrawAddress] = useState('')
-  const [withdrawError, setWithdrawError] = useState('')
-  const [swapCrystalsAmount, setSwapCrystalsAmount] = useState('')
-  const [swapLoading, setSwapLoading] = useState(false)
-  const [swapError, setSwapError] = useState('')
-  const [playerWithdrawals, setPlayerWithdrawals] = useState<WithdrawalRow[]>([])
-  const [playerWithdrawalsLoading, setPlayerWithdrawalsLoading] = useState(false)
-  const [playerWithdrawalsError, setPlayerWithdrawalsError] = useState('')
+  const [seasonInfo, setSeasonInfo] = useState<SeasonInfo | null>(null)
+  const [seasonLeaderboard, setSeasonLeaderboard] = useState<SeasonLeaderboardEntry[]>([])
+  const [seasonPlayer, setSeasonPlayer] = useState<SeasonLeaderboardEntry | null>(null)
+  const [seasonTotalPlayers, setSeasonTotalPlayers] = useState(0)
+  const [seasonTotalCrystals, setSeasonTotalCrystals] = useState(0)
+  const [seasonTotalEffectiveCrystals, setSeasonTotalEffectiveCrystals] = useState(0)
+  const [seasonLoading, setSeasonLoading] = useState(false)
+  const [seasonError, setSeasonError] = useState('')
+  const [seasonAdminBusy, setSeasonAdminBusy] = useState(false)
+  const [seasonAdminName, setSeasonAdminName] = useState('Crystal Season')
+  const [seasonAdminPool, setSeasonAdminPool] = useState('100')
+  const [seasonAdminDurationDays, setSeasonAdminDurationDays] = useState('30')
+  const [seasonPreviewRows, setSeasonPreviewRows] = useState<SeasonSnapshotEntry[]>([])
+  const [seasonSnapshotRows, setSeasonSnapshotRows] = useState<SeasonSnapshotEntry[]>([])
   const [buyGoldError, setBuyGoldError] = useState('')
   const [buyGoldLoading, setBuyGoldLoading] = useState<string | null>(null)
   const [starterPackError, setStarterPackError] = useState('')
@@ -3767,6 +3781,133 @@ function App() {
     return lastResult
   }
 
+  const submitTreasuryPayment = async (solAmount: number) => {
+    if (!publicKey) {
+      throw new Error('Connect your wallet first.')
+    }
+    const secureToken = await ensureDungeonSession(true)
+    if (!secureToken) {
+      throw new Error('Wallet signature required before payment.')
+    }
+
+    const lamports = Math.round(solAmount * LAMPORTS_PER_SOL)
+    const balance = await connection.getBalance(publicKey)
+    const feeBuffer = 5000
+    if (balance < lamports + feeBuffer) {
+      throw new Error(`Not enough SOL. Need ${solAmount} SOL + network fee.`)
+    }
+
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash()
+    const tx = new Transaction({
+      feePayer: publicKey,
+      recentBlockhash: blockhash,
+    }).add(
+      SystemProgram.transfer({
+        fromPubkey: publicKey,
+        toPubkey: GOLD_STORE_WALLET,
+        lamports,
+      }),
+    )
+
+    const signature = await sendTransaction(tx, connection)
+    await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
+    return signature
+  }
+
+  const buyGoldPackage = async (packId: string) => {
+    const state = gameStateRef.current
+    if (!state) return
+    const pack = GOLD_PACKAGES_SOL.find((entry) => entry.id === packId)
+    if (!pack) {
+      setBuyGoldError('Unknown gold pack.')
+      return
+    }
+
+    setBuyGoldLoading(packId)
+    setBuyGoldError('')
+    try {
+      const signature = await submitTreasuryPayment(pack.sol)
+      setBuyGoldError('Payment confirmed. Crediting gold...')
+      const result = await finalizePaymentCredit('buy_gold', { packId: pack.id, txSignature: signature }, 7, 1200)
+      if (!result.ok) {
+        setBuyGoldError(`Payment sent (${signature.slice(0, 8)}...), but gold credit failed: ${result.error || 'unknown error'}.`)
+        return
+      }
+      state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
+      pushLog(state.eventLog, `Gold purchased: +${formatNumber(pack.gold)} gold.`)
+      syncHud()
+      setBuyGoldError('')
+    } catch (error) {
+      console.warn('Gold purchase failed', error)
+      const message = error instanceof Error ? error.message : String(error)
+      setBuyGoldError(`Transaction failed: ${message}`)
+    } finally {
+      setBuyGoldLoading(null)
+    }
+  }
+
+  const buyStarterPack = async () => {
+    const state = gameStateRef.current
+    if (!state) return
+    setStarterPackLoading(true)
+    setStarterPackError('')
+    try {
+      const signature = await submitTreasuryPayment(STARTER_PACK_PRICE)
+      setStarterPackError('Payment confirmed. Activating starter pack...')
+      const result = await finalizePaymentCredit('starter_pack_buy', { txSignature: signature }, 7, 1200)
+      if (!result.ok) {
+        setStarterPackError(`Payment sent (${signature.slice(0, 8)}...), but starter pack credit failed: ${result.error || 'unknown error'}.`)
+        return
+      }
+      state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
+      applyServerConsumables(state, result.consumables)
+      state.starterPackPurchased = Boolean(result.starterPackPurchased ?? true)
+      pushLog(state.eventLog, 'Starter Pack activated.')
+      syncHud()
+      setStarterPackError('')
+    } catch (error) {
+      console.warn('Starter pack purchase failed', error)
+      const message = error instanceof Error ? error.message : String(error)
+      setStarterPackError(`Transaction failed: ${message}`)
+    } finally {
+      setStarterPackLoading(false)
+    }
+  }
+
+  const buyPremiumPlan = async (planId: PremiumPlanId) => {
+    const state = gameStateRef.current
+    if (!state) return
+    const plan = PREMIUM_PLANS.find((entry) => entry.id === planId)
+    if (!plan) {
+      setPremiumError('Unknown premium plan.')
+      return
+    }
+    const pricing = getPremiumPlanPrice(plan)
+    setPremiumLoading(planId)
+    setPremiumError('')
+    try {
+      const signature = await submitTreasuryPayment(pricing.sol)
+      setPremiumError('Payment confirmed. Activating premium...')
+      const result = await finalizePaymentCredit('premium_buy', { planId: plan.id, txSignature: signature }, 7, 1200)
+      if (!result.ok) {
+        setPremiumError(`Payment sent (${signature.slice(0, 8)}...), but premium activation failed: ${result.error || 'unknown error'}.`)
+        return
+      }
+      if (typeof result.premiumEndsAt === 'number') {
+        state.premiumEndsAt = Math.max(0, Math.floor(Number(result.premiumEndsAt)))
+      }
+      pushLog(state.eventLog, `Premium ${premiumActive ? 'extended' : 'activated'} for ${plan.days} days.`)
+      syncHud()
+      setPremiumError('')
+    } catch (error) {
+      console.warn('Premium purchase failed', error)
+      const message = error instanceof Error ? error.message : String(error)
+      setPremiumError(`Transaction failed: ${message}`)
+    } finally {
+      setPremiumLoading(null)
+    }
+  }
+
   const refreshOfflineEnergyFromServer = async (interactive = false) => {
     const state = gameStateRef.current
     if (!state || !accountIdentity) return
@@ -3851,6 +3992,43 @@ function App() {
     if (typeof result.shopWorldBossTicketsLeftToday === 'number') {
       setShopWorldBossTicketsLeftToday(Math.max(0, Math.floor(result.shopWorldBossTicketsLeftToday)))
     }
+  }
+
+  function applyServerConsumables(state: GameState, consumables: unknown) {
+    if (!Array.isArray(consumables)) return
+    const normalized = normalizeLoadedConsumables(consumables)
+    state.consumables = normalized
+    state.consumableId = Math.max(state.consumableId, ...normalized.map((entry) => entry.id), 0)
+  }
+
+  function applyConsumableEffectsFromServer(state: GameState, result: GameSecureResponse) {
+    if (typeof result.bossMarkCycleStart === 'string') {
+      state.bossMarkCycleStart = result.bossMarkCycleStart
+    }
+    if (typeof result.crystalFlaskRuns === 'number') {
+      state.crystalFlaskRuns = Math.max(0, Math.floor(Number(result.crystalFlaskRuns)))
+    }
+    if (typeof result.premiumEndsAt === 'number') {
+      state.premiumEndsAt = Math.max(0, Math.floor(Number(result.premiumEndsAt)))
+    }
+  }
+
+  function parseServerStakeEntries(value: unknown): StakeEntry[] {
+    if (!Array.isArray(value)) return []
+    return value
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') return null
+        const row = entry as { id?: unknown; amount?: unknown; endsAt?: unknown }
+        const id = Math.max(1, Math.floor(Number(row.id ?? 0)))
+        const amount = Math.max(0, Math.floor(Number(row.amount ?? 0)))
+        const endsAt = Math.max(0, Math.floor(Number(row.endsAt ?? 0)))
+        if (!Number.isFinite(id) || id <= 0 || !Number.isFinite(amount) || amount <= 0 || !Number.isFinite(endsAt) || endsAt <= 0) {
+          return null
+        }
+        return { id, amount, endsAt }
+      })
+      .filter((entry): entry is StakeEntry => Boolean(entry))
+      .sort((a, b) => a.endsAt - b.endsAt)
   }
 
   const syncShopLimitsFromServer = async (interactive = false) => {
@@ -3949,6 +4127,134 @@ function App() {
     }
 
     applyReferralSummary(result)
+  }
+
+  const applySeasonStatus = (result: GameSecureResponse) => {
+    setSeasonInfo(result.season ?? null)
+    setSeasonLeaderboard(result.seasonLeaderboard ?? [])
+    setSeasonPlayer(result.seasonPlayer ?? null)
+    setSeasonTotalPlayers(Math.max(0, Math.floor(Number(result.seasonTotalPlayers ?? 0))))
+    setSeasonTotalCrystals(Math.max(0, Math.floor(Number(result.seasonTotalCrystals ?? 0))))
+    setSeasonTotalEffectiveCrystals(Math.max(0, Number(result.seasonTotalEffectiveCrystals ?? 0)))
+  }
+
+  const refreshProfileFromServer = async () => {
+    const current = gameStateRef.current
+    if (!current || !accountIdentity) return
+    const fresh = await loadProfileStateSecure(false)
+    if (!fresh || !gameStateRef.current) return
+    profileUpdatedAtRef.current = fresh.updatedAt || profileUpdatedAtRef.current
+    applyPersistedState(gameStateRef.current, fresh.state, fresh.updatedAt)
+    syncHud()
+  }
+
+  const loadSeasonStatus = async (interactive = false) => {
+    if (!accountIdentity) {
+      setSeasonInfo(null)
+      setSeasonLeaderboard([])
+      setSeasonPlayer(null)
+      setSeasonTotalPlayers(0)
+      setSeasonTotalCrystals(0)
+      setSeasonTotalEffectiveCrystals(0)
+      return
+    }
+    setSeasonLoading(true)
+    if (interactive) setSeasonError('')
+    const result = await callGameSecureAuthed('season_status', { limit: 100 }, interactive)
+    if (!result.ok) {
+      if (interactive) setSeasonError(result.error || 'Failed to load season status.')
+      setSeasonLoading(false)
+      return
+    }
+    applySeasonStatus(result)
+    setSeasonLoading(false)
+  }
+
+  const previewSeasonClose = async () => {
+    if (!isAdmin) return
+    setSeasonAdminBusy(true)
+    setSeasonError('')
+    const result = await callGameSecureAuthed('admin_season_preview', { limit: 300 }, true)
+    if (!result.ok) {
+      setSeasonError(result.error || 'Failed to build season preview.')
+      setSeasonAdminBusy(false)
+      return
+    }
+    applySeasonStatus(result)
+    setSeasonSnapshotRows([])
+    setSeasonPreviewRows(result.seasonPreview ?? [])
+    setSeasonAdminBusy(false)
+  }
+
+  const loadLatestSeasonSnapshot = async () => {
+    if (!isAdmin) return
+    setSeasonAdminBusy(true)
+    setSeasonError('')
+    const result = await callGameSecureAuthed('admin_season_snapshot', { limit: 300 }, true)
+    if (!result.ok) {
+      setSeasonError(result.error || 'Failed to load latest season snapshot.')
+      setSeasonAdminBusy(false)
+      return
+    }
+    setSeasonInfo(result.season ?? null)
+    setSeasonSnapshotRows(result.seasonSnapshot ?? [])
+    setSeasonPreviewRows([])
+    setSeasonTotalPlayers(Math.max(0, Math.floor(Number(result.seasonTotalPlayers ?? 0))))
+    setSeasonTotalCrystals(Math.max(0, Math.floor(Number(result.seasonTotalCrystals ?? 0))))
+    setSeasonTotalEffectiveCrystals(Math.max(0, Number(result.seasonTotalEffectiveCrystals ?? 0)))
+    setSeasonAdminBusy(false)
+  }
+
+  const startSeason = async () => {
+    if (!isAdmin) return
+    const poolSol = Number(seasonAdminPool)
+    const durationDays = Math.max(1, Math.floor(Number(seasonAdminDurationDays || '30')))
+    if (!Number.isFinite(poolSol) || poolSol < 0) {
+      setSeasonError('Enter a valid SOL pool.')
+      return
+    }
+    setSeasonAdminBusy(true)
+    setSeasonError('')
+    const result = await callGameSecureAuthed(
+      'admin_season_start',
+      {
+        name: seasonAdminName.trim() || 'Crystal Season',
+        poolSol,
+        durationDays,
+      },
+      true,
+    )
+    if (!result.ok) {
+      setSeasonError(result.error || 'Failed to start season.')
+      setSeasonAdminBusy(false)
+      return
+    }
+    setSeasonInfo(result.season ?? null)
+    setSeasonPreviewRows([])
+    setSeasonSnapshotRows([])
+    await loadSeasonStatus(false)
+    setSeasonAdminBusy(false)
+  }
+
+  const closeSeason = async () => {
+    if (!isAdmin) return
+    setSeasonAdminBusy(true)
+    setSeasonError('')
+    const result = await callGameSecureAuthed('admin_season_close', { limit: 300 }, true)
+    if (!result.ok) {
+      setSeasonError(result.error || 'Failed to close season.')
+      setSeasonAdminBusy(false)
+      return
+    }
+    setSeasonSnapshotRows(result.seasonSnapshot ?? [])
+    setSeasonPreviewRows([])
+    setSeasonInfo(result.season ?? null)
+    setSeasonTotalPlayers(Math.max(0, Math.floor(Number(result.seasonTotalPlayers ?? 0))))
+    setSeasonTotalCrystals(Math.max(0, Math.floor(Number(result.seasonTotalCrystals ?? 0))))
+    setSeasonTotalEffectiveCrystals(Math.max(0, Number(result.seasonTotalEffectiveCrystals ?? 0)))
+    await refreshProfileFromServer()
+    await loadSeasonStatus(false)
+    setSeasonAdminBusy(false)
   }
 
   const applyFortuneStatus = (result: GameSecureResponse) => {
@@ -4639,14 +4945,6 @@ function App() {
     if (activePanel === 'inventory') {
       setInventoryTab('equipment')
     }
-    if (activePanel !== 'withdraw') {
-      setWithdrawError('')
-      setPlayerWithdrawalsError('')
-    }
-    if (activePanel !== 'swap') {
-      setSwapError('')
-      setSwapLoading(false)
-    }
     if (activePanel !== 'buygold') {
       setBuyGoldError('')
       setBuyGoldLoading(null)
@@ -4683,6 +4981,9 @@ function App() {
       setFortuneSpinLoading(false)
       setFortuneBuyLoading(null)
     }
+    if (activePanel !== 'season') {
+      setSeasonError('')
+    }
   }, [activePanel])
 
   useEffect(() => {
@@ -4696,40 +4997,12 @@ function App() {
   }, [activePanel, hud?.village.settlementName])
 
   useEffect(() => {
-    if (!usingWalletAuth || !walletAddress) return
-    setWithdrawAddress(walletAddress)
-  }, [usingWalletAuth, walletAddress])
-
-  useEffect(() => {
-    if (activePanel !== 'withdraw') return
-    if (!accountIdentity) {
-      setPlayerWithdrawals([])
-      return
+    if (activePanel !== 'season') return
+    void loadSeasonStatus(false)
+    if (isAdmin && !seasonInfo) {
+      void loadLatestSeasonSnapshot()
     }
-    let active = true
-    const loadWithdrawals = async () => {
-      setPlayerWithdrawalsLoading(true)
-      setPlayerWithdrawalsError('')
-      const result = await callGameSecureAuthed('withdraw_list', {}, true)
-      if (!active) return
-      if (!result.ok) {
-        setPlayerWithdrawalsError('Failed to load withdrawal requests.')
-        setPlayerWithdrawals([])
-      } else {
-        setPlayerWithdrawals((result.withdrawals ?? []).map((row) => ({
-          ...row,
-          payout_wallet: typeof row.payout_wallet === 'string' ? row.payout_wallet : '',
-          crystals: Number(row.crystals ?? 0),
-          sol_amount: Number(row.sol_amount ?? 0),
-        })))
-      }
-      setPlayerWithdrawalsLoading(false)
-    }
-    void loadWithdrawals()
-    return () => {
-      active = false
-    }
-  }, [activePanel, accountIdentity])
+  }, [activePanel, accountIdentity, isAdmin])
 
   useEffect(() => {
     if (activePanel !== 'worldboss') return
@@ -4946,11 +5219,6 @@ function App() {
       const eventLimitRaw = Math.floor(Number(adminEventLimit))
       const eventLimit = Number.isFinite(eventLimitRaw) ? Math.min(1000, Math.max(20, eventLimitRaw)) : 300
 
-      const withdrawalsResult = await callGameSecureAuthed('admin_withdrawals', { limit: 500 }, true)
-      if (!withdrawalsResult.ok) {
-        warnings.push(withdrawalsResult.error || 'Failed to load withdrawals.')
-      }
-
       const eventsResult = await callGameSecureAuthed(
         'admin_events',
         {
@@ -5061,20 +5329,6 @@ function App() {
         { level: 0, tier: 0, gold: 0, crystals: 0, kills: 0, dungeons: 0, active: 0, maxLevel: 0 },
       )
 
-      const withdrawals: WithdrawalRow[] = ((withdrawalsResult.ok ? withdrawalsResult.withdrawals : []) ?? []).map((row) => ({
-        id: String(row.id),
-        wallet: row.wallet as string,
-        payout_wallet: typeof row.payout_wallet === 'string' ? row.payout_wallet : '',
-        name: (row.name as string) || 'Unknown',
-        crystals: Number(row.crystals ?? 0),
-        sol_amount: Number(row.sol_amount ?? 0),
-        status: (row.status as string) || 'pending',
-        created_at: (row.created_at as string) || new Date(0).toISOString(),
-      }))
-
-      const pending = withdrawals.filter((entry) => entry.status === 'pending')
-      const pendingCrystals = pending.reduce((sum, entry) => sum + entry.crystals, 0)
-
       const summary: AdminSummary = {
         totalPlayers,
         active24h: totals.active,
@@ -5085,11 +5339,9 @@ function App() {
         totalKills: totals.kills,
         totalDungeons: totals.dungeons,
         maxLevel: totals.maxLevel,
-        pendingWithdrawals: pending.length,
-        pendingCrystals,
       }
 
-      setAdminData({ summary, players, villages, withdrawals, events })
+      setAdminData({ summary, players, villages, events })
       setAdminEventLimit(String(eventLimit))
       setAdminError(warnings.join(' '))
     } catch (error) {
@@ -5099,19 +5351,6 @@ function App() {
     } finally {
       setAdminLoading(false)
     }
-  }
-
-  const markWithdrawalPaid = async (withdrawalId: string) => {
-    if (!isAdmin) return
-    setAdminLoading(true)
-    setAdminError('')
-    const result = await callGameSecureAuthed('admin_mark_paid', { withdrawalId }, true)
-    if (!result.ok) {
-      setAdminError(result.error || 'Failed to update withdrawal.')
-      setAdminLoading(false)
-      return
-    }
-    await loadAdminData()
   }
 
   const togglePlayerBlock = async (player: { wallet: string; blocked: boolean }) => {
@@ -5147,362 +5386,6 @@ function App() {
       return
     }
     await loadAdminData()
-  }
-
-  const submitWithdrawal = async () => {
-    const state = gameStateRef.current
-    if (!state || !accountIdentity) return
-
-    const amount = Math.floor(Number(withdrawAmount))
-    const payoutWallet = withdrawAddress.trim()
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setWithdrawError('Enter a valid amount.')
-      return
-    }
-    if (amount < WITHDRAW_MIN) {
-      setWithdrawError(`Minimum withdrawal is ${WITHDRAW_MIN} crystals.`)
-      return
-    }
-    if (amount > state.crystals) {
-      setWithdrawError('Not enough crystals.')
-      return
-    }
-    if (!payoutWallet) {
-      setWithdrawError('Enter your Solana address.')
-      return
-    }
-    try {
-      const parsedAddress = new PublicKey(payoutWallet)
-      if (parsedAddress.toBase58() !== payoutWallet) {
-        setWithdrawError('Enter a valid Solana address.')
-        return
-      }
-    } catch {
-      setWithdrawError('Enter a valid Solana address.')
-      return
-    }
-
-    const result = await callGameSecureAuthed('withdraw_submit', { amount, payoutWallet }, true)
-    if (!result.ok || !result.withdrawal) {
-      setWithdrawError(result.error || 'Failed to submit request.')
-      return
-    }
-
-    const remainingCrystals = Math.max(
-      0,
-      Math.floor(Number(result.remainingCrystals ?? (state.crystals - amount))),
-    )
-    state.crystals = remainingCrystals
-    pushLog(state.eventLog, `Withdrawal requested: ${amount} crystals.`)
-    setWithdrawAmount('')
-    setWithdrawError('')
-    const serverRow: WithdrawalRow = {
-      ...result.withdrawal,
-      crystals: Number(result.withdrawal.crystals ?? amount),
-      sol_amount: Number(result.withdrawal.sol_amount ?? Number((amount / WITHDRAW_RATE).toFixed(4))),
-    }
-    setPlayerWithdrawals((prev) => [
-      serverRow,
-      ...prev.filter((entry) => entry.id !== serverRow.id),
-    ])
-    syncHud()
-    void saveGameState()
-    setActivePanel(null)
-  }
-
-  const submitCrystalGoldSwap = async () => {
-    const state = gameStateRef.current
-    if (!state || !accountIdentity) return
-
-    const crystalsAmount = Math.floor(Number(swapCrystalsAmount))
-    if (!Number.isFinite(crystalsAmount) || crystalsAmount <= 0) {
-      setSwapError('Enter a valid amount.')
-      return
-    }
-    if (crystalsAmount > state.crystals) {
-      setSwapError('Not enough crystals.')
-      return
-    }
-
-    setSwapLoading(true)
-    setSwapError('')
-    try {
-      const result = await callGameSecureAuthed('swap_crystals_to_gold', { crystalsAmount }, true)
-      if (!result.ok) {
-        setSwapError(result.error || 'Swap failed.')
-        return
-      }
-      const swappedCrystals = Math.max(0, Math.floor(Number(result.swappedCrystals ?? crystalsAmount)))
-      const swappedGold = Math.max(
-        0,
-        Math.floor(Number(result.swappedGold ?? (swappedCrystals * CRYSTAL_TO_GOLD_SWAP_RATE))),
-      )
-      state.crystals = Math.max(0, Math.floor(Number(result.crystals ?? (state.crystals - swappedCrystals))))
-      state.gold = Math.max(0, Math.floor(Number(result.gold ?? (state.gold + swappedGold))))
-      pushLog(state.eventLog, `Swap completed: -${formatNumber(swappedCrystals)} crystals, +${formatNumber(swappedGold)} gold.`)
-      setSwapCrystalsAmount('')
-      syncHud()
-      void saveGameState()
-      setActivePanel(null)
-    } finally {
-      setSwapLoading(false)
-    }
-  }
-
-  const buyGoldPackage = async (packId: string) => {
-    const state = gameStateRef.current
-    if (!state || !publicKey) {
-      setBuyGoldError('Connect your wallet to buy gold.')
-      return
-    }
-    const pack = GOLD_PACKAGES_SOL.find((entry) => entry.id === packId)
-    if (!pack) return
-    setBuyGoldLoading(packId)
-    setBuyGoldError('')
-    try {
-      const secureToken = await ensureDungeonSession(true)
-      if (!secureToken) {
-        setBuyGoldError('Wallet signature required before payment.')
-        setBuyGoldLoading(null)
-        return
-      }
-
-      const lamports = Math.round(pack.sol * LAMPORTS_PER_SOL)
-      const balance = await connection.getBalance(publicKey)
-      const feeBuffer = 5000
-      if (balance < lamports + feeBuffer) {
-        setBuyGoldError(`Not enough SOL. Need ${pack.sol} SOL + network fee.`)
-        setBuyGoldLoading(null)
-        return
-      }
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash()
-      const tx = new Transaction({
-        feePayer: publicKey,
-        recentBlockhash: blockhash,
-      }).add(
-        SystemProgram.transfer({
-          fromPubkey: publicKey,
-          toPubkey: GOLD_STORE_WALLET,
-          lamports,
-        }),
-      )
-      const signature = await sendTransaction(tx, connection)
-      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
-      setBuyGoldError('Payment confirmed. Finalizing gold credit...')
-      const result = await finalizePaymentCredit('buy_gold', { packId: pack.id, txSignature: signature }, 7, 1200)
-      if (!result.ok) {
-        setBuyGoldError(
-          `Payment sent (${signature.slice(0, 8)}...), but gold credit failed: ${result.error || 'unknown error'}.`,
-        )
-        return
-      }
-      state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold + pack.gold)))
-      pushLog(
-        state.eventLog,
-        result.buyGoldAlreadyProcessed ? 'Gold purchase already processed.' : `Purchased ${formatNumber(pack.gold)} gold.`,
-      )
-      syncHud()
-      setActivePanel(null)
-    } catch (error) {
-      console.warn('Gold purchase failed', error)
-      const message = error instanceof Error ? error.message : String(error)
-      setBuyGoldError(`Transaction failed: ${message}`)
-    } finally {
-      setBuyGoldLoading(null)
-    }
-  }
-
-  const buyStarterPack = async () => {
-    const state = gameStateRef.current
-    if (!state || !publicKey) {
-      setStarterPackError('Connect your wallet to buy the starter pack.')
-      return
-    }
-    if (state.starterPackPurchased) {
-      setStarterPackError('Starter pack already purchased.')
-      return
-    }
-    setStarterPackLoading(true)
-    setStarterPackError('')
-    try {
-      const secureToken = await ensureDungeonSession(true)
-      if (!secureToken) {
-        setStarterPackError('Wallet signature required before payment.')
-        setStarterPackLoading(false)
-        return
-      }
-
-      const lamports = Math.round(STARTER_PACK_PRICE * LAMPORTS_PER_SOL)
-      const balance = await connection.getBalance(publicKey)
-      const feeBuffer = 5000
-      if (balance < lamports + feeBuffer) {
-        setStarterPackError(`Not enough SOL. Need ${STARTER_PACK_PRICE} SOL + network fee.`)
-        setStarterPackLoading(false)
-        return
-      }
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash()
-      const tx = new Transaction({
-        feePayer: publicKey,
-        recentBlockhash: blockhash,
-      }).add(
-        SystemProgram.transfer({
-          fromPubkey: publicKey,
-          toPubkey: GOLD_STORE_WALLET,
-          lamports,
-        }),
-      )
-      const signature = await sendTransaction(tx, connection)
-      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
-
-      setStarterPackError('Payment confirmed. Finalizing Starter Pack...')
-      const result = await finalizePaymentCredit(
-        'starter_pack_buy',
-        { txSignature: signature },
-        7,
-        1200,
-      )
-      if (!result.ok) {
-        setStarterPackError(
-          `Payment sent (${signature.slice(0, 8)}...), but Starter Pack credit failed: ${result.error || 'unknown error'}.`,
-        )
-        setStarterPackLoading(false)
-        return
-      }
-
-      if (typeof result.gold === 'number') {
-        state.gold = Math.max(0, Math.floor(Number(result.gold)))
-      } else {
-        state.gold += STARTER_PACK_GOLD
-      }
-      applyServerConsumables(state, result.consumables)
-      state.starterPackPurchased = typeof result.starterPackPurchased === 'boolean'
-        ? result.starterPackPurchased
-        : true
-      pushLog(
-        state.eventLog,
-        result.starterPackAlreadyProcessed ? 'Starter Pack purchase already processed.' : 'Starter Pack purchased.',
-      )
-      syncHud()
-      void syncWorldBossFromServer(false)
-      setActivePanel(null)
-    } catch (error) {
-      console.warn('Starter pack purchase failed', error)
-      const message = error instanceof Error ? error.message : String(error)
-      setStarterPackError(`Transaction failed: ${message}`)
-    } finally {
-      setStarterPackLoading(false)
-    }
-  }
-
-  const buyPremiumPlan = async (planId: PremiumPlanId) => {
-    const state = gameStateRef.current
-    const plan = PREMIUM_PLANS.find((entry) => entry.id === planId)
-    if (!state || !publicKey || !plan) {
-      setPremiumError('Connect your wallet to buy Premium.')
-      return
-    }
-    const pricing = getPremiumPlanPrice(plan)
-    setPremiumLoading(plan.id)
-    setPremiumError('')
-    try {
-      const secureToken = await ensureDungeonSession(true)
-      if (!secureToken) {
-        setPremiumError('Wallet signature required before payment.')
-        setPremiumLoading(null)
-        return
-      }
-
-      const lamports = Math.round(pricing.sol * LAMPORTS_PER_SOL)
-      const balance = await connection.getBalance(publicKey)
-      const feeBuffer = 5000
-      if (balance < lamports + feeBuffer) {
-        setPremiumError(`Not enough SOL. Need ${pricing.sol} SOL + network fee.`)
-        setPremiumLoading(null)
-        return
-      }
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash()
-      const tx = new Transaction({
-        feePayer: publicKey,
-        recentBlockhash: blockhash,
-      }).add(
-        SystemProgram.transfer({
-          fromPubkey: publicKey,
-          toPubkey: GOLD_STORE_WALLET,
-          lamports,
-        }),
-      )
-      const signature = await sendTransaction(tx, connection)
-      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
-
-      setPremiumError('Payment confirmed. Finalizing Premium activation...')
-      const result = await finalizePaymentCredit(
-        'premium_buy',
-        { planId: plan.id, days: plan.days, txSignature: signature },
-        7,
-        1200,
-      )
-      if (!result.ok) {
-        setPremiumError(
-          `Payment sent (${signature.slice(0, 8)}...), but Premium activation failed: ${result.error || 'unknown error'}.`,
-        )
-        setPremiumLoading(null)
-        return
-      }
-
-      if (typeof result.premiumEndsAt === 'number') {
-        state.premiumEndsAt = Math.max(0, Math.floor(result.premiumEndsAt))
-      } else {
-        const now = Date.now()
-        const base = Math.max(now, state.premiumEndsAt)
-        state.premiumEndsAt = base + plan.days * 24 * 60 * 60 * 1000
-      }
-      if (result.premiumClaimDay) {
-        state.premiumClaimDay = result.premiumClaimDay
-      }
-      pushLog(state.eventLog, result.premiumAlreadyProcessed ? 'Premium purchase already processed.' : `Premium activated for ${plan.days} days.`)
-      syncHud()
-      void saveGameState()
-      void syncWorldBossFromServer(false)
-    } catch (error) {
-      console.warn('Premium purchase failed', error)
-      const message = error instanceof Error ? error.message : String(error)
-      setPremiumError(`Transaction failed: ${message}`)
-    } finally {
-      setPremiumLoading(null)
-    }
-  }
-
-  const applyServerConsumables = (state: GameState, rows: unknown) => {
-    if (!Array.isArray(rows)) return
-    const normalized = normalizeLoadedConsumables(rows)
-    if (!normalized.length && rows.length > 0) return
-    state.consumables = normalized
-    state.consumableId = normalized.reduce((max, item) => Math.max(max, item.id), 0)
-  }
-
-  const applyConsumableEffectsFromServer = (state: GameState, result: GameSecureResponse) => {
-    if (typeof result.bossMarkCycleStart === 'string') {
-      state.bossMarkCycleStart = result.bossMarkCycleStart
-    }
-    if (typeof result.crystalFlaskRuns === 'number') {
-      state.crystalFlaskRuns = Math.max(0, Math.floor(Number(result.crystalFlaskRuns)))
-    }
-  }
-
-
-  const parseServerStakeEntries = (rows: unknown): StakeEntry[] => {
-    if (!Array.isArray(rows)) return []
-    return rows
-      .map((entry) => {
-        if (!entry || typeof entry !== 'object') return null
-        const row = entry as { id?: number; amount?: number; endsAt?: number }
-        const id = Math.max(1, Math.floor(Number(row.id ?? 0)))
-        const amount = Math.max(0, Math.floor(Number(row.amount ?? 0)))
-        const endsAt = Math.max(0, Math.floor(Number(row.endsAt ?? 0)))
-        if (!id || amount <= 0 || endsAt <= 0) return null
-        return { id, amount, endsAt }
-      })
-      .filter((entry): entry is StakeEntry => Boolean(entry))
   }
 
   const claimPremiumDailyRewards = async () => {
@@ -6161,16 +6044,6 @@ function App() {
             </div>
           </div>
         </div>
-        <button
-          type="button"
-          className="resource-swap-trigger"
-          onClick={() => setActivePanel('swap')}
-          title="Swap crystals to gold"
-          aria-label="Swap crystals to gold"
-        >
-          <img className="icon-img" src={iconCrystalGoldSwap} alt="" />
-          <span>Swap</span>
-        </button>
         <div className="resource-chip crystals with-action">
           <img className="icon-img" src={iconCrystals} alt="" />
           <div className="resource-text">
@@ -6179,9 +6052,9 @@ function App() {
               <strong>{hud.crystals}</strong>
             </div>
             <div className="resource-actions">
-              <button type="button" className="resource-action" onClick={() => setActivePanel('withdraw')}>
-                <img className="icon-img tiny" src={iconWithdraw} alt="" />
-                Withdraw
+              <button type="button" className="resource-action" onClick={() => setActivePanel('season')}>
+                <img className="icon-img tiny" src={iconCrystals} alt="" />
+                Season
               </button>
               <button type="button" className="resource-action secondary" onClick={() => setActivePanel('stake')}>
                 <img className="icon-img tiny" src={iconStacking} alt="" />
@@ -6214,9 +6087,9 @@ function App() {
         <img className="icon-img tiny" src={iconBuyGold} alt="" />
         Buy Gold
       </button>
-      <button type="button" className="resource-action" onClick={() => setActivePanel('withdraw')}>
-        <img className="icon-img tiny" src={iconWithdraw} alt="" />
-        Withdraw
+      <button type="button" className="resource-action" onClick={() => setActivePanel('season')}>
+        <img className="icon-img tiny" src={iconCrystals} alt="" />
+        Season
       </button>
       <button type="button" className="resource-action secondary" onClick={() => setActivePanel('stake')}>
         <img className="icon-img tiny" src={iconStacking} alt="" />
@@ -6400,14 +6273,14 @@ function App() {
                 <img src={iconShop} alt="" />
                 <div>
                   <h3>Merchant shop</h3>
-                  <p>Stock energy, speed, and attack tonics to push further.</p>
+                  <p>Stock energy, keys, Boss Marks, and Crystal Flasks to push further.</p>
                 </div>
               </div>
               <div className="feature-card">
                 <img src={iconCrystals} alt="" />
                 <div>
-                  <h3>Crystals to SOL</h3>
-                  <p>Turn crystal rewards into SOL at a fixed exchange rate.</p>
+                  <h3>30-day seasons</h3>
+                  <p>Stack crystals, climb the leaderboard, and compete for the seasonal SOL pool.</p>
                 </div>
               </div>
             </div>
@@ -8040,177 +7913,190 @@ function App() {
         </div>
       )}
 
-      {activePanel === 'swap' && hud && (
+      {activePanel === 'season' && hud && (
         <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
+          <div className="modal wide" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
-              <h3>Swap Crystals to Gold</h3>
+              <h3>Crystal Season</h3>
               <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
                 Close
               </button>
             </div>
-            <div className="withdraw-body">
-              <div className="withdraw-info">
-                <span className="withdraw-info-label">
-                  <img className="icon-img small" src={iconCrystalGoldSwap} alt="" />
-                  Exchange rate
-                </span>
-                <strong>
-                  1 <img className="icon-img small" src={iconCrystals} alt="" /> = {formatNumber(CRYSTAL_TO_GOLD_SWAP_RATE)}{' '}
-                  <img className="icon-img small" src={iconGold} alt="" />
-                </strong>
-              </div>
-              <div className="withdraw-info">
-                <span className="withdraw-info-label">
-                  <img className="icon-img small" src={iconCrystals} alt="" />
-                  Available crystals
-                </span>
-                <strong>
-                  {formatNumber(hud.crystals)} <img className="icon-img small" src={iconCrystals} alt="" />
-                </strong>
-              </div>
-              <label className="withdraw-label">
-                Amount (crystals)
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={swapCrystalsAmount}
-                  onChange={(event) => setSwapCrystalsAmount(event.target.value.replace(/[^0-9]/g, ''))}
-                  placeholder="100"
-                />
-              </label>
-              {(() => {
-                const amount = Math.floor(Number(swapCrystalsAmount))
-                if (!Number.isFinite(amount) || amount <= 0) return null
-                const goldValue = amount * CRYSTAL_TO_GOLD_SWAP_RATE
-                return (
-                  <div className="withdraw-convert">
-                    <img className="icon-img small" src={iconCrystals} alt="" />
-                    {formatNumber(amount)} =
-                    <img className="icon-img small" src={iconGold} alt="" />
-                    {formatNumber(goldValue)} gold
+            <div className="withdraw-body season-body">
+              {seasonInfo ? (
+                <>
+                  <div className="withdraw-info">
+                    <span className="withdraw-info-label">
+                      <img className="icon-img small" src={iconCrystals} alt="" />
+                      Active season
+                    </span>
+                    <strong>{seasonInfo.name}</strong>
                   </div>
-                )
-              })()}
-              {swapError && <div className="withdraw-error">{swapError}</div>}
-              <button type="button" className="withdraw-submit" disabled={swapLoading} onClick={submitCrystalGoldSwap}>
-                {swapLoading ? 'Swapping...' : 'Swap'}
-              </button>
+                  <div className="withdraw-info season-grid-two">
+                    <span className="withdraw-info-label">Pool</span>
+                    <strong>{seasonInfo.poolSol.toFixed(3)} SOL</strong>
+                  </div>
+                  <div className="withdraw-info season-grid-two">
+                    <span className="withdraw-info-label">Ends</span>
+                    <strong>{formatDateTime(seasonInfo.endAt)}</strong>
+                  </div>
+                  <div className="withdraw-info season-grid-two">
+                    <span className="withdraw-info-label">Total crystals</span>
+                    <strong>{formatNumber(seasonTotalCrystals)}</strong>
+                  </div>
+                  <div className="withdraw-info season-grid-two">
+                    <span className="withdraw-info-label">Weighted crystals</span>
+                    <strong>{formatNumber(Math.floor(seasonTotalEffectiveCrystals))}</strong>
+                  </div>
+                  <div className="withdraw-info season-grid-two">
+                    <span className="withdraw-info-label">Participants</span>
+                    <strong>{formatNumber(seasonTotalPlayers)}</strong>
+                  </div>
+                  {seasonPlayer && (
+                    <div className="withdraw-info season-player-summary">
+                      <span className="withdraw-info-label">Your snapshot projection</span>
+                      <strong>
+                        Rank #{seasonPlayer.rank} · {formatNumber(seasonPlayer.crystals)} crystals · {seasonPlayer.premiumActive ? 'Premium x1.5' : 'Standard x1.0'} · ~{seasonPlayer.payoutSol.toFixed(6)} SOL
+                      </strong>
+                    </div>
+                  )}
+                  <div className="withdraw-note">
+                    Snapshot uses your current crystal balance. Premium players receive a 1.5x multiplier at season close.
+                  </div>
+                </>
+              ) : (
+                <div className="withdraw-note">No active season right now.</div>
+              )}
+
+              {seasonError && <div className="withdraw-error">{seasonError}</div>}
+              {seasonLoading && <div className="muted">Loading season data...</div>}
+
+              {seasonLeaderboard.length > 0 && (
+                <div className="admin-table season-table">
+                  <div className="admin-row header season-table">
+                    <span>Rank</span>
+                    <span>Player</span>
+                    <span>Crystals</span>
+                    <span>Premium</span>
+                    <span>Weighted</span>
+                    <span>Payout</span>
+                    <span>Wallet</span>
+                  </div>
+                  {seasonLeaderboard.map((row) => (
+                    <div key={row.wallet} className="admin-row season-table">
+                      <span>#{row.rank}</span>
+                      <span>{row.name}</span>
+                      <span>{formatNumber(row.crystals)}</span>
+                      <span>{row.premiumActive ? 'x1.5' : 'x1.0'}</span>
+                      <span>{formatNumber(Math.floor(row.effectiveCrystals))}</span>
+                      <span>{row.payoutSol.toFixed(6)} SOL</span>
+                      <span className="wallet-chip">{formatShortWallet(row.wallet)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {isAdmin && (
+                <div className="season-admin-block">
+                  <div className="modal-header season-subheader">
+                    <h3>Season Admin</h3>
+                  </div>
+                  {!seasonInfo && (
+                    <div className="season-admin-start-grid">
+                      <label className="withdraw-label">
+                        Season name
+                        <input type="text" value={seasonAdminName} onChange={(event) => setSeasonAdminName(event.target.value)} placeholder="Crystal Season" />
+                      </label>
+                      <label className="withdraw-label">
+                        Pool (SOL)
+                        <input type="number" min={0} step="0.001" value={seasonAdminPool} onChange={(event) => setSeasonAdminPool(event.target.value)} placeholder="100" />
+                      </label>
+                      <label className="withdraw-label">
+                        Duration (days)
+                        <input type="number" min={1} max={90} step={1} value={seasonAdminDurationDays} onChange={(event) => setSeasonAdminDurationDays(event.target.value.replace(/[^0-9]/g, ''))} placeholder="30" />
+                      </label>
+                      <button type="button" className="withdraw-submit" onClick={startSeason} disabled={seasonAdminBusy}>
+                        {seasonAdminBusy ? 'Starting...' : 'Start Season'}
+                      </button>
+                    </div>
+                  )}
+                  {seasonInfo && seasonInfo.status === 'active' && (
+                    <div className="resources-actions-row season-admin-actions">
+                      <button type="button" className="resource-action" onClick={() => void loadSeasonStatus(true)} disabled={seasonAdminBusy || seasonLoading}>
+                        Refresh
+                      </button>
+                      <button type="button" className="resource-action secondary" onClick={previewSeasonClose} disabled={seasonAdminBusy}>
+                        {seasonAdminBusy ? 'Working...' : 'Preview Close'}
+                      </button>
+                      <button type="button" className="resource-action buy-gold" onClick={closeSeason} disabled={seasonAdminBusy}>
+                        {seasonAdminBusy ? 'Closing...' : 'Close Season'}
+                      </button>
+                    </div>
+                  )}
+                  {!seasonInfo && (
+                    <div className="resources-actions-row season-admin-actions">
+                      <button type="button" className="resource-action secondary" onClick={loadLatestSeasonSnapshot} disabled={seasonAdminBusy}>
+                        {seasonAdminBusy ? 'Loading...' : 'Load Latest Snapshot'}
+                      </button>
+                    </div>
+                  )}
+                  {seasonPreviewRows.length > 0 && (
+                    <>
+                      <div className="withdraw-note">Preview close uses the current crystal balances and Premium state at the moment of closing.</div>
+                      <div className="admin-table season-table compact">
+                        <div className="admin-row header season-table compact">
+                          <span>Rank</span>
+                          <span>Player</span>
+                          <span>Crystals</span>
+                          <span>Weighted</span>
+                          <span>Share</span>
+                          <span>Payout</span>
+                        </div>
+                        {seasonPreviewRows.map((row) => (
+                          <div key={row.wallet} className="admin-row season-table compact">
+                            <span>#{row.rank}</span>
+                            <span>{row.name}</span>
+                            <span>{formatNumber(row.crystals)}</span>
+                            <span>{formatNumber(Math.floor(row.effectiveCrystals))}</span>
+                            <span>{(row.share * 100).toFixed(3)}%</span>
+                            <span>{row.payoutSol.toFixed(6)} SOL</span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                  {seasonSnapshotRows.length > 0 && (
+                    <>
+                      <div className="withdraw-note">Latest closed season snapshot. Use this table for manual payouts.</div>
+                      <div className="admin-table season-table compact">
+                        <div className="admin-row header season-table compact">
+                          <span>Rank</span>
+                          <span>Player</span>
+                          <span>Crystals</span>
+                          <span>Premium</span>
+                          <span>Weighted</span>
+                          <span>Payout</span>
+                        </div>
+                        {seasonSnapshotRows.map((row) => (
+                          <div key={row.wallet} className="admin-row season-table compact">
+                            <span>#{row.rank}</span>
+                            <span>{row.name}</span>
+                            <span>{formatNumber(row.crystals)}</span>
+                            <span>{row.premiumActive ? 'x1.5' : 'x1.0'}</span>
+                            <span>{formatNumber(Math.floor(row.effectiveCrystals))}</span>
+                            <span>{row.payoutSol.toFixed(6)} SOL</span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {activePanel === 'withdraw' && hud && (
-        <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Withdraw Crystals</h3>
-              <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
-                Close
-              </button>
-            </div>
-            <div className="withdraw-body">
-              <div className="withdraw-info">
-                <span className="withdraw-info-label">
-                  <img className="icon-img small" src={iconCrystals} alt="" />
-                  Exchange rate
-                </span>
-                <strong>
-                  {formatNumber(WITHDRAW_RATE)} <img className="icon-img small" src={iconCrystals} alt="" /> = 1{' '}
-                  <img className="icon-img small" src={iconSolana} alt="" />
-                </strong>
-              </div>
-              <div className="withdraw-info">
-                <span className="withdraw-info-label">
-                  <img className="icon-img small" src={iconCrystals} alt="" />
-                  Minimum withdrawal
-                </span>
-                <strong>
-                  {formatNumber(WITHDRAW_MIN)} <img className="icon-img small" src={iconCrystals} alt="" />
-                </strong>
-              </div>
-              <div className="withdraw-info">
-                <span className="withdraw-info-label">
-                  <img className="icon-img small" src={iconCrystals} alt="" />
-                  Available
-                </span>
-                <strong>
-                  {formatNumber(hud.crystals)} <img className="icon-img small" src={iconCrystals} alt="" />
-                </strong>
-              </div>
-              <label className="withdraw-label">
-                Amount (crystals)
-                <input
-                  type="number"
-                  min={WITHDRAW_MIN}
-                  step={1}
-                  value={withdrawAmount}
-                  onChange={(event) => setWithdrawAmount(event.target.value.replace(/[^0-9]/g, ''))}
-                  placeholder="1000"
-                />
-              </label>
-              <label className="withdraw-label">
-                Your Solana address
-                <input
-                  type="text"
-                  value={withdrawAddress}
-                  onChange={(event) => setWithdrawAddress(event.target.value.trim())}
-                  placeholder="Enter SOL address"
-                />
-              </label>
-              {(() => {
-                const amount = Math.floor(Number(withdrawAmount))
-                if (!Number.isFinite(amount) || amount <= 0) return null
-                const solValue = (amount / WITHDRAW_RATE).toFixed(4)
-                return (
-                  <div className="withdraw-convert">
-                    <img className="icon-img small" src={iconCrystals} alt="" />
-                    {formatNumber(amount)} =
-                    <img className="icon-img small" src={iconSolana} alt="" />
-                    {solValue} SOL
-                  </div>
-                )
-              })()}
-              {withdrawError && <div className="withdraw-error">{withdrawError}</div>}
-              <button type="button" className="withdraw-submit" onClick={submitWithdrawal}>
-                Submit request
-              </button>
-              <div className="withdraw-note">
-                Requests are reviewed manually. You will receive SOL in 15min - 2hr.
-              </div>
-              <div className="withdraw-requests">
-                <div className="withdraw-requests-title">Your requests</div>
-                {playerWithdrawalsLoading && <div className="muted">Loading requests...</div>}
-                {playerWithdrawalsError && <div className="withdraw-error">{playerWithdrawalsError}</div>}
-                {!playerWithdrawalsLoading && !playerWithdrawalsError && playerWithdrawals.length === 0 && (
-                  <div className="muted">No withdrawal requests yet.</div>
-                )}
-                {playerWithdrawals.length > 0 && (
-                  <div className="withdraw-requests-list">
-                    {playerWithdrawals.map((row) => (
-                      <div key={row.id} className="withdraw-row">
-                        <span className="withdraw-cell id">#{row.id.slice(0, 6)}</span>
-                        <span className={`withdraw-cell status ${row.status}`}>{row.status}</span>
-                        <span className="withdraw-cell amount">
-                          <img className="icon-img small" src={iconCrystals} alt="" />
-                          {formatNumber(row.crystals)}
-                        </span>
-                        <span className="withdraw-cell sol">
-                          <img className="icon-img small" src={iconSolana} alt="" />
-                          {row.sol_amount}
-                        </span>
-                        <span className="withdraw-cell date">{formatDateTime(row.created_at)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {activePanel === 'stake' && hud && (
         <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
@@ -8517,11 +8403,6 @@ function App() {
                         <div className="admin-sub">{formatNumber(adminData.summary.totalCrystals)} crystals</div>
                       </div>
                       <div className="admin-card">
-                        <div className="admin-label">Withdrawals</div>
-                        <div className="admin-value">{formatNumber(adminData.summary.pendingWithdrawals)} pending</div>
-                        <div className="admin-sub">{formatNumber(adminData.summary.pendingCrystals)} crystals</div>
-                      </div>
-                      <div className="admin-card">
                         <div className="admin-label">Dungeons</div>
                         <div className="admin-value">{formatNumber(adminData.summary.totalDungeons)}</div>
                         <div className="admin-sub">Runs total</div>
@@ -8543,7 +8424,7 @@ function App() {
                           type="text"
                           value={adminEventKindFilter}
                           onChange={(event) => setAdminEventKindFilter(event.target.value)}
-                          placeholder="withdraw_submit"
+                          placeholder="profile_save"
                         />
                       </label>
                       <label className="admin-filter small">
@@ -8702,57 +8583,6 @@ function App() {
                               {detailsText}
                             </span>
                           </div>
-                        )
-                      })}
-                    </div>
-                    <div className="admin-table withdrawals">
-                      <div className="admin-row header withdrawals">
-                        <span>Request</span>
-                        <span>Player</span>
-                        <span>Crystals</span>
-                        <span>SOL</span>
-                        <span>Status</span>
-                        <span>Created</span>
-                        <span>Wallet</span>
-                        <span>Action</span>
-                      </div>
-                      {adminData.withdrawals.length === 0 && (
-                        <div className="admin-row empty">
-                          <span>No withdrawal requests yet.</span>
-                        </div>
-                      )}
-                      {adminData.withdrawals.map((row) => {
-                        const payoutWallet = (row.payout_wallet || '').trim() || row.wallet
-                        return (
-                        <div key={row.id} className="admin-row withdrawals">
-                          <span>#{row.id.slice(0, 6)}</span>
-                          <span>{row.name}</span>
-                          <span>{formatNumber(row.crystals)}</span>
-                          <span>{row.sol_amount}</span>
-                          <span className={`status ${row.status}`}>{row.status}</span>
-                          <span>{formatDateTime(row.created_at)}</span>
-                          <button
-                            type="button"
-                            className="wallet-chip copy-chip"
-                            onClick={() => copyToClipboard(payoutWallet)}
-                            title="Copy payout wallet"
-                          >
-                            {formatShortWallet(payoutWallet)}
-                          </button>
-                          <span>
-                            {row.status === 'pending' ? (
-                              <button
-                                type="button"
-                                className="admin-action"
-                                onClick={() => markWithdrawalPaid(row.id)}
-                              >
-                                Mark as paid
-                              </button>
-                            ) : (
-                              <span className="status paid">paid</span>
-                            )}
-                          </span>
-                        </div>
                         )
                       })}
                     </div>

@@ -3,9 +3,6 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { clusterApiUrl, Connection, PublicKey } from "https://esm.sh/@solana/web3.js@1.98.4";
 
 const MAX_LEVEL = 255;
-const WITHDRAW_RATE = 15000;
-const WITHDRAW_MIN = 2000;
-const CRYSTAL_TO_GOLD_SWAP_RATE = 75;
 const MAX_TICKETS = 30;
 const DUNGEON_DAILY_TICKETS = 5;
 const WORLD_BOSS_DURATION_SECONDS = 12 * 60 * 60;
@@ -250,6 +247,43 @@ type ReferralRow = {
   crystals_earned: number;
   created_at: string;
   updated_at?: string;
+};
+
+type SeasonRow = {
+  id: string;
+  name: string;
+  start_at: string;
+  end_at: string;
+  pool_sol: number | string;
+  status: string;
+  closed_at: string | null;
+  created_at?: string;
+};
+
+type SeasonSnapshotRow = {
+  id: string;
+  season_id: string;
+  wallet: string;
+  name: string;
+  crystals_snapshot: number | string;
+  premium_active: boolean;
+  effective_crystals: number | string;
+  share: number | string;
+  payout_sol: number | string;
+  excluded: boolean;
+  exclude_reason: string;
+  created_at: string;
+};
+
+type SeasonComputedRow = {
+  wallet: string;
+  name: string;
+  crystalsSnapshot: number;
+  premiumActive: boolean;
+  effectiveCrystals: number;
+  share: number;
+  payoutSol: number;
+  updatedAt: string;
 };
 
 type VillageBuildingId = "castle" | "mine" | "lab" | "storage";
@@ -1440,6 +1474,102 @@ const normalizeState = (raw: unknown) => {
   state.stake = stakes;
   state.stakeId = maxStakeId;
   return state;
+};
+
+const normalizeSeason = (row: Record<string, unknown> | SeasonRow | null) => {
+  if (!row || typeof row !== "object") return null;
+  const season = row as Record<string, unknown>;
+  const id = String(season.id ?? "").trim();
+  if (!id) return null;
+  return {
+    id,
+    name: String(season.name ?? "Season").trim() || "Season",
+    startAt: String(season.start_at ?? ""),
+    endAt: String(season.end_at ?? ""),
+    poolSol: Math.max(0, Number(season.pool_sol ?? 0)),
+    status: String(season.status ?? "active"),
+    closedAt: season.closed_at ? String(season.closed_at) : "",
+  };
+};
+
+const getActiveSeason = async (supabase: ReturnType<typeof createClient>) => {
+  const { data, error } = await supabase
+    .from("seasons")
+    .select("id, name, start_at, end_at, pool_sol, status, closed_at, created_at")
+    .eq("status", "active")
+    .order("start_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) return { ok: false as const, error: "Failed to load active season." };
+  return { ok: true as const, season: normalizeSeason((data as Record<string, unknown> | null) ?? null) };
+};
+
+const getLatestClosedSeason = async (supabase: ReturnType<typeof createClient>) => {
+  const { data, error } = await supabase
+    .from("seasons")
+    .select("id, name, start_at, end_at, pool_sol, status, closed_at, created_at")
+    .eq("status", "closed")
+    .order("closed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) return { ok: false as const, error: "Failed to load season history." };
+  return { ok: true as const, season: normalizeSeason((data as Record<string, unknown> | null) ?? null) };
+};
+
+const buildSeasonComputedRows = (
+  profileRows: Array<Record<string, unknown>>,
+  poolSol: number,
+  nowMs: number,
+) => {
+  const rows: SeasonComputedRow[] = profileRows
+    .map((row) => {
+      const wallet = String(row.wallet ?? "").trim();
+      const state = normalizeState(row.state ?? null);
+      if (!wallet || !state) return null;
+      const crystalsSnapshot = Math.max(0, asInt(state.crystals, 0));
+      const premiumActive = Math.max(0, asInt(state.premiumEndsAt, 0)) > nowMs;
+      const effectiveCrystals = Number((crystalsSnapshot * (premiumActive ? 1.5 : 1)).toFixed(3));
+      return {
+        wallet,
+        name: sanitizeName(state.name) || "Unknown",
+        crystalsSnapshot,
+        premiumActive,
+        effectiveCrystals,
+        share: 0,
+        payoutSol: 0,
+        updatedAt: String(row.updated_at ?? ""),
+      };
+    })
+    .filter((row): row is SeasonComputedRow => Boolean(row));
+
+  rows.sort((a, b) =>
+    b.crystalsSnapshot - a.crystalsSnapshot ||
+    Number(b.premiumActive) - Number(a.premiumActive) ||
+    b.effectiveCrystals - a.effectiveCrystals ||
+    a.wallet.localeCompare(b.wallet)
+  );
+
+  const totalCrystals = rows.reduce((sum, row) => sum + row.crystalsSnapshot, 0);
+  const totalEffectiveCrystals = rows.reduce((sum, row) => sum + row.effectiveCrystals, 0);
+  const safePoolSol = Math.max(0, Number.isFinite(poolSol) ? poolSol : 0);
+
+  const computedRows = rows.map((row) => {
+    const share = totalEffectiveCrystals > 0 ? row.effectiveCrystals / totalEffectiveCrystals : 0;
+    return {
+      ...row,
+      share,
+      payoutSol: Number((safePoolSol * share).toFixed(9)),
+    };
+  });
+
+  return {
+    rows: computedRows,
+    totalPlayers: computedRows.length,
+    totalCrystals,
+    totalEffectiveCrystals: Number(totalEffectiveCrystals.toFixed(3)),
+  };
 };
 
 const validateStateTransition = (
@@ -2960,111 +3090,55 @@ serve(async (req) => {
     return json({ ok: true, savedAt: now.toISOString() });
   }
 
-  if (action === "withdraw_submit") {
-    const amount = asInt(body.amount, 0);
-    if (!Number.isFinite(amount) || amount < WITHDRAW_MIN) {
-      return json({ ok: false, error: `Minimum withdrawal is ${WITHDRAW_MIN} crystals.` });
-    }
-    const payoutWalletRaw = String(body.payoutWallet ?? body.withdrawAddress ?? "").trim();
-    let payoutWallet = payoutWalletRaw;
-    if (!payoutWallet && isValidSolanaAddress(auth.wallet)) {
-      payoutWallet = auth.wallet;
-    }
-    if (!payoutWallet) {
-      return json({ ok: false, error: "Enter your Solana address." });
-    }
-    if (!isValidSolanaAddress(payoutWallet)) {
-      return json({ ok: false, error: "Enter a valid Solana address." });
+  if (action === "season_status") {
+    const activeSeasonResult = await getActiveSeason(supabase);
+    if (!activeSeasonResult.ok) return json({ ok: false, error: activeSeasonResult.error });
+    if (!activeSeasonResult.season) {
+      return json({ ok: true, season: null, seasonLeaderboard: [], seasonPlayer: null });
     }
 
-    const { data: profileRow, error: profileError } = await supabase
+    const limit = clampInt(body.limit, 10, 100);
+    const { data, error } = await supabase
       .from("profiles")
-      .select("state, updated_at")
-      .eq("wallet", auth.wallet)
-      .maybeSingle();
+      .select("wallet, state, updated_at");
+    if (error) return json({ ok: false, error: "Failed to load season leaderboard." });
 
-    if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
-      return json({ ok: false, error: "Profile not found." });
-    }
-
-    const state = normalizeState(profileRow.state as unknown);
-    if (!state) return json({ ok: false, error: "Invalid profile state." });
-
-    const metrics = getMetrics(state);
-    if (amount > metrics.crystals) {
-      return json({ ok: false, error: "Not enough crystals." });
-    }
-
-    const nextCrystals = metrics.crystals - amount;
-    state.crystals = nextCrystals;
-    const name = sanitizeName(state.name);
-    const solAmount = Number((amount / WITHDRAW_RATE).toFixed(4));
-    const createdAt = now.toISOString();
-
-    const expectedUpdatedAt = String(profileRow.updated_at ?? "");
-    const { data: updatedProfile, error: updateError } = await supabase
-      .from("profiles")
-      .update({
-        state,
-        updated_at: now.toISOString(),
-      })
-      .eq("wallet", auth.wallet)
-      .eq("updated_at", expectedUpdatedAt)
-      .select("wallet")
-      .maybeSingle();
-
-    if (updateError || !updatedProfile) {
-      return json({ ok: false, error: "Profile changed concurrently, retry withdrawal." });
-    }
-
-    const { data: withdrawalRow, error: insertError } = await supabase
-      .from("withdrawals")
-      .insert({
-        wallet: auth.wallet,
-        payout_wallet: payoutWallet,
-        name,
-        crystals: amount,
-        sol_amount: solAmount,
-        status: "pending",
-        created_at: createdAt,
-      })
-      .select("id, wallet, payout_wallet, name, crystals, sol_amount, status, created_at")
-      .maybeSingle();
-
-    if (insertError || !withdrawalRow) {
-      await supabase
-        .from("profiles")
-        .update({ state: profileRow.state, updated_at: now.toISOString() })
-        .eq("wallet", auth.wallet);
-      return json({ ok: false, error: "Failed to submit withdrawal request." });
-    }
-
-    await auditEvent(supabase, auth.wallet, "withdraw_submit", {
-      amount,
-      solAmount,
-      payoutWallet,
-      remainingCrystals: nextCrystals,
-      withdrawalId: String(withdrawalRow.id ?? ""),
-    });
+    const computed = buildSeasonComputedRows(
+      ((data as Array<Record<string, unknown>> | null) ?? []),
+      Math.max(0, Number(activeSeasonResult.season.poolSol ?? 0)),
+      now.getTime(),
+    );
+    const leaderboard = computed.rows.slice(0, limit).map((row, index) => ({
+      rank: index + 1,
+      wallet: row.wallet,
+      name: row.name,
+      crystals: row.crystalsSnapshot,
+      premiumActive: row.premiumActive,
+      effectiveCrystals: row.effectiveCrystals,
+      payoutSol: row.payoutSol,
+    }));
+    const playerIndex = computed.rows.findIndex((row) => row.wallet === auth.wallet);
+    const playerRow = playerIndex >= 0
+      ? {
+          rank: playerIndex + 1,
+          wallet: computed.rows[playerIndex].wallet,
+          name: computed.rows[playerIndex].name,
+          crystals: computed.rows[playerIndex].crystalsSnapshot,
+          premiumActive: computed.rows[playerIndex].premiumActive,
+          effectiveCrystals: computed.rows[playerIndex].effectiveCrystals,
+          payoutSol: computed.rows[playerIndex].payoutSol,
+        }
+      : null;
 
     return json({
       ok: true,
-      savedAt: now.toISOString(),
-      withdrawal: withdrawalRow,
-      remainingCrystals: nextCrystals,
+      season: activeSeasonResult.season,
+      seasonLeaderboard: leaderboard,
+      seasonPlayer: playerRow,
+      seasonTotalPlayers: computed.totalPlayers,
+      seasonTotalCrystals: computed.totalCrystals,
+      seasonTotalEffectiveCrystals: computed.totalEffectiveCrystals,
     });
-  }
-
-  if (action === "withdraw_list") {
-    const { data, error } = await supabase
-      .from("withdrawals")
-      .select("id, wallet, payout_wallet, name, crystals, sol_amount, status, created_at")
-      .eq("wallet", auth.wallet)
-      .order("created_at", { ascending: false })
-      .limit(20);
-
-    if (error) return json({ ok: false, error: "Failed to load withdrawals." });
-    return json({ ok: true, withdrawals: data ?? [] });
   }
 
   if (action === "fortune_status") {
@@ -4190,77 +4264,6 @@ serve(async (req) => {
     return json({ ok: false, error: "Profile changed concurrently, retry claim." });
   }
 
-  if (action === "swap_crystals_to_gold") {
-    const crystalsAmount = asInt(body.crystalsAmount, 0);
-    if (!Number.isFinite(crystalsAmount) || crystalsAmount <= 0) {
-      return json({ ok: false, error: "Enter a valid amount." });
-    }
-    if (crystalsAmount > 10_000_000_000) {
-      return json({ ok: false, error: "Swap amount is too high." });
-    }
-
-    const goldAmount = crystalsAmount * CRYSTAL_TO_GOLD_SWAP_RATE;
-    if (!Number.isSafeInteger(goldAmount) || goldAmount <= 0) {
-      return json({ ok: false, error: "Invalid swap amount." });
-    }
-
-    for (let attempt = 0; attempt < 6; attempt += 1) {
-      const nowIso = new Date().toISOString();
-      const { data: profileRow, error: profileError } = await supabase
-        .from("profiles")
-        .select("state, updated_at")
-        .eq("wallet", auth.wallet)
-        .maybeSingle();
-
-      if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
-        return json({ ok: false, error: "Profile not found." });
-      }
-
-      const state = normalizeState(profileRow.state as unknown);
-      if (!state) return json({ ok: false, error: "Invalid profile state." });
-
-      const crystals = Math.max(0, asInt(state.crystals, 0));
-      if (crystalsAmount > crystals) {
-        return json({ ok: false, error: "Not enough crystals." });
-      }
-
-      state.crystals = crystals - crystalsAmount;
-      state.gold = Math.max(0, asInt(state.gold, 0)) + goldAmount;
-
-      const expectedUpdatedAt = String(profileRow.updated_at ?? "");
-      const { data: updated, error: updateError } = await supabase
-        .from("profiles")
-        .update({
-          state,
-          updated_at: nowIso,
-        })
-        .eq("wallet", auth.wallet)
-        .eq("updated_at", expectedUpdatedAt)
-        .select("wallet")
-        .maybeSingle();
-
-      if (updateError || !updated) continue;
-
-      await auditEvent(supabase, auth.wallet, "swap_crystals_to_gold", {
-        swappedCrystals: crystalsAmount,
-        swappedGold: goldAmount,
-        crystalsLeft: Math.max(0, asInt(state.crystals, 0)),
-        gold: Math.max(0, asInt(state.gold, 0)),
-      });
-
-      return json({
-        ok: true,
-        savedAt: nowIso,
-        swappedCrystals: crystalsAmount,
-        swappedGold: goldAmount,
-        crystals: Math.max(0, asInt(state.crystals, 0)),
-        gold: Math.max(0, asInt(state.gold, 0)),
-      });
-    }
-
-    return json({ ok: false, error: "Profile changed concurrently, retry swap." });
-  }
-
   if (action === "quest_claim") {
     const questId = String(body.questId ?? "").trim();
     const quest = QUEST_DEFINITIONS.find((entry) => entry.id === questId);
@@ -4736,6 +4739,189 @@ serve(async (req) => {
     });
   }
 
+  if (action === "admin_season_start") {
+    const adminWallets = toWalletList(Deno.env.get("ADMIN_WALLETS"));
+    if (!adminWallets.includes(auth.wallet)) {
+      return json({ ok: false, error: "Admin access required." });
+    }
+
+    const activeSeasonResult = await getActiveSeason(supabase);
+    if (!activeSeasonResult.ok) return json({ ok: false, error: activeSeasonResult.error });
+    if (activeSeasonResult.season) {
+      return json({ ok: false, error: "Close the current active season first." });
+    }
+
+    const name = String(body.name ?? "Crystal Season").trim().slice(0, 80) || "Crystal Season";
+    const durationDays = clampInt(body.durationDays, 1, 90);
+    const poolSolRaw = Number(body.poolSol ?? 0);
+    if (!Number.isFinite(poolSolRaw) || poolSolRaw < 0) {
+      return json({ ok: false, error: "Enter a valid SOL pool." });
+    }
+
+    const startAt = now.toISOString();
+    const endAt = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString();
+    const { data, error } = await supabase
+      .from("seasons")
+      .insert({
+        name,
+        start_at: startAt,
+        end_at: endAt,
+        pool_sol: Number(poolSolRaw.toFixed(9)),
+        status: "active",
+      })
+      .select("id, name, start_at, end_at, pool_sol, status, closed_at, created_at")
+      .maybeSingle();
+
+    if (error || !data) return json({ ok: false, error: "Failed to start season." });
+    await auditEvent(supabase, auth.wallet, "admin_season_start", { name, durationDays, poolSol: Number(poolSolRaw.toFixed(9)) });
+    return json({ ok: true, season: normalizeSeason(data as Record<string, unknown>) });
+  }
+
+  if (action === "admin_season_preview") {
+    const adminWallets = toWalletList(Deno.env.get("ADMIN_WALLETS"));
+    if (!adminWallets.includes(auth.wallet)) {
+      return json({ ok: false, error: "Admin access required." });
+    }
+
+    const activeSeasonResult = await getActiveSeason(supabase);
+    if (!activeSeasonResult.ok) return json({ ok: false, error: activeSeasonResult.error });
+    if (!activeSeasonResult.season) {
+      return json({ ok: false, error: "No active season to preview." });
+    }
+
+    const limit = clampInt(body.limit, 20, 1000);
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("wallet, state, updated_at");
+    if (error) return json({ ok: false, error: "Failed to build season preview." });
+
+    const computed = buildSeasonComputedRows(((data as Array<Record<string, unknown>> | null) ?? []), Number(activeSeasonResult.season.poolSol ?? 0), now.getTime());
+
+    return json({
+      ok: true,
+      season: activeSeasonResult.season,
+      seasonPreview: computed.rows.slice(0, limit).map((row, index) => ({
+        rank: index + 1,
+        wallet: row.wallet,
+        name: row.name,
+        crystals: row.crystalsSnapshot,
+        premiumActive: row.premiumActive,
+        effectiveCrystals: row.effectiveCrystals,
+        share: row.share,
+        payoutSol: row.payoutSol,
+      })),
+      seasonTotalPlayers: computed.totalPlayers,
+      seasonTotalCrystals: computed.totalCrystals,
+      seasonTotalEffectiveCrystals: computed.totalEffectiveCrystals,
+    });
+  }
+
+  if (action === "admin_season_snapshot") {
+    const adminWallets = toWalletList(Deno.env.get("ADMIN_WALLETS"));
+    if (!adminWallets.includes(auth.wallet)) {
+      return json({ ok: false, error: "Admin access required." });
+    }
+
+    let season = null as ReturnType<typeof normalizeSeason>;
+    const seasonId = String(body.seasonId ?? "").trim();
+    if (seasonId) {
+      const { data, error } = await supabase
+        .from("seasons")
+        .select("id, name, start_at, end_at, pool_sol, status, closed_at, created_at")
+        .eq("id", seasonId)
+        .maybeSingle();
+      if (error) return json({ ok: false, error: "Failed to load season snapshot." });
+      season = normalizeSeason((data as Record<string, unknown> | null) ?? null);
+    } else {
+      const latestClosed = await getLatestClosedSeason(supabase);
+      if (!latestClosed.ok) return json({ ok: false, error: latestClosed.error });
+      season = latestClosed.season;
+    }
+
+    if (!season) return json({ ok: false, error: "No closed season found." });
+
+    const limit = clampInt(body.limit, 20, 1000);
+    const { data, error } = await supabase
+      .from("season_snapshots")
+      .select("id, season_id, wallet, name, crystals_snapshot, premium_active, effective_crystals, share, payout_sol, excluded, exclude_reason, created_at")
+      .eq("season_id", season.id)
+      .order("payout_sol", { ascending: false })
+      .limit(limit);
+    if (error) return json({ ok: false, error: "Failed to load season snapshot rows." });
+
+    const rows = ((data as SeasonSnapshotRow[] | null) ?? []).map((row, index) => ({
+      rank: index + 1,
+      wallet: String(row.wallet ?? ""),
+      name: String(row.name ?? "Unknown"),
+      crystals: Math.max(0, Number(row.crystals_snapshot ?? 0)),
+      premiumActive: Boolean(row.premium_active),
+      effectiveCrystals: Math.max(0, Number(row.effective_crystals ?? 0)),
+      share: Math.max(0, Number(row.share ?? 0)),
+      payoutSol: Math.max(0, Number(row.payout_sol ?? 0)),
+      excluded: Boolean(row.excluded),
+      excludeReason: String(row.exclude_reason ?? ""),
+    }));
+
+    return json({
+      ok: true,
+      season,
+      seasonSnapshot: rows,
+      seasonTotalPlayers: rows.length,
+      seasonTotalCrystals: rows.reduce((sum, row) => sum + row.crystals, 0),
+      seasonTotalEffectiveCrystals: Number(rows.reduce((sum, row) => sum + row.effectiveCrystals, 0).toFixed(3)),
+    });
+  }
+
+  if (action === "admin_season_close") {
+    const adminWallets = toWalletList(Deno.env.get("ADMIN_WALLETS"));
+    if (!adminWallets.includes(auth.wallet)) {
+      return json({ ok: false, error: "Admin access required." });
+    }
+
+    const { data: closedSeasonId, error } = await supabase.rpc("close_active_season");
+    if (error) {
+      return json({ ok: false, error: String(error.message ?? "Failed to close season.") });
+    }
+    const seasonId = String(closedSeasonId ?? "").trim();
+    if (!seasonId) return json({ ok: false, error: "Season close did not return an id." });
+
+    await auditEvent(supabase, auth.wallet, "admin_season_close", { seasonId });
+
+    const { data: seasonRow } = await supabase
+      .from("seasons")
+      .select("id, name, start_at, end_at, pool_sol, status, closed_at, created_at")
+      .eq("id", seasonId)
+      .maybeSingle();
+    const { data: snapshotRows } = await supabase
+      .from("season_snapshots")
+      .select("id, season_id, wallet, name, crystals_snapshot, premium_active, effective_crystals, share, payout_sol, excluded, exclude_reason, created_at")
+      .eq("season_id", seasonId)
+      .order("payout_sol", { ascending: false })
+      .limit(clampInt(body.limit, 20, 1000));
+
+    const rows = ((snapshotRows as SeasonSnapshotRow[] | null) ?? []).map((row, index) => ({
+      rank: index + 1,
+      wallet: String(row.wallet ?? ""),
+      name: String(row.name ?? "Unknown"),
+      crystals: Math.max(0, Number(row.crystals_snapshot ?? 0)),
+      premiumActive: Boolean(row.premium_active),
+      effectiveCrystals: Math.max(0, Number(row.effective_crystals ?? 0)),
+      share: Math.max(0, Number(row.share ?? 0)),
+      payoutSol: Math.max(0, Number(row.payout_sol ?? 0)),
+      excluded: Boolean(row.excluded),
+      excludeReason: String(row.exclude_reason ?? ""),
+    }));
+
+    return json({
+      ok: true,
+      season: normalizeSeason((seasonRow as Record<string, unknown> | null) ?? null),
+      seasonSnapshot: rows,
+      seasonTotalPlayers: rows.length,
+      seasonTotalCrystals: rows.reduce((sum, row) => sum + row.crystals, 0),
+      seasonTotalEffectiveCrystals: Number(rows.reduce((sum, row) => sum + row.effectiveCrystals, 0).toFixed(3)),
+    });
+  }
+
   if (action === "admin_blocked_list") {
     const adminWallets = toWalletList(Deno.env.get("ADMIN_WALLETS"));
     if (!adminWallets.includes(auth.wallet)) {
@@ -4885,42 +5071,6 @@ serve(async (req) => {
       profiles,
       profilesTotal: Math.max(0, asInt(totalProfilesCount, profiles.length)),
     });
-  }
-
-  if (action === "admin_withdrawals") {
-    const adminWallets = toWalletList(Deno.env.get("ADMIN_WALLETS"));
-    if (!adminWallets.includes(auth.wallet)) {
-      return json({ ok: false, error: "Admin access required." });
-    }
-
-    const limit = clampInt(body.limit, 20, 1000);
-    const { data, error } = await supabase
-      .from("withdrawals")
-      .select("id, wallet, payout_wallet, name, crystals, sol_amount, status, created_at")
-      .order("created_at", { ascending: false })
-      .limit(limit);
-
-    if (error) return json({ ok: false, error: "Failed to load withdrawals." });
-    return json({ ok: true, withdrawals: data ?? [] });
-  }
-
-  if (action === "admin_mark_paid") {
-    const withdrawalId = String(body.withdrawalId ?? "");
-    if (!withdrawalId) return json({ ok: false, error: "Missing withdrawal id." });
-
-    const adminWallets = toWalletList(Deno.env.get("ADMIN_WALLETS"));
-    if (!adminWallets.includes(auth.wallet)) {
-      return json({ ok: false, error: "Admin access required." });
-    }
-
-    const { error } = await supabase
-      .from("withdrawals")
-      .update({ status: "paid" })
-      .eq("id", withdrawalId);
-
-    if (error) return json({ ok: false, error: "Failed to update withdrawal." });
-    await auditEvent(supabase, auth.wallet, "admin_mark_paid", { withdrawalId });
-    return json({ ok: true });
   }
 
   return json({ ok: false, error: "Unknown action." });
