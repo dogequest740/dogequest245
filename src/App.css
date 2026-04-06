@@ -5987,3 +5987,80 @@ button.ghost {
     padding-bottom: 20px;
   }
 }
+
+@media (min-width: 921px) {
+  .app:not(.auth-mode):not(.mobile) .game-section {
+    gap: 12px;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .game-layout {
+    gap: 10px;
+    align-items: start;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .game-main {
+    gap: 8px;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .left-panel {
+    padding: 10px;
+    gap: 8px;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .player-card {
+    gap: 4px;
+    padding: 8px;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .player-name {
+    font-size: 19px;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .player-class {
+    font-size: 12px;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .player-level {
+    font-size: 16px;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .player-xp {
+    font-size: 12px;
+    gap: 5px;
+    padding: 3px 7px;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .player-stats {
+    gap: 6px;
+    padding: 10px;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .player-stat-button {
+    padding: 5px 7px;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .player-stat-help {
+    margin-top: 2px;
+    padding: 6px 8px;
+    line-height: 1.3;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .menu-stack {
+    gap: 8px;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .menu-big {
+    padding: 9px 11px;
+    font-size: 11px;
+    gap: 8px;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .menu-big .icon-img {
+    width: 32px;
+    height: 32px;
+  }
+
+  .app:not(.auth-mode):not(.mobile) .battle-controls {
+    gap: 8px;
+  }
+}
