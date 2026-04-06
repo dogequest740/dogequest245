@@ -356,8 +356,8 @@ type FortuneRewardDef = {
 const FORTUNE_REWARDS: FortuneRewardDef[] = [
   { id: "energy_tonic", label: "Energy Tonic", kind: "consumable", consumableType: "energy-small", amount: 1, chance: 24 },
   { id: "grand_energy_elixir", label: "Grand Energy Elixir", kind: "consumable", consumableType: "energy-full", amount: 1, chance: 9 },
-  { id: "crystal_flask", label: "Crystal Flask", kind: "consumable", consumableType: "crystal-flask", amount: 1, chance: 6 },
-  { id: "boss_mark", label: "Boss Mark", kind: "consumable", consumableType: "boss-mark", amount: 1, chance: 3.5 },
+  { id: "crystal_flask", label: "Crystal Flask", kind: "consumable", consumableType: "crystal-flask", amount: 1, chance: 5 },
+  { id: "boss_mark", label: "Boss Mark", kind: "consumable", consumableType: "boss-mark", amount: 1, chance: 5 },
   { id: "crystals_100", label: "100 Crystals", kind: "crystals", amount: 100, chance: 2 },
   { id: "crystals_50", label: "50 Crystals", kind: "crystals", amount: 50, chance: 3 },
   { id: "crystals_10", label: "10 Crystals", kind: "crystals", amount: 10, chance: 5 },
@@ -4925,4 +4925,3 @@ serve(async (req) => {
 
   return json({ ok: false, error: "Unknown action." });
 });
-
