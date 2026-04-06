@@ -176,6 +176,14 @@ type StakeEntryState = {
 };
 
 type ConsumableType = "energy-small" | "energy-full" | "boss-mark" | "crystal-flask" | "key";
+type QuestType = "level" | "kills" | "tier" | "dungeons";
+type QuestDefinition = {
+  id: string;
+  type: QuestType;
+  target: number;
+  rewardGold: number;
+  rewardItem?: ConsumableType;
+};
 type EquipmentSlot = "weapon" | "armor" | "head" | "legs" | "boots" | "artifact";
 type EquipmentStatKey = "power" | "fortune" | "prosperity";
 type EquipmentStats = Record<EquipmentStatKey, number>;
@@ -346,8 +354,10 @@ type FortuneRewardDef = {
 };
 
 const FORTUNE_REWARDS: FortuneRewardDef[] = [
-  { id: "energy_tonic", label: "Energy Tonic", kind: "consumable", consumableType: "energy-small", amount: 1, chance: 31 },
-  { id: "grand_energy_elixir", label: "Grand Energy Elixir", kind: "consumable", consumableType: "energy-full", amount: 1, chance: 10 },
+  { id: "energy_tonic", label: "Energy Tonic", kind: "consumable", consumableType: "energy-small", amount: 1, chance: 24 },
+  { id: "grand_energy_elixir", label: "Grand Energy Elixir", kind: "consumable", consumableType: "energy-full", amount: 1, chance: 9 },
+  { id: "crystal_flask", label: "Crystal Flask", kind: "consumable", consumableType: "crystal-flask", amount: 1, chance: 6 },
+  { id: "boss_mark", label: "Boss Mark", kind: "consumable", consumableType: "boss-mark", amount: 1, chance: 3.5 },
   { id: "crystals_100", label: "100 Crystals", kind: "crystals", amount: 100, chance: 2 },
   { id: "crystals_50", label: "50 Crystals", kind: "crystals", amount: 50, chance: 3 },
   { id: "crystals_10", label: "10 Crystals", kind: "crystals", amount: 10, chance: 5 },
@@ -416,6 +426,61 @@ const getSolanaConnection = () => {
   solanaConnection = new Connection(rpcUrl, "confirmed");
   return solanaConnection;
 };
+
+const rangeValues = (start: number, end: number, step: number) => {
+  const values: number[] = [];
+  for (let value = start; value <= end; value += step) values.push(value);
+  return values;
+};
+
+const LEVEL_QUEST_TARGETS = [...rangeValues(5, 50, 5), ...rangeValues(60, 150, 10), ...rangeValues(160, 250, 10), 255];
+const KILL_QUEST_TARGETS = [
+  25, 50, 100, 175, 250, 350, 500, 700, 950, 1250, 1600, 2000, 2600, 3400, 4500, 6000, 8000, 10500,
+  13500, 17000, 21000, 26000, 32000, 39000, 47000, 56000,
+] as const;
+const TIER_QUEST_TARGETS = [
+  300, 600, 1000, 1600, 2400, 3400, 4700, 6200, 8000, 10000, 12500, 15500, 19000, 23000, 27500, 32000,
+  36500, 41000, 45000,
+] as const;
+const DUNGEON_QUEST_TARGETS = [1, 2, 3, 5, 7, 10, 14, 18, 23, 28, 35, 43, 52, 62, 74, 88, 104, 122, 142, 165] as const;
+
+const scaleQuestRewardGold = (index: number, total: number, min: number, max: number) => {
+  if (total <= 1) return max;
+  const ratio = index / (total - 1);
+  return Math.round(min + (max - min) * ratio);
+};
+
+const buildQuestDefinitions = () => {
+  const quests: QuestDefinition[] = [];
+
+  LEVEL_QUEST_TARGETS.forEach((target, index) => {
+    const rewardGold = Math.round(scaleQuestRewardGold(index, LEVEL_QUEST_TARGETS.length, 200, 2200) / 12);
+    const rewardItem: ConsumableType = target >= 255 ? "key" : target >= 200 ? "boss-mark" : target >= 120 ? "crystal-flask" : target >= 60 ? "energy-full" : "energy-small";
+    quests.push({ id: `level-${target}`, type: "level", target, rewardGold, rewardItem });
+  });
+
+  KILL_QUEST_TARGETS.forEach((target, index) => {
+    const rewardGold = Math.round(scaleQuestRewardGold(index, KILL_QUEST_TARGETS.length, 250, 2500) / 12);
+    const rewardItem: ConsumableType = target >= 56000 ? "key" : target >= 32000 ? "boss-mark" : target >= 14000 ? "crystal-flask" : target >= 6000 ? "energy-full" : "energy-small";
+    quests.push({ id: `kills-${target}`, type: "kills", target, rewardGold, rewardItem });
+  });
+
+  TIER_QUEST_TARGETS.forEach((target, index) => {
+    const rewardGold = Math.round(scaleQuestRewardGold(index, TIER_QUEST_TARGETS.length, 300, 3000) / 12);
+    const rewardItem: ConsumableType = target >= 45000 ? "key" : target >= 30000 ? "boss-mark" : target >= 14000 ? "crystal-flask" : target >= 6200 ? "energy-full" : "energy-small";
+    quests.push({ id: `tier-${target}`, type: "tier", target, rewardGold, rewardItem });
+  });
+
+  DUNGEON_QUEST_TARGETS.forEach((target, index) => {
+    const rewardGold = Math.round(scaleQuestRewardGold(index, DUNGEON_QUEST_TARGETS.length, 350, 3200) / 12);
+    const rewardItem: ConsumableType = target >= 165 ? "key" : target >= 104 ? "boss-mark" : target >= 35 ? "crystal-flask" : target >= 14 ? "energy-full" : "energy-small";
+    quests.push({ id: `dungeons-${target}`, type: "dungeons", target, rewardGold, rewardItem });
+  });
+
+  return quests;
+};
+
+const QUEST_DEFINITIONS = buildQuestDefinitions();
 
 const getPremiumPlan = (planIdRaw: unknown, daysRaw: unknown) => {
   const planId = String(planIdRaw ?? "").trim();
@@ -1272,6 +1337,49 @@ const getMetrics = (state: Record<string, unknown>): Metrics => {
     monsterKills: Math.max(0, asInt(state.monsterKills, 0)),
     dungeonRuns: Math.max(0, asInt(state.dungeonRuns, 0)),
   };
+};
+
+const getTierScoreFromState = (state: Record<string, unknown>) => {
+  const equipment = state.equipment as Record<string, unknown> | undefined;
+  if (!equipment || typeof equipment !== "object" || Array.isArray(equipment)) return 0;
+  let total = 0;
+  for (const slot of EQUIPMENT_SLOT_IDS) {
+    const item = equipment[slot];
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    total += Math.max(0, Math.round(asInt((item as Record<string, unknown>).tierScore, 0) * ITEM_TIER_SCORE_MULTIPLIER));
+  }
+  return total;
+};
+
+const getQuestProgressFromState = (state: Record<string, unknown>, quest: QuestDefinition) => {
+  const player = (state.player as Record<string, unknown> | undefined) ?? {};
+  switch (quest.type) {
+    case "level":
+      return Math.max(0, asInt(player.level, 0));
+    case "kills":
+      return Math.max(0, asInt(state.monsterKills, 0));
+    case "tier":
+      return getTierScoreFromState(state);
+    case "dungeons":
+      return Math.max(0, asInt(state.dungeonRuns, 0));
+    default:
+      return 0;
+  }
+};
+
+const normalizeQuestStates = (value: unknown) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {} as Record<string, { claimed: boolean }>;
+  const source = value as Record<string, unknown>;
+  const result: Record<string, { claimed: boolean }> = {};
+  for (const quest of QUEST_DEFINITIONS) {
+    const row = source[quest.id];
+    if (row && typeof row === "object" && !Array.isArray(row)) {
+      result[quest.id] = { claimed: Boolean((row as Record<string, unknown>).claimed) };
+    } else {
+      result[quest.id] = { claimed: false };
+    }
+  }
+  return result;
 };
 
 const normalizeState = (raw: unknown) => {
@@ -4151,6 +4259,51 @@ serve(async (req) => {
     }
 
     return json({ ok: false, error: "Profile changed concurrently, retry swap." });
+  }
+
+  if (action === "quest_claim") {
+    const questId = String(body.questId ?? "").trim();
+    const quest = QUEST_DEFINITIONS.find((entry) => entry.id === questId);
+    if (!quest) {
+      return json({ ok: false, error: "Unknown quest." });
+    }
+
+    const updated = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
+      const questStates = normalizeQuestStates(state.questStates);
+      if (questStates[quest.id]?.claimed) {
+        throw new Error("Quest already claimed.");
+      }
+      const progress = getQuestProgressFromState(state, quest);
+      if (progress < quest.target) {
+        throw new Error("Quest is not complete yet.");
+      }
+      questStates[quest.id] = { claimed: true };
+      state.questStates = questStates;
+      state.gold = Math.max(0, asInt(state.gold, 0)) + quest.rewardGold;
+      if (quest.rewardItem) {
+        addConsumableToState(state, quest.rewardItem);
+      }
+    });
+
+    if (!updated.ok || !updated.state) {
+      return json({ ok: false, error: updated.error || "Failed to claim quest." });
+    }
+
+    await auditEvent(supabase, auth.wallet, "quest_claim", {
+      questId: quest.id,
+      rewardGold: quest.rewardGold,
+      rewardItem: quest.rewardItem ?? "",
+    });
+
+    return json({
+      ok: true,
+      savedAt: updated.updatedAt,
+      gold: Math.max(0, asInt(updated.state.gold, 0)),
+      consumables: normalizeConsumables(updated.state.consumables).rows,
+      questStates: normalizeQuestStates(updated.state.questStates),
+      bossMarkCycleStart: String(updated.state.bossMarkCycleStart ?? ""),
+      crystalFlaskRuns: Math.max(0, asInt(updated.state.crystalFlaskRuns, 0)),
+    });
   }
 
   if (action === "shop_buy_consumable") {

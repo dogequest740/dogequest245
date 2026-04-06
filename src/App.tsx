@@ -163,9 +163,9 @@ type LevelUpNotice = {
 
 type QuestType = 'level' | 'kills' | 'tier' | 'dungeons'
 
-type QuestRewardItem = 'energy-small' | 'energy-full' | 'key'
+type QuestRewardItem = 'energy-small' | 'energy-full' | 'key' | 'boss-mark' | 'crystal-flask'
 
-type ConsumableType = QuestRewardItem | 'boss-mark' | 'crystal-flask'
+type ConsumableType = QuestRewardItem
 
 type QuestDefinition = {
   id: string
@@ -434,6 +434,7 @@ type GameSecureResponse = {
   premiumAlreadyProcessed?: boolean
   premiumClaimDay?: string
   consumables?: Array<{ id?: number; type?: string }>
+  questStates?: Record<string, QuestState>
   stakeId?: number
   stakeEntries?: Array<{ id?: number; amount?: number; endsAt?: number }>
   startedStake?: { id?: number; amount?: number; endsAt?: number }
@@ -863,6 +864,10 @@ const questRewardItemName = (item?: QuestRewardItem) => {
       return 'Energy Tonic'
     case 'energy-full':
       return 'Grand Energy Elixir'
+    case 'boss-mark':
+      return 'Boss Mark'
+    case 'crystal-flask':
+      return 'Crystal Flask'
     case 'key':
       return 'Dungeon Key'
     default:
@@ -918,7 +923,7 @@ const buildQuestList = (): QuestDefinition[] => {
   LEVEL_QUEST_TARGETS.forEach((target, index) => {
     const rewardGold = Math.round(scaleRewardGold(index, LEVEL_QUEST_TARGETS.length, 200, 2200) / 12)
     const baseRewardItem: QuestRewardItem =
-      target >= 255 ? 'key' : target >= 180 ? 'energy-full' : 'energy-small'
+      target >= 255 ? 'key' : target >= 200 ? 'boss-mark' : target >= 120 ? 'crystal-flask' : target >= 60 ? 'energy-full' : 'energy-small'
     const rewardItem = baseRewardItem
     quests.push({
       id: `level-${target}`,
@@ -934,7 +939,7 @@ const buildQuestList = (): QuestDefinition[] => {
   KILL_QUEST_TARGETS.forEach((target, index) => {
     const rewardGold = Math.round(scaleRewardGold(index, KILL_QUEST_TARGETS.length, 250, 2500) / 12)
     const baseRewardItem: QuestRewardItem =
-      target >= 56000 ? 'key' : target >= 22000 ? 'energy-full' : 'energy-small'
+      target >= 56000 ? 'key' : target >= 32000 ? 'boss-mark' : target >= 14000 ? 'crystal-flask' : target >= 6000 ? 'energy-full' : 'energy-small'
     const rewardItem = baseRewardItem
     quests.push({
       id: `kills-${target}`,
@@ -950,7 +955,7 @@ const buildQuestList = (): QuestDefinition[] => {
   TIER_QUEST_TARGETS.forEach((target, index) => {
     const rewardGold = Math.round(scaleRewardGold(index, TIER_QUEST_TARGETS.length, 300, 3000) / 12)
     const baseRewardItem: QuestRewardItem =
-      target >= 45000 ? 'key' : target >= 26000 ? 'energy-full' : 'energy-small'
+      target >= 45000 ? 'key' : target >= 30000 ? 'boss-mark' : target >= 14000 ? 'crystal-flask' : target >= 6200 ? 'energy-full' : 'energy-small'
     const rewardItem = baseRewardItem
     quests.push({
       id: `tier-${target}`,
@@ -966,7 +971,7 @@ const buildQuestList = (): QuestDefinition[] => {
   DUNGEON_QUEST_TARGETS.forEach((target, index) => {
     const rewardGold = Math.round(scaleRewardGold(index, DUNGEON_QUEST_TARGETS.length, 350, 3200) / 12)
     const baseRewardItem: QuestRewardItem =
-      target >= 165 ? 'key' : target >= 88 ? 'energy-full' : 'energy-small'
+      target >= 165 ? 'key' : target >= 104 ? 'boss-mark' : target >= 35 ? 'crystal-flask' : target >= 14 ? 'energy-full' : 'energy-small'
     const rewardItem = baseRewardItem
     quests.push({
       id: `dungeons-${target}`,
@@ -1045,8 +1050,10 @@ const FORTUNE_SPIN_PRICES = {
 const FORTUNE_SPIN_PACKS_SOL = [1, 10] as const
 type FortunePackId = keyof typeof FORTUNE_SPIN_PRICES
 const FORTUNE_REWARDS: FortuneReward[] = [
-  { id: 'energy_tonic', label: 'Energy Tonic', kind: 'consumable', consumableType: 'energy-small', amount: 1, chance: 31 },
-  { id: 'grand_energy_elixir', label: 'Grand Energy Elixir', kind: 'consumable', consumableType: 'energy-full', amount: 1, chance: 10 },
+  { id: 'energy_tonic', label: 'Energy Tonic', kind: 'consumable', consumableType: 'energy-small', amount: 1, chance: 24 },
+  { id: 'grand_energy_elixir', label: 'Grand Energy Elixir', kind: 'consumable', consumableType: 'energy-full', amount: 1, chance: 9 },
+  { id: 'crystal_flask', label: 'Crystal Flask', kind: 'consumable', consumableType: 'crystal-flask', amount: 1, chance: 6 },
+  { id: 'boss_mark', label: 'Boss Mark', kind: 'consumable', consumableType: 'boss-mark', amount: 1, chance: 3.5 },
   { id: 'crystals_100', label: '100 Crystals', kind: 'crystals', amount: 100, chance: 2 },
   { id: 'crystals_50', label: '50 Crystals', kind: 'crystals', amount: 50, chance: 3 },
   { id: 'crystals_10', label: '10 Crystals', kind: 'crystals', amount: 10, chance: 5 },
@@ -1403,15 +1410,15 @@ const getCastleUpgradeRequirement = (village: VillageState, playerLevel: number,
   }
 }
 
-const MONSTER_HP_BASE_MULTIPLIER = 1.75
+const MONSTER_HP_BASE_MULTIPLIER = 0.85
 const ITEM_TIER_SCORE_MULTIPLIER = 0.5
 const PERSIST_VERSION = 1
 
 const getMonsterHpMultiplier = (player: PlayerState) => {
-  const playerDps = Math.max(12, player.attack * Math.max(0.7, player.attackSpeed))
-  const targetTime = 3.2 + Math.min(1.6, player.level * 0.01)
-  const levelPressure = 1 + player.level * 0.08
-  return Math.max(1, (playerDps * targetTime + levelPressure * 14) / 42)
+  const playerDps = Math.max(8, player.attack * Math.max(0.7, player.attackSpeed))
+  const targetTime = Math.min(4.6, 3.4 + player.level * 0.003)
+  const targetHp = playerDps * targetTime
+  return Math.max(0.6, targetHp / 72)
 }
 
 const createWorldBossState = (playerName: string, cycleStart = '', cycleEnd = ''): WorldBossState => {
@@ -2147,8 +2154,38 @@ const getEquipmentStatRows = (item: EquipmentItem) => {
   if (item.bonuses.power !== 0) rows.push(`+${item.bonuses.power} Power`)
   if (item.bonuses.fortune !== 0) rows.push(`+${item.bonuses.fortune} Fortune`)
   if (item.bonuses.prosperity !== 0) rows.push(`+${item.bonuses.prosperity} Prosperity`)
-  if (item.effect) rows.push(getEquipmentEffectLabel(item.effect))
   return rows
+}
+
+const getEquipmentEffectRow = (item: EquipmentItem) => {
+  return item.effect ? getEquipmentEffectLabel(item.effect) : ''
+}
+
+const formatBonusPercent = (value: number) => `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`
+
+const getPlayerStatInsight = (hud: HudState, key: 'power' | 'fortune' | 'prosperity') => {
+  if (key === 'power') {
+    return {
+      label: 'Power',
+      summary: 'Direct combat strength.',
+      detail: `Current bonus: +${hud.power} attack from gear. The same Power also feeds your World Boss damage.`,
+    }
+  }
+  if (key === 'fortune') {
+    const dropBonus = Math.min(0.08, hud.fortune * 0.00045) * 100
+    return {
+      label: 'Fortune',
+      summary: 'Loot quality and drop chance.',
+      detail: `Current bonus: ${formatBonusPercent(dropBonus)} item drop chance, plus stronger weighting toward better rarities.`,
+    }
+  }
+  const villageBonus = Math.min(0.1, hud.prosperity * 0.0008) * 100
+  const sellBonus = Math.min(0.15, hud.prosperity * 0.0012) * 100
+  return {
+    label: 'Prosperity',
+    summary: 'Gold economy bonuses.',
+    detail: `Current bonus: ${formatBonusPercent(villageBonus)} village gold and ${formatBonusPercent(sellBonus)} sell value.`,
+  }
 }
 
 const getEquipmentCompareRows = (next: EquipmentItem, current: EquipmentItem) => {
@@ -3287,6 +3324,8 @@ function App() {
   const [fortuneWheelSpinning, setFortuneWheelSpinning] = useState(false)
   const [fortuneSpinResult, setFortuneSpinResult] = useState<FortuneReward | null>(null)
   const [fortuneSpinUsed, setFortuneSpinUsed] = useState<'free' | 'paid' | null>(null)
+  const [questClaimLoadingId, setQuestClaimLoadingId] = useState<string | null>(null)
+  const [hoveredPlayerStat, setHoveredPlayerStat] = useState<'power' | 'fortune' | 'prosperity' | null>(null)
   const [isMobile, setIsMobile] = useState(false)
   const [dungeonRunBusy, setDungeonRunBusy] = useState(false)
   const [, setConsumableBusyVersion] = useState(0)
@@ -5821,11 +5860,6 @@ function App() {
     }
   }
 
-  const grantQuestRewardItem = (state: GameState, item: QuestRewardItem) => {
-    addConsumable(state, item)
-    return { label: questRewardItemName(item), applied: true }
-  }
-
   const setConsumableBusy = (itemId: number, busy: boolean) => {
     if (busy) {
       consumableBusyIdsRef.current.add(itemId)
@@ -5923,28 +5957,41 @@ function App() {
     void syncWorldBossFromServer(true, true)
   }
 
-  const claimQuest = (quest: QuestDefinition) => {
+  const claimQuest = async (quest: QuestDefinition) => {
     const state = gameStateRef.current
-    if (!state) return
+    if (!state || questClaimLoadingId) return
     const questState = state.questStates[quest.id]
     if (!questState || questState.claimed) return
     const progress = getQuestProgress(state, quest)
     if (progress < quest.target) return
-    state.questStates = {
-      ...state.questStates,
-      [quest.id]: { ...questState, claimed: true },
-    }
-    state.gold += quest.rewardGold
-    const rewardParts = [`+${quest.rewardGold} gold`]
-    if (quest.rewardItem) {
-      const reward = grantQuestRewardItem(state, quest.rewardItem)
-      if (reward.label) {
-        rewardParts.push(reward.applied ? `+${reward.label}` : `${reward.label} (storage full)`)
+
+    setQuestClaimLoadingId(quest.id)
+    try {
+      const result = await callGameSecureAuthed('quest_claim', { questId: quest.id }, true)
+      if (!result.ok) {
+        pushLog(state.eventLog, result.error || 'Quest claim failed.')
+        syncHud()
+        return
       }
+      if (typeof result.gold === 'number') {
+        state.gold = Math.max(0, Math.floor(result.gold))
+      }
+      if (result.consumables) {
+        state.consumables = normalizeLoadedConsumables(result.consumables)
+      }
+      if (result.questStates) {
+        state.questStates = { ...state.questStates, ...result.questStates }
+      } else {
+        state.questStates = { ...state.questStates, [quest.id]: { claimed: true } }
+      }
+      applyConsumableEffectsFromServer(state, result)
+      const rewardParts = [`+${quest.rewardGold} gold`]
+      if (quest.rewardItem) rewardParts.push(`+${questRewardItemName(quest.rewardItem)}`)
+      pushLog(state.eventLog, `Quest completed: ${rewardParts.join(', ')}.`)
+      syncHud()
+    } finally {
+      setQuestClaimLoadingId(null)
     }
-    pushLog(state.eventLog, `Quest completed: ${rewardParts.join(', ')}.`)
-    syncHud()
-    void saveGameState()
   }
 
   const equipItem = (item: EquipmentItem, source: 'loot' | 'inventory') => {
@@ -6671,12 +6718,43 @@ function App() {
                     </div>
                   </div>
                   <div className="player-stats">
-                    <div>ATK {hud.attack}</div>
-                    <div>Power {hud.power}</div>
-                    <div>Fortune {hud.fortune}</div>
-                    <div>Prosperity {hud.prosperity}</div>
-                    {hud.bossMarkCycleStart === hud.worldBoss.cycleStart && <div>Boss Mark active</div>}
-                    {hud.crystalFlaskRuns > 0 && <div>Crystal Flask {hud.crystalFlaskRuns} run(s)</div>}
+                    <div className="player-stat-row">
+                      <span>ATK</span>
+                      <strong>{hud.attack}</strong>
+                    </div>
+                    {(['power', 'fortune', 'prosperity'] as const).map((key) => {
+                      const insight = getPlayerStatInsight(hud, key)
+                      const value = key === 'power' ? hud.power : key === 'fortune' ? hud.fortune : hud.prosperity
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          className={`player-stat-row player-stat-button ${hoveredPlayerStat === key ? 'active' : ''}`}
+                          onMouseEnter={() => setHoveredPlayerStat(key)}
+                          onMouseLeave={() => setHoveredPlayerStat((current) => (current === key ? null : current))}
+                          onFocus={() => setHoveredPlayerStat(key)}
+                          onBlur={() => setHoveredPlayerStat((current) => (current === key ? null : current))}
+                        >
+                          <span>{insight.label}</span>
+                          <strong>{value}</strong>
+                        </button>
+                      )
+                    })}
+                    {(hoveredPlayerStat || hud.bossMarkCycleStart === hud.worldBoss.cycleStart || hud.crystalFlaskRuns > 0) && (
+                      <div className="player-stat-help">
+                        {hoveredPlayerStat ? (
+                          <>
+                            <div className="player-stat-help-title">{getPlayerStatInsight(hud, hoveredPlayerStat).summary}</div>
+                            <div>{getPlayerStatInsight(hud, hoveredPlayerStat).detail}</div>
+                          </>
+                        ) : (
+                          <>
+                            {hud.bossMarkCycleStart === hud.worldBoss.cycleStart && <div>Boss Mark active: +25% World Boss damage this cycle.</div>}
+                            {hud.crystalFlaskRuns > 0 && <div>Crystal Flask ready: +25% dungeon crystals for {hud.crystalFlaskRuns} more run(s).</div>}
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="menu-stack">
                     <button type="button" className="menu-big" onClick={() => setActivePanel('inventory')}>
@@ -6990,6 +7068,7 @@ function App() {
                               <div className="slot-score">Lv. {item.level}</div>
                               <div className="slot-score">Score {getDisplayItemTierScore(item.tierScore)}</div>
                               <div className="slot-score">{getEquipmentStatRows(item).join(' · ')}</div>
+                              {getEquipmentEffectRow(item) && <div className="slot-effect">{getEquipmentEffectRow(item)}</div>}
                             </>
                           ) : (
                             <div className="slot-empty">Empty</div>
@@ -7021,6 +7100,7 @@ function App() {
                                 Lv. {item.level} - {EQUIPMENT_SLOTS.find((slot) => slot.id === item.slot)?.label ?? item.slot} - Score {getDisplayItemTierScore(item.tierScore)}
                               </div>
                               <div className="inventory-slot">{getEquipmentStatRows(item).join(' · ')}</div>
+                              {getEquipmentEffectRow(item) && <div className="inventory-effect">{getEquipmentEffectRow(item)}</div>}
                             </div>
                             <div className="inventory-actions">
                               <button type="button" onClick={() => equipItem(item, 'inventory')}>
@@ -8302,8 +8382,8 @@ function App() {
                         </span>
                       )}
                     </div>
-                    <button type="button" disabled={!completed || claimed} onClick={() => claimQuest(quest)}>
-                      {claimed ? 'Claimed' : completed ? 'Claim' : 'Incomplete'}
+                    <button type="button" disabled={!completed || claimed || questClaimLoadingId === quest.id} onClick={() => void claimQuest(quest)}>
+                      {claimed ? 'Claimed' : questClaimLoadingId === quest.id ? 'Claiming...' : completed ? 'Claim' : 'Incomplete'}
                     </button>
                   </div>
                 )
