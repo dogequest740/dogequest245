@@ -538,8 +538,8 @@
 }
 
 .topbar.centered .brand {
-  font-size: 32px;
-  letter-spacing: 3px;
+  font-size: 34px;
+  letter-spacing: 2px;
 }
 
 .top-actions {
@@ -1075,20 +1075,25 @@
 
 
 .brand {
-  font-family: 'Cinzel Decorative', 'Cinzel', 'Manrope', system-ui, sans-serif;
-  font-size: 28px;
-  letter-spacing: 2.8px;
+  font-family: 'Uncial Antiqua', 'Cinzel Decorative', 'Cinzel', 'Manrope', system-ui, sans-serif;
+  font-size: 30px;
+  letter-spacing: 1.8px;
   font-weight: 700;
-  background: linear-gradient(180deg, #fff2bd 0%, #ffd86f 34%, #ffb347 68%, #ffefb3 100%);
+  line-height: 1;
+  background: linear-gradient(180deg, #fff4b8 0%, #ffd96c 32%, #ffbf4f 54%, #d87918 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
   text-shadow:
-    0 1px 0 #6d3206,
-    0 2px 0 #572503,
-    0 3px 0 #3b1701,
-    0 6px 12px rgba(0, 0, 0, 0.34),
-    0 0 16px rgba(255, 191, 86, 0.32);
+    -1px 0 0 #4a2202,
+    1px 0 0 #4a2202,
+    0 -1px 0 #4a2202,
+    0 1px 0 #4a2202,
+    -2px 0 0 #2d1200,
+    2px 0 0 #2d1200,
+    0 2px 0 #8b470f,
+    0 4px 0 #4a2202,
+    0 7px 14px rgba(0, 0, 0, 0.34);
 }
 
 .wallet {
@@ -5950,8 +5955,8 @@ button.ghost {
   }
 
   .brand {
-    font-size: 18px;
-    letter-spacing: 1.8px;
+    font-size: 17px;
+    letter-spacing: 1px;
   }
 
   .panel {
