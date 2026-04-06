@@ -254,7 +254,7 @@ type SeasonRow = {
   name: string;
   start_at: string;
   end_at: string;
-  pool_sol: number | string;
+  pool_usdt: number | string;
   status: string;
   closed_at: string | null;
   created_at?: string;
@@ -269,7 +269,7 @@ type SeasonSnapshotRow = {
   premium_active: boolean;
   effective_crystals: number | string;
   share: number | string;
-  payout_sol: number | string;
+  payout_usdt: number | string;
   excluded: boolean;
   exclude_reason: string;
   created_at: string;
@@ -282,7 +282,7 @@ type SeasonComputedRow = {
   premiumActive: boolean;
   effectiveCrystals: number;
   share: number;
-  payoutSol: number;
+  payoutUsdt: number;
   updatedAt: string;
 };
 
@@ -1486,7 +1486,7 @@ const normalizeSeason = (row: Record<string, unknown> | SeasonRow | null) => {
     name: String(season.name ?? "Season").trim() || "Season",
     startAt: String(season.start_at ?? ""),
     endAt: String(season.end_at ?? ""),
-    poolSol: Math.max(0, Number(season.pool_sol ?? 0)),
+    poolUsdt: Math.max(0, Number(season.pool_usdt ?? 0)),
     status: String(season.status ?? "active"),
     closedAt: season.closed_at ? String(season.closed_at) : "",
   };
@@ -1495,7 +1495,7 @@ const normalizeSeason = (row: Record<string, unknown> | SeasonRow | null) => {
 const getActiveSeason = async (supabase: ReturnType<typeof createClient>) => {
   const { data, error } = await supabase
     .from("seasons")
-    .select("id, name, start_at, end_at, pool_sol, status, closed_at, created_at")
+    .select("id, name, start_at, end_at, pool_usdt, status, closed_at, created_at")
     .eq("status", "active")
     .order("start_at", { ascending: false })
     .limit(1)
@@ -1508,7 +1508,7 @@ const getActiveSeason = async (supabase: ReturnType<typeof createClient>) => {
 const getLatestClosedSeason = async (supabase: ReturnType<typeof createClient>) => {
   const { data, error } = await supabase
     .from("seasons")
-    .select("id, name, start_at, end_at, pool_sol, status, closed_at, created_at")
+    .select("id, name, start_at, end_at, pool_usdt, status, closed_at, created_at")
     .eq("status", "closed")
     .order("closed_at", { ascending: false })
     .limit(1)
@@ -1520,7 +1520,7 @@ const getLatestClosedSeason = async (supabase: ReturnType<typeof createClient>) 
 
 const buildSeasonComputedRows = (
   profileRows: Array<Record<string, unknown>>,
-  poolSol: number,
+  poolUsdt: number,
   nowMs: number,
 ) => {
   const rows: SeasonComputedRow[] = profileRows
@@ -1538,7 +1538,7 @@ const buildSeasonComputedRows = (
         premiumActive,
         effectiveCrystals,
         share: 0,
-        payoutSol: 0,
+        payoutUsdt: 0,
         updatedAt: String(row.updated_at ?? ""),
       };
     })
@@ -1553,14 +1553,14 @@ const buildSeasonComputedRows = (
 
   const totalCrystals = rows.reduce((sum, row) => sum + row.crystalsSnapshot, 0);
   const totalEffectiveCrystals = rows.reduce((sum, row) => sum + row.effectiveCrystals, 0);
-  const safePoolSol = Math.max(0, Number.isFinite(poolSol) ? poolSol : 0);
+  const safePoolUsdt = Math.max(0, Number.isFinite(poolUsdt) ? poolUsdt : 0);
 
   const computedRows = rows.map((row) => {
     const share = totalEffectiveCrystals > 0 ? row.effectiveCrystals / totalEffectiveCrystals : 0;
     return {
       ...row,
       share,
-      payoutSol: Number((safePoolSol * share).toFixed(9)),
+      payoutUsdt: Number((safePoolUsdt * share).toFixed(9)),
     };
   });
 
@@ -3105,7 +3105,7 @@ serve(async (req) => {
 
     const computed = buildSeasonComputedRows(
       ((data as Array<Record<string, unknown>> | null) ?? []),
-      Math.max(0, Number(activeSeasonResult.season.poolSol ?? 0)),
+      Math.max(0, Number(activeSeasonResult.season.poolUsdt ?? 0)),
       now.getTime(),
     );
     const leaderboard = computed.rows.slice(0, limit).map((row, index) => ({
@@ -3115,7 +3115,7 @@ serve(async (req) => {
       crystals: row.crystalsSnapshot,
       premiumActive: row.premiumActive,
       effectiveCrystals: row.effectiveCrystals,
-      payoutSol: row.payoutSol,
+      payoutUsdt: row.payoutUsdt,
     }));
     const playerIndex = computed.rows.findIndex((row) => row.wallet === auth.wallet);
     const playerRow = playerIndex >= 0
@@ -3126,7 +3126,7 @@ serve(async (req) => {
           crystals: computed.rows[playerIndex].crystalsSnapshot,
           premiumActive: computed.rows[playerIndex].premiumActive,
           effectiveCrystals: computed.rows[playerIndex].effectiveCrystals,
-          payoutSol: computed.rows[playerIndex].payoutSol,
+          payoutUsdt: computed.rows[playerIndex].payoutUsdt,
         }
       : null;
 
@@ -4753,9 +4753,9 @@ serve(async (req) => {
 
     const name = String(body.name ?? "Crystal Season").trim().slice(0, 80) || "Crystal Season";
     const durationDays = clampInt(body.durationDays, 1, 90);
-    const poolSolRaw = Number(body.poolSol ?? 0);
-    if (!Number.isFinite(poolSolRaw) || poolSolRaw < 0) {
-      return json({ ok: false, error: "Enter a valid SOL pool." });
+    const poolUsdtRaw = Number(body.poolUsdt ?? 0);
+    if (!Number.isFinite(poolUsdtRaw) || poolUsdtRaw < 0) {
+      return json({ ok: false, error: "Enter a valid USDT pool." });
     }
 
     const startAt = now.toISOString();
@@ -4766,14 +4766,49 @@ serve(async (req) => {
         name,
         start_at: startAt,
         end_at: endAt,
-        pool_sol: Number(poolSolRaw.toFixed(9)),
+        pool_usdt: Number(poolUsdtRaw.toFixed(9)),
         status: "active",
       })
-      .select("id, name, start_at, end_at, pool_sol, status, closed_at, created_at")
+      .select("id, name, start_at, end_at, pool_usdt, status, closed_at, created_at")
       .maybeSingle();
 
     if (error || !data) return json({ ok: false, error: "Failed to start season." });
-    await auditEvent(supabase, auth.wallet, "admin_season_start", { name, durationDays, poolSol: Number(poolSolRaw.toFixed(9)) });
+    await auditEvent(supabase, auth.wallet, "admin_season_start", { name, durationDays, poolUsdt: Number(poolUsdtRaw.toFixed(9)) });
+    return json({ ok: true, season: normalizeSeason(data as Record<string, unknown>) });
+  }
+
+  if (action === "admin_season_update_pool") {
+    const adminWallets = toWalletList(Deno.env.get("ADMIN_WALLETS"));
+    if (!adminWallets.includes(auth.wallet)) {
+      return json({ ok: false, error: "Admin access required." });
+    }
+
+    const activeSeasonResult = await getActiveSeason(supabase);
+    if (!activeSeasonResult.ok) return json({ ok: false, error: activeSeasonResult.error });
+    if (!activeSeasonResult.season) {
+      return json({ ok: false, error: "No active season to update." });
+    }
+
+    const poolUsdtRaw = Number(body.poolUsdt ?? body.poolSol ?? 0);
+    if (!Number.isFinite(poolUsdtRaw) || poolUsdtRaw < 0) {
+      return json({ ok: false, error: "Enter a valid USDT pool." });
+    }
+
+    const { data, error } = await supabase
+      .from("seasons")
+      .update({ pool_usdt: Number(poolUsdtRaw.toFixed(9)) })
+      .eq("id", activeSeasonResult.season.id)
+      .eq("status", "active")
+      .select("id, name, start_at, end_at, pool_usdt, status, closed_at, created_at")
+      .maybeSingle();
+
+    if (error || !data) return json({ ok: false, error: "Failed to update season pool." });
+
+    await auditEvent(supabase, auth.wallet, "admin_season_update_pool", {
+      seasonId: activeSeasonResult.season.id,
+      poolUsdt: Number(poolUsdtRaw.toFixed(9)),
+    });
+
     return json({ ok: true, season: normalizeSeason(data as Record<string, unknown>) });
   }
 
@@ -4795,7 +4830,7 @@ serve(async (req) => {
       .select("wallet, state, updated_at");
     if (error) return json({ ok: false, error: "Failed to build season preview." });
 
-    const computed = buildSeasonComputedRows(((data as Array<Record<string, unknown>> | null) ?? []), Number(activeSeasonResult.season.poolSol ?? 0), now.getTime());
+    const computed = buildSeasonComputedRows(((data as Array<Record<string, unknown>> | null) ?? []), Number(activeSeasonResult.season.poolUsdt ?? 0), now.getTime());
 
     return json({
       ok: true,
@@ -4808,7 +4843,7 @@ serve(async (req) => {
         premiumActive: row.premiumActive,
         effectiveCrystals: row.effectiveCrystals,
         share: row.share,
-        payoutSol: row.payoutSol,
+        payoutUsdt: row.payoutUsdt,
       })),
       seasonTotalPlayers: computed.totalPlayers,
       seasonTotalCrystals: computed.totalCrystals,
@@ -4827,7 +4862,7 @@ serve(async (req) => {
     if (seasonId) {
       const { data, error } = await supabase
         .from("seasons")
-        .select("id, name, start_at, end_at, pool_sol, status, closed_at, created_at")
+        .select("id, name, start_at, end_at, pool_usdt, status, closed_at, created_at")
         .eq("id", seasonId)
         .maybeSingle();
       if (error) return json({ ok: false, error: "Failed to load season snapshot." });
@@ -4843,9 +4878,9 @@ serve(async (req) => {
     const limit = clampInt(body.limit, 20, 1000);
     const { data, error } = await supabase
       .from("season_snapshots")
-      .select("id, season_id, wallet, name, crystals_snapshot, premium_active, effective_crystals, share, payout_sol, excluded, exclude_reason, created_at")
+      .select("id, season_id, wallet, name, crystals_snapshot, premium_active, effective_crystals, share, payout_usdt, excluded, exclude_reason, created_at")
       .eq("season_id", season.id)
-      .order("payout_sol", { ascending: false })
+      .order("payout_usdt", { ascending: false })
       .limit(limit);
     if (error) return json({ ok: false, error: "Failed to load season snapshot rows." });
 
@@ -4857,7 +4892,7 @@ serve(async (req) => {
       premiumActive: Boolean(row.premium_active),
       effectiveCrystals: Math.max(0, Number(row.effective_crystals ?? 0)),
       share: Math.max(0, Number(row.share ?? 0)),
-      payoutSol: Math.max(0, Number(row.payout_sol ?? 0)),
+      payoutUsdt: Math.max(0, Number(row.payout_usdt ?? 0)),
       excluded: Boolean(row.excluded),
       excludeReason: String(row.exclude_reason ?? ""),
     }));
@@ -4889,14 +4924,14 @@ serve(async (req) => {
 
     const { data: seasonRow } = await supabase
       .from("seasons")
-      .select("id, name, start_at, end_at, pool_sol, status, closed_at, created_at")
+      .select("id, name, start_at, end_at, pool_usdt, status, closed_at, created_at")
       .eq("id", seasonId)
       .maybeSingle();
     const { data: snapshotRows } = await supabase
       .from("season_snapshots")
-      .select("id, season_id, wallet, name, crystals_snapshot, premium_active, effective_crystals, share, payout_sol, excluded, exclude_reason, created_at")
+      .select("id, season_id, wallet, name, crystals_snapshot, premium_active, effective_crystals, share, payout_usdt, excluded, exclude_reason, created_at")
       .eq("season_id", seasonId)
-      .order("payout_sol", { ascending: false })
+      .order("payout_usdt", { ascending: false })
       .limit(clampInt(body.limit, 20, 1000));
 
     const rows = ((snapshotRows as SeasonSnapshotRow[] | null) ?? []).map((row, index) => ({
@@ -4907,7 +4942,7 @@ serve(async (req) => {
       premiumActive: Boolean(row.premium_active),
       effectiveCrystals: Math.max(0, Number(row.effective_crystals ?? 0)),
       share: Math.max(0, Number(row.share ?? 0)),
-      payoutSol: Math.max(0, Number(row.payout_sol ?? 0)),
+      payoutUsdt: Math.max(0, Number(row.payout_usdt ?? 0)),
       excluded: Boolean(row.excluded),
       excludeReason: String(row.exclude_reason ?? ""),
     }));

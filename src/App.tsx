@@ -365,7 +365,7 @@ type SeasonInfo = {
   id: string
   name: string
   status: string
-  poolSol: number
+  poolUsdt: number
   startAt: string
   endAt: string
   closedAt?: string
@@ -379,7 +379,7 @@ type SeasonLeaderboardEntry = {
   premiumActive: boolean
   effectiveCrystals: number
   share: number
-  payoutSol: number
+  payoutUsdt: number
 }
 
 type SeasonSnapshotEntry = SeasonLeaderboardEntry & {
@@ -3295,6 +3295,7 @@ function App() {
   const [seasonAdminBusy, setSeasonAdminBusy] = useState(false)
   const [seasonAdminName, setSeasonAdminName] = useState('Crystal Season')
   const [seasonAdminPool, setSeasonAdminPool] = useState('100')
+  const [seasonAdminEditPool, setSeasonAdminEditPool] = useState('0')
   const [seasonAdminDurationDays, setSeasonAdminDurationDays] = useState('30')
   const [seasonPreviewRows, setSeasonPreviewRows] = useState<SeasonSnapshotEntry[]>([])
   const [seasonSnapshotRows, setSeasonSnapshotRows] = useState<SeasonSnapshotEntry[]>([])
@@ -4140,6 +4141,7 @@ function App() {
 
   const applySeasonStatus = (result: GameSecureResponse) => {
     setSeasonInfo(result.season ?? null)
+    setSeasonAdminEditPool(result.season ? result.season.poolUsdt.toFixed(3) : '0')
     setSeasonLeaderboard(result.seasonLeaderboard ?? [])
     setSeasonPlayer(result.seasonPlayer ?? null)
     setSeasonTotalPlayers(Math.max(0, Math.floor(Number(result.seasonTotalPlayers ?? 0))))
@@ -4208,14 +4210,14 @@ function App() {
       `End: ${season?.endAt || ''}`,
       `Closed: ${season?.closedAt || ''}`,
       '',
-      ['Rank', 'Player', 'Crystals', 'Premium', 'Wallet', 'Payout SOL'].join('	'),
+      ['Rank', 'Player', 'Crystals', 'Premium', 'Wallet', 'Payout USDT'].join('	'),
       ...rows.map((row) => [
         String(row.rank),
         row.name,
         String(Math.max(0, Math.floor(row.crystals))),
         row.premiumActive ? 'Yes' : 'No',
         row.wallet,
-        row.payoutSol.toFixed(9),
+        row.payoutUsdt.toFixed(9),
       ].join('	'))
     ]
     const blob = new Blob([lines.join('\r\n')], { type: 'text/plain;charset=utf-8' })
@@ -4251,10 +4253,10 @@ function App() {
 
   const startSeason = async () => {
     if (!isAdmin) return
-    const poolSol = Number(seasonAdminPool)
+    const poolUsdt = Number(seasonAdminPool)
     const durationDays = Math.max(1, Math.floor(Number(seasonAdminDurationDays || '30')))
-    if (!Number.isFinite(poolSol) || poolSol < 0) {
-      setSeasonError('Enter a valid SOL pool.')
+    if (!Number.isFinite(poolUsdt) || poolUsdt < 0) {
+      setSeasonError('Enter a valid USDT pool.')
       return
     }
     setSeasonAdminBusy(true)
@@ -4263,7 +4265,7 @@ function App() {
       'admin_season_start',
       {
         name: seasonAdminName.trim() || 'Crystal Season',
-        poolSol,
+        poolUsdt,
         durationDays,
       },
       true,
@@ -4276,6 +4278,29 @@ function App() {
     setSeasonInfo(result.season ?? null)
     setSeasonPreviewRows([])
     setSeasonSnapshotRows([])
+    await loadSeasonStatus(false)
+    setSeasonAdminBusy(false)
+  }
+
+  const updateSeasonPool = async () => {
+    if (!isAdmin || !seasonInfo || seasonInfo.status !== 'active') return
+    const poolUsdt = Number(seasonAdminEditPool)
+    if (!Number.isFinite(poolUsdt) || poolUsdt < 0) {
+      setSeasonError('Enter a valid USDT pool.')
+      return
+    }
+    setSeasonAdminBusy(true)
+    setSeasonError('')
+    const result = await callGameSecureAuthed('admin_season_update_pool', { poolUsdt }, true)
+    if (!result.ok) {
+      setSeasonError(result.error || 'Failed to update season pool.')
+      setSeasonAdminBusy(false)
+      return
+    }
+    if (result.season) {
+      setSeasonInfo(result.season)
+      setSeasonAdminEditPool(result.season.poolUsdt.toFixed(3))
+    }
     await loadSeasonStatus(false)
     setSeasonAdminBusy(false)
   }
@@ -6306,7 +6331,7 @@ function App() {
                 <img src={iconCrystals} alt="" />
                 <div>
                   <h3>30-day seasons</h3>
-                  <p>Stack crystals, climb the leaderboard, and compete for the seasonal SOL pool.</p>
+                  <p>Stack crystals, climb the leaderboard, and compete for the seasonal USDT pool.</p>
                 </div>
               </div>
             </div>
@@ -6383,7 +6408,7 @@ function App() {
                 <img src={iconCrystals} alt="" />
                 <div>
                   <h3>Crystals economy</h3>
-                  <p>Earn crystals in raids and dungeons, then convert them into SOL.</p>
+                  <p>Earn crystals in raids and dungeons, then hold them for seasonal USDT rewards.</p>
                 </div>
               </div>
               <div className="progress-card">
@@ -6411,7 +6436,7 @@ function App() {
           </div>
 
           <div className="auth-section highlight reveal delay-6">
-            <h2>How to earn SOL</h2>
+            <h2>How to earn USDT</h2>
             <div className="earn-grid">
               <div className="earn-card">
                 <div className="earn-number">01</div>
@@ -6435,8 +6460,8 @@ function App() {
               </div>
               <div className="earn-card">
                 <div className="earn-number">05</div>
-                <h3>Convert crystals</h3>
-                <p>Exchange your crystal balance into SOL at a fixed rate.</p>
+                <h3>Hold for season end</h3>
+                <p>Keep your crystal balance until the snapshot to maximize your share of the USDT pool.</p>
               </div>
             </div>
           </div>
@@ -7960,7 +7985,7 @@ function App() {
                   </div>
                   <div className="withdraw-info season-grid-two">
                     <span className="withdraw-info-label">Pool</span>
-                    <strong>{seasonInfo.poolSol.toFixed(3)} SOL</strong>
+                    <strong>{seasonInfo.poolUsdt.toFixed(3)} USDT</strong>
                   </div>
                   <div className="withdraw-info season-grid-two">
                     <span className="withdraw-info-label">Ends</span>
@@ -8042,7 +8067,7 @@ function App() {
                         <input type="text" value={seasonAdminName} onChange={(event) => setSeasonAdminName(event.target.value)} placeholder="Crystal Season" />
                       </label>
                       <label className="withdraw-label">
-                        Pool (SOL)
+                        Pool (USDT)
                         <input type="number" min={0} step="0.001" value={seasonAdminPool} onChange={(event) => setSeasonAdminPool(event.target.value)} placeholder="100" />
                       </label>
                       <label className="withdraw-label">
@@ -8055,17 +8080,28 @@ function App() {
                     </div>
                   )}
                   {seasonInfo && seasonInfo.status === 'active' && (
-                    <div className="resources-actions-row season-admin-actions">
-                      <button type="button" className="resource-action" onClick={() => void loadSeasonStatus(true)} disabled={seasonAdminBusy || seasonLoading}>
-                        Refresh
-                      </button>
-                      <button type="button" className="resource-action secondary" onClick={previewSeasonClose} disabled={seasonAdminBusy}>
-                        {seasonAdminBusy ? 'Working...' : 'Preview Close'}
-                      </button>
-                      <button type="button" className="resource-action buy-gold" onClick={closeSeason} disabled={seasonAdminBusy}>
-                        {seasonAdminBusy ? 'Closing...' : 'Close Season'}
-                      </button>
-                    </div>
+                    <>
+                      <div className="season-admin-start-grid season-admin-pool-grid">
+                        <label className="withdraw-label">
+                          Current pool (USDT)
+                          <input type="number" min={0} step="0.001" value={seasonAdminEditPool} onChange={(event) => setSeasonAdminEditPool(event.target.value)} placeholder="0" />
+                        </label>
+                        <button type="button" className="withdraw-submit" onClick={updateSeasonPool} disabled={seasonAdminBusy}>
+                          {seasonAdminBusy ? 'Saving...' : 'Update Pool'}
+                        </button>
+                      </div>
+                      <div className="resources-actions-row season-admin-actions">
+                        <button type="button" className="resource-action" onClick={() => void loadSeasonStatus(true)} disabled={seasonAdminBusy || seasonLoading}>
+                          Refresh
+                        </button>
+                        <button type="button" className="resource-action secondary" onClick={previewSeasonClose} disabled={seasonAdminBusy}>
+                          {seasonAdminBusy ? 'Working...' : 'Preview Close'}
+                        </button>
+                        <button type="button" className="resource-action buy-gold" onClick={closeSeason} disabled={seasonAdminBusy}>
+                          {seasonAdminBusy ? 'Closing...' : 'Close Season'}
+                        </button>
+                      </div>
+                    </>
                   )}
                   {!seasonInfo && (
                     <div className="resources-actions-row season-admin-actions">
@@ -8084,7 +8120,7 @@ function App() {
                           <span>Crystals</span>
                           <span>Weighted</span>
                           <span>Share</span>
-                          <span>Payout</span>
+                          <span>Payout USDT</span>
                         </div>
                         {seasonPreviewRows.map((row) => (
                           <div key={row.wallet} className="admin-row season-table compact">
@@ -8093,7 +8129,7 @@ function App() {
                             <span>{formatNumber(row.crystals)}</span>
                             <span>{formatNumber(Math.floor(row.effectiveCrystals))}</span>
                             <span>{(row.share * 100).toFixed(3)}%</span>
-                            <span>{row.payoutSol.toFixed(6)} SOL</span>
+                            <span>{row.payoutUsdt.toFixed(6)} USDT</span>
                           </div>
                         ))}
                       </div></div>
@@ -8109,7 +8145,7 @@ function App() {
                           <span>Crystals</span>
                           <span>Premium</span>
                           <span>Weighted</span>
-                          <span>Payout</span>
+                          <span>Payout USDT</span>
                         </div>
                         {seasonSnapshotRows.map((row) => (
                           <div key={row.wallet} className="admin-row season-table compact">
@@ -8118,7 +8154,7 @@ function App() {
                             <span>{formatNumber(row.crystals)}</span>
                             <span>{row.premiumActive ? 'x1.5' : 'x1.0'}</span>
                             <span>{formatNumber(Math.floor(row.effectiveCrystals))}</span>
-                            <span>{row.payoutSol.toFixed(6)} SOL</span>
+                            <span>{row.payoutUsdt.toFixed(6)} USDT</span>
                           </div>
                         ))}
                       </div></div>
@@ -8591,7 +8627,7 @@ function App() {
                       <div className="admin-row header events">
                         <span>Time</span>
                         <span>Type</span>
-                        <span>Payout</span>
+                        <span>Wallet</span>
                         <span>Details</span>
                       </div>
                       {adminData.events.length === 0 && (
@@ -8634,3 +8670,4 @@ function App() {
   )
 }
 export default App
+

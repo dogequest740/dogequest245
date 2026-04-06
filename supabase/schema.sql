@@ -79,11 +79,11 @@ create table if not exists public.seasons (
   name text not null,
   start_at timestamptz not null,
   end_at timestamptz not null,
-  pool_sol numeric not null default 0,
+  pool_usdt numeric not null default 0,
   status text not null default 'active',
   closed_at timestamptz,
   created_at timestamptz default now(),
-  check (pool_sol >= 0),
+  check (pool_usdt >= 0),
   check (end_at > start_at)
 );
 
@@ -96,7 +96,7 @@ create table if not exists public.season_snapshots (
   premium_active boolean not null default false,
   effective_crystals numeric not null default 0,
   share numeric not null default 0,
-  payout_sol numeric not null default 0,
+  payout_usdt numeric not null default 0,
   excluded boolean not null default false,
   exclude_reason text not null default '',
   created_at timestamptz default now(),
@@ -104,13 +104,13 @@ create table if not exists public.season_snapshots (
   check (crystals_snapshot >= 0),
   check (effective_crystals >= 0),
   check (share >= 0),
-  check (payout_sol >= 0)
+  check (payout_usdt >= 0)
 );
 
 create index if not exists seasons_status_idx on public.seasons(status, start_at desc);
 create index if not exists season_snapshots_season_idx on public.season_snapshots(season_id);
 create index if not exists season_snapshots_season_effective_idx on public.season_snapshots(season_id, effective_crystals desc);
-create index if not exists season_snapshots_season_payout_idx on public.season_snapshots(season_id, payout_sol desc);
+create index if not exists season_snapshots_season_payout_usdt_idx on public.season_snapshots(season_id, payout_usdt desc);
 
 alter table public.seasons enable row level security;
 alter table public.season_snapshots enable row level security;
@@ -267,7 +267,7 @@ begin
     premium_active,
     effective_crystals,
     share,
-    payout_sol,
+    payout_usdt,
     excluded,
     exclude_reason,
     created_at
@@ -300,7 +300,7 @@ begin
     update public.season_snapshots
     set
       share = effective_crystals / total_effective,
-      payout_sol = round(active_season.pool_sol * (effective_crystals / total_effective), 9)
+      payout_usdt = round(active_season.pool_usdt * (effective_crystals / total_effective), 9)
     where season_id = active_season.id
       and excluded = false;
   end if;
