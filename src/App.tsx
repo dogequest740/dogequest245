@@ -3512,26 +3512,35 @@ function App() {
     }
   }
 
-  const handleSecurityAuthFailure = (message: string, interactive = false) => {
-    if (!message) return
-    setWalletSessionVerified(false)
-    if (interactive || isBlockedAuthError(message)) {
-      setSecurityAuthError(message)
-    }
-    if (interactive || isBlockedAuthError(message)) {
-      dungeonSessionRef.current = null
-      dungeonSessionRequestRef.current = null
-      secureSessionInitRef.current = false
-      setActivePanel(null)
-      setStage('auth')
-    }
-  }
-
   const isSessionTokenError = (message: string) => {
     const normalized = message.toLowerCase()
     return normalized.includes('missing session token') ||
       normalized.includes('invalid session token') ||
       normalized.includes('session expired')
+  }
+
+  const isSecurityAuthFailureMessage = (message: string) => {
+    const normalized = message.toLowerCase()
+    return isBlockedAuthError(message) ||
+      isSessionTokenError(message) ||
+      normalized.includes('sign-in required') ||
+      normalized.includes('invalid jwt') ||
+      normalized.includes('wallet login failed') ||
+      normalized.includes('wallet signature') ||
+      normalized.includes('signature was rejected')
+  }
+
+  const handleSecurityAuthFailure = (message: string, interactive = false) => {
+    if (!message || !isSecurityAuthFailureMessage(message)) return
+    setWalletSessionVerified(false)
+    if (interactive || isBlockedAuthError(message)) {
+      setSecurityAuthError(message)
+    }
+    dungeonSessionRef.current = null
+    dungeonSessionRequestRef.current = null
+    secureSessionInitRef.current = false
+    setActivePanel(null)
+    setStage('auth')
   }
 
   const isStaleProfileError = (message: string) => {
@@ -6029,38 +6038,18 @@ function App() {
   const resourceChips = hud ? (
     <>
       <div className="resource-gold-crystal-group">
-        <div className="resource-chip gold with-action">
+        <div className="resource-chip gold">
           <img className="icon-img" src={iconGold} alt="" />
           <div className="resource-text">
-            <div className="resource-main">
-              <span>Gold</span>
-              <strong>{hud.gold}</strong>
-            </div>
-            <div className="resource-actions">
-              <button type="button" className="resource-action buy-gold" onClick={() => setActivePanel('buygold')}>
-                <img className="icon-img tiny" src={iconBuyGold} alt="" />
-                Buy Gold
-              </button>
-            </div>
+            <span>Gold</span>
+            <strong>{hud.gold}</strong>
           </div>
         </div>
-        <div className="resource-chip crystals with-action">
+        <div className="resource-chip crystals">
           <img className="icon-img" src={iconCrystals} alt="" />
           <div className="resource-text">
-            <div className="resource-main">
-              <span>Crystals</span>
-              <strong>{hud.crystals}</strong>
-            </div>
-            <div className="resource-actions">
-              <button type="button" className="resource-action" onClick={() => setActivePanel('season')}>
-                <img className="icon-img tiny" src={iconCrystals} alt="" />
-                Season
-              </button>
-              <button type="button" className="resource-action secondary" onClick={() => setActivePanel('stake')}>
-                <img className="icon-img tiny" src={iconStacking} alt="" />
-                Staking
-              </button>
-            </div>
+            <span>Crystals</span>
+            <strong>{hud.crystals}</strong>
           </div>
         </div>
       </div>
@@ -6110,14 +6099,8 @@ function App() {
           <div className="top-actions">
             {stage === 'game' && hud && (
               <div className={`resources ${isMobile ? 'mobile-resources' : ''}`}>
-                {isMobile ? (
-                  <>
-                    <div className="resources-strip">{resourceChips}</div>
-                    {resourceActionRow}
-                  </>
-                ) : (
-                  resourceChips
-                )}
+                <div className="resources-strip">{resourceChips}</div>
+                {resourceActionRow}
               </div>
             )}
           </div>

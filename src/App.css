@@ -531,6 +531,12 @@
   min-width: 0;
 }
 
+.resources-strip {
+  display: flex;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
 .resources {
   display: flex;
   gap: 8px;
@@ -550,7 +556,7 @@
 
 .resource-gold-crystal-group {
   display: inline-grid;
-  grid-template-columns: minmax(0, auto) 56px minmax(0, auto);
+  grid-template-columns: repeat(2, minmax(0, auto));
   gap: 6px;
   align-items: stretch;
   flex: 0 0 auto;
@@ -644,30 +650,6 @@
   line-height: 1.1;
 }
 
-.resource-chip.with-action {
-  align-items: center;
-}
-
-.resource-chip.with-action .resource-text {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.resource-chip.with-action .resource-main {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.resource-chip.with-action .resource-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.resource-chip.with-action .resource-actions .resource-action {
-  margin: 0;
-}
 
 .resource-timer {
   font-size: 11px;
