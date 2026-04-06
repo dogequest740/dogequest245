@@ -308,7 +308,8 @@ begin
   update public.profiles
   set
     state = jsonb_set(state, '{crystals}', '0'::jsonb, true),
-    updated_at = snapshot_time;
+    updated_at = snapshot_time
+  where wallet is not null;
 
   update public.seasons
   set

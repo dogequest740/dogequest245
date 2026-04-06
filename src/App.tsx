@@ -3288,8 +3288,8 @@ function App() {
   const [seasonLeaderboard, setSeasonLeaderboard] = useState<SeasonLeaderboardEntry[]>([])
   const [seasonPlayer, setSeasonPlayer] = useState<SeasonLeaderboardEntry | null>(null)
   const [seasonTotalPlayers, setSeasonTotalPlayers] = useState(0)
-  const [seasonTotalCrystals, setSeasonTotalCrystals] = useState(0)
-  const [seasonTotalEffectiveCrystals, setSeasonTotalEffectiveCrystals] = useState(0)
+  const [, setSeasonTotalCrystals] = useState(0)
+  const [, setSeasonTotalEffectiveCrystals] = useState(0)
   const [seasonLoading, setSeasonLoading] = useState(false)
   const [seasonError, setSeasonError] = useState('')
   const [seasonAdminBusy, setSeasonAdminBusy] = useState(false)
@@ -4169,7 +4169,7 @@ function App() {
     }
     setSeasonLoading(true)
     if (interactive) setSeasonError('')
-    const result = await callGameSecureAuthed('season_status', { limit: 100 }, interactive)
+    const result = await callGameSecureAuthed('season_status', { limit: 20 }, interactive)
     if (!result.ok) {
       if (interactive) setSeasonError(result.error || 'Failed to load season status.')
       setSeasonLoading(false)
@@ -7932,12 +7932,8 @@ function App() {
                     <strong>{formatDateTime(seasonInfo.endAt)}</strong>
                   </div>
                   <div className="withdraw-info season-grid-two">
-                    <span className="withdraw-info-label">Total crystals</span>
-                    <strong>{formatNumber(seasonTotalCrystals)}</strong>
-                  </div>
-                  <div className="withdraw-info season-grid-two">
-                    <span className="withdraw-info-label">Weighted crystals</span>
-                    <strong>{formatNumber(Math.floor(seasonTotalEffectiveCrystals))}</strong>
+                    <span className="withdraw-info-label">Your crystals</span>
+                    <strong>{formatNumber(seasonPlayer?.crystals ?? hud.crystals)}</strong>
                   </div>
                   <div className="withdraw-info season-grid-two">
                     <span className="withdraw-info-label">Participants</span>
@@ -7945,10 +7941,8 @@ function App() {
                   </div>
                   {seasonPlayer && (
                     <div className="withdraw-info season-player-summary">
-                      <span className="withdraw-info-label">Your snapshot projection</span>
-                      <strong>
-                        Rank #{seasonPlayer.rank} · {formatNumber(seasonPlayer.crystals)} crystals · {seasonPlayer.premiumActive ? 'Premium x1.5' : 'Standard x1.0'} · ~{seasonPlayer.payoutSol.toFixed(6)} SOL
-                      </strong>
+                      <span className="withdraw-info-label">Your rank</span>
+                      <strong>#{seasonPlayer.rank}</strong>
                     </div>
                   )}
                   <div className="withdraw-note">

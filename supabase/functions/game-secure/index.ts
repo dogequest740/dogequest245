@@ -3097,7 +3097,7 @@ serve(async (req) => {
       return json({ ok: true, season: null, seasonLeaderboard: [], seasonPlayer: null });
     }
 
-    const limit = clampInt(body.limit, 10, 100);
+    const limit = clampInt(body.limit, 1, 20);
     const { data, error } = await supabase
       .from("profiles")
       .select("wallet, state, updated_at");
