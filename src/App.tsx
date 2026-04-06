@@ -6172,6 +6172,7 @@ function App() {
         <header className={topbarClass}>
           <div>
             <div className="brand">DOGE QUEST</div>
+            <div className="subtitle">Auto-battle, loot and XP in a pixel world</div>
           </div>
           <div className="top-actions">
             {stage === 'game' && hud && (
@@ -6246,7 +6247,8 @@ function App() {
                 conquer dungeons, build your own village, and share World Boss rewards.
               </p>
               <p className="auth-sublead highlight">
-                Stack crystals in dungeons, World Boss raids, and your village, then fight for your share of the live seasonal USDT pool. Premium gives a 1.5x payout bonus at the final snapshot.
+                Earn real SOL by playing: farm crystals in dungeons and World Boss raids, build your own village and
+                earn passive income, then convert rewards to SOL. The deeper you push, the larger the payouts.
               </p>
               <div className="auth-cta">
                 <div className="auth-cta-row">
@@ -6268,8 +6270,8 @@ function App() {
                   <span className="stat-label">Dungeons</span>
                 </div>
                 <div className="stat-card">
-                  <span className="stat-value">30</span>
-                  <span className="stat-label">Day Seasons</span>
+                  <span className="stat-value">Mainnet</span>
+                  <span className="stat-label">Solana</span>
                 </div>
               </div>
             </div>
