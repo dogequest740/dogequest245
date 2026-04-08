@@ -5002,7 +5002,7 @@ function App() {
   const shareReferralLink = () => {
     if (!referralLink) return
 
-    const inviteText = 'Play with me, win seasons, and earn rewards! ⚔️💎🏆'
+    const inviteText = 'Play with me, win seasons, and earn USDT! ⚔️💎🏆'
     const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent(inviteText)}`
 
     if (usingTelegramAuth && telegramWebApp?.openTelegramLink) {
@@ -9362,6 +9362,7 @@ function App() {
   )
 }
 export default App
+
 
 
 
