@@ -150,7 +150,7 @@
 }
 
 .app.mobile .left-panel {
-  order: 2;
+  display: none;
 }
 
 .app.mobile .game-main {
@@ -218,11 +218,8 @@
 .app.mobile .battle-controls {
   flex-direction: column;
   gap: 8px;
-  position: sticky;
-  bottom: 8px;
-  z-index: 3;
-  padding: 6px;
-  background: rgba(8, 12, 18, 0.7);
+  padding: 8px;
+  background: rgba(8, 12, 18, 0.75);
   border-radius: 14px;
 }
 
@@ -232,33 +229,122 @@
   padding: 12px 14px;
 }
 
-.mobile-nav {
+.mobile-hub-cards {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mobile-hub-card {
+  border: 1px solid rgba(214, 178, 95, 0.32);
+  background: rgba(11, 16, 24, 0.84);
+  color: #f6d488;
+  border-radius: 12px;
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mobile-hub-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.45px;
+}
+
+.mobile-hub-head .icon-img {
+  width: 16px;
+  height: 16px;
+}
+
+.mobile-hub-card strong {
+  font-size: 13px;
+  line-height: 1.15;
+}
+
+.mobile-hub-card small {
+  color: rgba(232, 241, 255, 0.78);
+  font-size: 10px;
+}
+
+.mobile-hub-actions {
   margin-top: 8px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
 }
 
-.mobile-nav button {
-  border: 1px solid rgba(214, 178, 95, 0.25);
-  background: rgba(12, 18, 26, 0.7);
+.mobile-hub-action {
+  border: 1px solid rgba(214, 178, 95, 0.28);
+  background: rgba(12, 18, 26, 0.72);
   color: #f6d488;
   border-radius: 12px;
   padding: 8px 6px;
-  font-size: 9px;
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.4px;
   font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
   display: grid;
   gap: 4px;
   justify-items: center;
+  cursor: pointer;
 }
 
-.mobile-nav .icon-img {
-  width: 22px;
-  height: 22px;
+.mobile-hub-action .icon-img {
+  width: 20px;
+  height: 20px;
 }
 
+.mobile-game-tabs {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  z-index: 35;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  padding: 8px;
+  border-radius: 14px;
+  border: 1px solid rgba(214, 178, 95, 0.25);
+  background: rgba(7, 11, 17, 0.92);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.38);
+}
+
+.mobile-game-tabs button {
+  border: 1px solid rgba(214, 178, 95, 0.24);
+  background: rgba(15, 21, 31, 0.75);
+  color: #f5d38a;
+  border-radius: 10px;
+  padding: 7px 4px;
+  font-size: 9px;
+  letter-spacing: 0.38px;
+  text-transform: uppercase;
+  font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
+  display: grid;
+  gap: 3px;
+  justify-items: center;
+}
+
+.mobile-game-tabs button.active {
+  background: linear-gradient(180deg, rgba(246, 212, 136, 0.22), rgba(246, 212, 136, 0.07));
+  border-color: rgba(246, 212, 136, 0.58);
+  color: #ffe6aa;
+}
+
+.mobile-game-tabs .icon-img {
+  width: 18px;
+  height: 18px;
+}
+
+.mobile-game-tabs span {
+  line-height: 1;
+}
 .app.mobile .panel {
   padding: 16px;
 }
@@ -465,6 +551,7 @@
 
 .app.mobile .game-section {
   overflow-x: hidden;
+  padding-bottom: calc(108px + env(safe-area-inset-bottom));
 }
 
 .app.mobile .modal,

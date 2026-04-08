@@ -95,7 +95,27 @@ type TelegramWebApp = {
   expand?: () => void
   openTelegramLink?: (url: string) => void
   openInvoice?: (url: string, callback?: (status: TelegramInvoiceStatus) => void) => void
+  BackButton?: {
+    show?: () => void
+    hide?: () => void
+    onClick?: (cb: () => void) => void
+    offClick?: (cb: () => void) => void
+  }
+  MainButton?: {
+    setText?: (text: string) => void
+    show?: () => void
+    hide?: () => void
+    enable?: () => void
+    disable?: () => void
+    onClick?: (cb: () => void) => void
+    offClick?: (cb: () => void) => void
+  }
+  HapticFeedback?: {
+    selectionChanged?: () => void
+  }
 }
+
+type MobileGameTab = 'battle' | 'boss' | 'shop' | 'season' | 'profile'
 
 const VILLAGE_FEATURE_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_VILLAGE === '1'
 const villageBackgroundImage = villageBackgroundPng
@@ -3486,6 +3506,7 @@ function App() {
   const [questClaimLoadingId, setQuestClaimLoadingId] = useState<string | null>(null)
   const [hoveredPlayerStat, setHoveredPlayerStat] = useState<'power' | 'fortune' | 'prosperity' | null>(null)
   const [isMobile, setIsMobile] = useState(false)
+  const [mobileGameTab, setMobileGameTab] = useState<MobileGameTab>('battle')
   const [dungeonRunBusy, setDungeonRunBusy] = useState(false)
   const [, setConsumableBusyVersion] = useState(0)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -5483,11 +5504,105 @@ function App() {
     void loadPayoutWalletStatus(true)
   }, [stage, activePanel, accountIdentity, usingTelegramAuth])
 
+
   const syncHud = () => {
     const state = gameStateRef.current
     if (!state) return
     setHud(buildHud(state))
   }
+
+  const openMobileGameTab = (tab: MobileGameTab) => {
+    setMobileGameTab(tab)
+    telegramWebApp?.HapticFeedback?.selectionChanged?.()
+
+    if (!isMobile || stage !== 'game') return
+
+    if (tab === 'battle') {
+      setActivePanel(null)
+      return
+    }
+    if (tab === 'boss') {
+      setActivePanel('worldboss')
+      return
+    }
+    if (tab === 'shop') {
+      setActivePanel('shop')
+      return
+    }
+    if (tab === 'season') {
+      setActivePanel('season')
+      return
+    }
+    setActivePanel(usingTelegramAuth ? 'settings' : 'inventory')
+  }
+
+  useEffect(() => {
+    if (!isMobile || stage !== 'game') return
+
+    if (!activePanel) {
+      setMobileGameTab('battle')
+      return
+    }
+
+    if (activePanel === 'worldboss') {
+      setMobileGameTab('boss')
+      return
+    }
+
+    if (activePanel === 'shop' || activePanel === 'buygold' || activePanel === 'premium' || activePanel === 'starterpack') {
+      setMobileGameTab('shop')
+      return
+    }
+
+    if (activePanel === 'season') {
+      setMobileGameTab('season')
+      return
+    }
+
+    if (
+      activePanel === 'settings' ||
+      activePanel === 'inventory' ||
+      activePanel === 'quests' ||
+      activePanel === 'referrals' ||
+      activePanel === 'stake' ||
+      activePanel === 'dungeons' ||
+      activePanel === 'fortune' ||
+      activePanel === 'village' ||
+      activePanel === 'admin'
+    ) {
+      setMobileGameTab('profile')
+    }
+  }, [isMobile, stage, activePanel])
+
+  useEffect(() => {
+    if (!usingTelegramAuth || stage !== 'game') return
+
+    const backButton = telegramWebApp?.BackButton
+    if (!backButton) return
+
+    const handleBack = () => {
+      if (activePanel) {
+        setActivePanel(null)
+        setMobileGameTab('battle')
+        return
+      }
+      if (mobileGameTab !== 'battle') {
+        setMobileGameTab('battle')
+      }
+    }
+
+    if (activePanel || mobileGameTab !== 'battle') {
+      backButton.show?.()
+    } else {
+      backButton.hide?.()
+    }
+
+    backButton.onClick?.(handleBack)
+
+    return () => {
+      backButton.offClick?.(handleBack)
+    }
+  }, [usingTelegramAuth, stage, telegramWebApp, activePanel, mobileGameTab])
 
   useEffect(() => {
     if (activePanel === 'inventory') {
@@ -5617,6 +5732,39 @@ function App() {
     pushLog(state.eventLog, state.autoBattle ? 'Auto battle enabled.' : 'Auto battle disabled.')
     syncHud()
   }
+
+  useEffect(() => {
+    if (!usingTelegramAuth || stage !== 'game') return
+
+    const mainButton = telegramWebApp?.MainButton
+    if (!mainButton) return
+
+    const shouldShow = isMobile && mobileGameTab === 'battle' && !activePanel
+    const canBattle = Boolean(hud && hud.energy > 0)
+    const handleMainBattle = () => {
+      startBattleOnce()
+      telegramWebApp?.HapticFeedback?.selectionChanged?.()
+    }
+
+    if (shouldShow) {
+      mainButton.setText?.(canBattle ? '⚔️ Battle now' : '⚠️ No energy')
+      if (canBattle) {
+        mainButton.enable?.()
+      } else {
+        mainButton.disable?.()
+      }
+      mainButton.show?.()
+      mainButton.onClick?.(handleMainBattle)
+    } else {
+      mainButton.hide?.()
+    }
+
+    return () => {
+      mainButton.offClick?.(handleMainBattle)
+      if (!shouldShow) return
+      mainButton.hide?.()
+    }
+  }, [usingTelegramAuth, stage, telegramWebApp, isMobile, mobileGameTab, activePanel, hud?.energy])
 
   const saveGameState = async (force = false) => {
     if (profileSaveInFlightRef.current) return
@@ -7349,39 +7497,69 @@ function App() {
                   Auto Battle: {hud?.autoBattle ? 'ON' : 'OFF'}
                 </button>
               </div>
-              {isMobile && (
-                <div className="mobile-nav">
-                  <button type="button" onClick={() => setActivePanel('inventory')}>
-                    <img className="icon-img" src={iconInventory} alt="" />
-                    <span>Inventory</span>
-                  </button>
-                  <button type="button" onClick={() => setActivePanel('dungeons')}>
-                    <img className="icon-img" src={iconDungeons} alt="" />
-                    <span>Dungeons</span>
-                  </button>
-                  <button type="button" onClick={() => setActivePanel('shop')}>
-                    <img className="icon-img" src={iconShop} alt="" />
-                    <span>Shop</span>
-                  </button>
-                  {usingTelegramAuth && (
-                    <button type="button" onClick={() => setActivePanel('settings')}>
-                      <img className="icon-img" src={iconName} alt="" />
-                      <span>Settings</span>
+              {isMobile && hud && (
+                <>
+                  <div className="mobile-hub-cards">
+                    <button type="button" className="mobile-hub-card" onClick={() => openMobileGameTab('boss')}>
+                      <div className="mobile-hub-head">
+                        <img className="icon-img" src={iconWorldBoss} alt="" />
+                        <span>World Boss</span>
+                      </div>
+                      <strong>{formatLongTimer(hud.worldBoss.remaining)}</strong>
+                      <small>{hud.worldBossTickets > 0 ? `${hud.worldBossTickets} ticket(s) ready` : 'No tickets yet'}</small>
                     </button>
-                  )}
-                  <button type="button" onClick={() => setActivePanel('fortune')}>
-                    <img className="icon-img" src={iconFortuneWheel} alt="" />
-                    <span>Fortune</span>
-                  </button>
-                  <button type="button" onClick={() => setActivePanel('quests')}>
-                    <img className="icon-img" src={iconQuests} alt="" />
-                    <span>Quests</span>
-                  </button>
-                  <button type="button" onClick={() => setActivePanel('worldboss')}>
-                    <img className="icon-img" src={iconWorldBoss} alt="" />
-                    <span>Boss</span>
-                  </button>
-                </div>
+                    <button type="button" className="mobile-hub-card" onClick={() => openMobileGameTab('season')}>
+                      <div className="mobile-hub-head">
+                        <img className="icon-img" src={iconCrystalSeason} alt="" />
+                        <span>Crystal Season</span>
+                      </div>
+                      <strong>{seasonInfo ? `${formatNumber(Math.max(0, Math.round(seasonInfo.poolUsdt)))} USDT` : 'No active season'}</strong>
+                      <small>{seasonInfo ? `Ends in ${formatLongTimer(seasonRemainingSec)}` : 'Waiting for next season'}</small>
+                    </button>
+                  </div>
+
+                  <div className="mobile-hub-actions">
+                    <button type="button" className="mobile-hub-action" onClick={() => setActivePanel('dungeons')}>
+                      <img className="icon-img" src={iconDungeons} alt="" />
+                      Dungeons
+                    </button>
+                    <button type="button" className="mobile-hub-action" onClick={() => setActivePanel('quests')}>
+                      <img className="icon-img" src={iconQuests} alt="" />
+                      Quests
+                    </button>
+                    <button type="button" className="mobile-hub-action" onClick={() => setActivePanel('fortune')}>
+                      <img className="icon-img" src={iconFortuneWheel} alt="" />
+                      Fortune
+                    </button>
+                    <button type="button" className="mobile-hub-action" onClick={() => setActivePanel('referrals')}>
+                      <img className="icon-img" src={iconReferrals} alt="" />
+                      Referrals
+                    </button>
+                  </div>
+
+                  <nav className="mobile-game-tabs" aria-label="Game sections">
+                    <button type="button" className={mobileGameTab === 'battle' ? 'active' : ''} onClick={() => openMobileGameTab('battle')}>
+                      <img className="icon-img" src={iconBattle} alt="" />
+                      <span>Battle</span>
+                    </button>
+                    <button type="button" className={mobileGameTab === 'boss' ? 'active' : ''} onClick={() => openMobileGameTab('boss')}>
+                      <img className="icon-img" src={iconWorldBoss} alt="" />
+                      <span>Boss</span>
+                    </button>
+                    <button type="button" className={mobileGameTab === 'shop' ? 'active' : ''} onClick={() => openMobileGameTab('shop')}>
+                      <img className="icon-img" src={iconShop} alt="" />
+                      <span>Shop</span>
+                    </button>
+                    <button type="button" className={mobileGameTab === 'season' ? 'active' : ''} onClick={() => openMobileGameTab('season')}>
+                      <img className="icon-img" src={iconCrystalSeason} alt="" />
+                      <span>Seasons</span>
+                    </button>
+                    <button type="button" className={mobileGameTab === 'profile' ? 'active' : ''} onClick={() => openMobileGameTab('profile')}>
+                      <img className="icon-img" src={iconInventory} alt="" />
+                      <span>{usingTelegramAuth ? 'Settings' : 'Profile'}</span>
+                    </button>
+                  </nav>
+                </>
               )}
             </div>
           </div>
@@ -9362,6 +9540,7 @@ function App() {
   )
 }
 export default App
+
 
 
 
