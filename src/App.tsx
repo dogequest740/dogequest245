@@ -5095,8 +5095,9 @@ function App() {
 
   useEffect(() => {
     if (stage !== 'game') return
+    if (!usingTelegramAuth) return
     void loadPayoutWalletStatus(false)
-  }, [stage, accountIdentity])
+  }, [stage, accountIdentity, usingTelegramAuth])
 
   useEffect(() => {
     if (stage !== 'game') return
@@ -5140,9 +5141,10 @@ function App() {
 
   useEffect(() => {
     if (stage !== 'game') return
+    if (!usingTelegramAuth) return
     if (activePanel !== 'settings') return
     void loadPayoutWalletStatus(true)
-  }, [stage, activePanel, accountIdentity])
+  }, [stage, activePanel, accountIdentity, usingTelegramAuth])
 
   const syncHud = () => {
     const state = gameStateRef.current
@@ -6864,10 +6866,12 @@ function App() {
                       <img className="icon-img" src={iconShop} alt="" />
                       Shop
                     </button>
-                    <button type="button" className="menu-big" onClick={() => setActivePanel('settings')}>
-                      <img className="icon-img" src={iconName} alt="" />
-                      Settings
-                    </button>
+                    {usingTelegramAuth && (
+                      <button type="button" className="menu-big" onClick={() => setActivePanel('settings')}>
+                        <img className="icon-img" src={iconName} alt="" />
+                        Settings
+                      </button>
+                    )}
                     <button type="button" className="menu-big" onClick={() => setActivePanel('fortune')}>
                       <img className="icon-img" src={iconFortuneWheel} alt="" />
                       Fortune Wheel
@@ -6981,10 +6985,12 @@ function App() {
                     <img className="icon-img" src={iconShop} alt="" />
                     <span>Shop</span>
                   </button>
-                  <button type="button" onClick={() => setActivePanel('settings')}>
-                    <img className="icon-img" src={iconName} alt="" />
-                    <span>Settings</span>
-                  </button>
+                  {usingTelegramAuth && (
+                    <button type="button" onClick={() => setActivePanel('settings')}>
+                      <img className="icon-img" src={iconName} alt="" />
+                      <span>Settings</span>
+                    </button>
+                  )}
                   <button type="button" onClick={() => setActivePanel('fortune')}>
                     <img className="icon-img" src={iconFortuneWheel} alt="" />
                     <span>Fortune</span>
@@ -8401,7 +8407,7 @@ function App() {
       )}
 
 
-      {activePanel === 'settings' && hud && (
+      {usingTelegramAuth && activePanel === 'settings' && hud && (
         <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
           <div className="modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
