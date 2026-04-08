@@ -6191,3 +6191,14 @@ button.ghost {
     letter-spacing: 0.7px;
   }
 }
+
+.tg-auth-page {
+  min-height: 320px;
+  display: grid;
+  place-items: center;
+}
+
+.tg-auth-page .auth-hero {
+  width: min(640px, 100%);
+}
+

@@ -445,6 +445,13 @@ const sanitizeSettlementName = (value: unknown) =>
     .trim()
     .slice(0, 24);
 
+const sanitizePayoutWallet = (value: unknown) =>
+  String(value ?? "")
+    .replace(/[\u0000-\u001f\u007f\s]/g, "")
+    .trim()
+    .slice(0, 96);
+
+const isTelegramIdentity = (value: string) => /^tg:[0-9]{3,20}$/.test(value);
 const isWalletLike = (value: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
 const isValidSolanaAddress = (value: string) => {
   try {
@@ -453,7 +460,11 @@ const isValidSolanaAddress = (value: string) => {
     return false;
   }
 };
-const isPlayerIdentity = (value: string) => isWalletLike(value);
+const isPayoutWalletFormat = (value: string) =>
+  value.length === 0 ||
+  isWalletLike(value) ||
+  /^0x[a-fA-F0-9]{40}$/.test(value);
+const isPlayerIdentity = (value: string) => isWalletLike(value) || isTelegramIdentity(value);
 const isTxSignatureLike = (value: string) => /^[1-9A-HJ-NP-Za-km-z]{70,120}$/.test(value);
 const todayKeyUtc = (now: Date) => now.toISOString().slice(0, 10);
 const isConsumableType = (value: string): value is ConsumableType =>
@@ -1011,6 +1022,7 @@ const createStarterProfileState = (seed: Record<string, unknown>, nowMs: number)
     energyTimer: ENERGY_REGEN_SECONDS,
     energyUpdatedAt: nowMs,
     gold: 0,
+    payoutWallet: "",
     crystals: 0,
     crystalsEarned: 0,
     tickets: DUNGEON_DAILY_TICKETS,
@@ -1452,6 +1464,7 @@ const normalizeState = (raw: unknown) => {
   state.player = player;
   state.name = sanitizeName(state.name);
   state.gold = Math.max(0, asInt(state.gold, 0));
+  state.payoutWallet = sanitizePayoutWallet(state.payoutWallet);
   state.crystals = Math.max(0, asInt(state.crystals, 0));
   state.crystalsEarned = Math.max(0, asInt(state.crystalsEarned ?? state.crystals, 0));
   state.monsterKills = Math.max(0, asInt(state.monsterKills, 0));
@@ -3062,6 +3075,7 @@ serve(async (req) => {
       }
       // Village writes are server-authoritative and must never be accepted from client profile_save.
       normalizedState.village = normalizeVillageState(prevState.village, now.getTime());
+      normalizedState.payoutWallet = sanitizePayoutWallet(prevState.payoutWallet);
 
       const prevEnergy = clampInt(prevState.energy, 0, Math.max(1, asInt(prevState.energyMax, ENERGY_MAX)));
       const prevTimer = clampInt(prevState.energyTimer, 1, ENERGY_REGEN_SECONDS);
@@ -3192,6 +3206,46 @@ serve(async (req) => {
       seasonTotalCrystals: computed.totalCrystals,
       seasonTotalEffectiveCrystals: computed.totalEffectiveCrystals,
     });
+  }
+
+  if (action === "payout_wallet_status") {
+    const { data: profileRow, error: profileError } = await supabase
+      .from("profiles")
+      .select("state")
+      .eq("wallet", auth.wallet)
+      .maybeSingle();
+
+    if (profileError) return json({ ok: false, error: "Failed to load payout wallet." });
+
+    const state = profileRow?.state && typeof profileRow.state === "object"
+      ? normalizeState(profileRow.state as unknown)
+      : null;
+
+    return json({
+      ok: true,
+      payoutWallet: sanitizePayoutWallet(state?.payoutWallet ?? ""),
+    });
+  }
+
+  if (action === "payout_wallet_save") {
+    const payoutWallet = sanitizePayoutWallet(body.payoutWallet ?? "");
+    if (!isPayoutWalletFormat(payoutWallet)) {
+      return json({ ok: false, error: "Invalid payout wallet format." });
+    }
+
+    const updated = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
+      state.payoutWallet = payoutWallet;
+    });
+    if (!updated.ok) {
+      return json({ ok: false, error: updated.error || "Failed to save payout wallet." });
+    }
+
+    await auditEvent(supabase, auth.wallet, "payout_wallet_save", {
+      hasValue: Boolean(payoutWallet),
+      walletType: payoutWallet.startsWith("0x") ? "evm" : payoutWallet ? "base58" : "empty",
+    });
+
+    return json({ ok: true, payoutWallet, savedAt: updated.updatedAt });
   }
 
   if (action === "fortune_status") {

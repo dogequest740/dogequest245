@@ -76,6 +76,22 @@ import landingBanner4Png from './assets/landing-banners/banner-4.png'
 import landingBanner5Png from './assets/landing-banners/banner-5.png'
 import './App.css'
 
+type TelegramWebAppUser = {
+  id?: number
+  username?: string
+  first_name?: string
+  last_name?: string
+}
+
+type TelegramWebApp = {
+  initData?: string
+  initDataUnsafe?: {
+    user?: TelegramWebAppUser
+  }
+  ready?: () => void
+  expand?: () => void
+}
+
 const VILLAGE_FEATURE_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_VILLAGE === '1'
 const villageBackgroundImage = villageBackgroundPng
 const villageCastleLv1Image = villageCastleLv1Png
@@ -428,6 +444,7 @@ type GameSecureResponse = {
   } | null
   profiles?: SecureProfileRow[]
   profilesTotal?: number
+  payoutWallet?: string
   energy?: number
   energyTimer?: number
   tickets?: number
@@ -1931,6 +1948,11 @@ const sanitizeSettlementName = (value: string) =>
     .replace(/[\u0000-\u001f\u007f]/g, '')
     .trim()
     .slice(0, 24)
+const sanitizePayoutWalletInput = (value: string) =>
+  value
+    .replace(/[\u0000-\u001f\u007f\s]/g, '')
+    .trim()
+    .slice(0, 96)
 
 const normalizeEquipment = (
   equipment?: Partial<Record<EquipmentSlot, EquipmentItem | null>> | null,
@@ -3274,6 +3296,7 @@ function App() {
     | 'village'
     | 'admin'
     | 'season'
+    | 'settings'
     | 'stake'
     | 'buygold'
     | 'starterpack'
@@ -3309,6 +3332,10 @@ function App() {
   const [seasonAdminDurationDays, setSeasonAdminDurationDays] = useState('30')
   const [seasonPreviewRows, setSeasonPreviewRows] = useState<SeasonSnapshotEntry[]>([])
   const [seasonSnapshotRows, setSeasonSnapshotRows] = useState<SeasonSnapshotEntry[]>([])
+  const [payoutWallet, setPayoutWallet] = useState('')
+  const [payoutWalletDraft, setPayoutWalletDraft] = useState('')
+  const [payoutWalletLoading, setPayoutWalletLoading] = useState(false)
+  const [payoutWalletError, setPayoutWalletError] = useState('')
   const [buyGoldError, setBuyGoldError] = useState('')
   const [buyGoldLoading, setBuyGoldLoading] = useState<string | null>(null)
   const [starterPackError, setStarterPackError] = useState('')
@@ -3426,15 +3453,38 @@ function App() {
       .filter(Boolean)
   }, [])
 
+  const telegramWebApp = useMemo<TelegramWebApp | null>(() => {
+    if (typeof window === 'undefined') return null
+    return (window as { Telegram?: { WebApp?: TelegramWebApp } }).Telegram?.WebApp ?? null
+  }, [])
+  const telegramInitData = useMemo(() => String(telegramWebApp?.initData ?? '').trim(), [telegramWebApp])
+  const telegramUser = useMemo<TelegramWebAppUser | null>(() => {
+    const raw = telegramWebApp?.initDataUnsafe?.user
+    if (!raw || typeof raw !== 'object') return null
+    return raw
+  }, [telegramWebApp])
+  const telegramUserId = Math.max(0, Math.floor(Number(telegramUser?.id ?? 0)))
+  const telegramUsername = String(telegramUser?.username ?? '').trim()
+  const usingTelegramAuth = telegramInitData.length > 0
+
   const walletAddress = publicKey?.toBase58() ?? ''
   const walletAuthReady = Boolean(walletAddress && signMessage)
-  const accountIdentity = walletAuthReady ? walletAddress : ''
-  const usingWalletAuth = walletAuthReady
+  const usingWalletAuth = walletAuthReady && !usingTelegramAuth
+  const accountIdentity = useMemo(() => {
+    if (usingTelegramAuth) return telegramUserId > 0 ? `tg:${telegramUserId}` : 'tg:webapp'
+    return usingWalletAuth ? walletAddress : ''
+  }, [usingTelegramAuth, telegramUserId, usingWalletAuth, walletAddress])
+
+  useEffect(() => {
+    if (!usingTelegramAuth) return
+    telegramWebApp?.ready?.()
+    telegramWebApp?.expand?.()
+  }, [usingTelegramAuth, telegramWebApp])
 
   const isAdmin = useMemo(() => {
-    if (!walletAddress || !walletSessionVerified) return false
-    return adminWallets.includes(walletAddress)
-  }, [walletAddress, walletSessionVerified, adminWallets])
+    if (!accountIdentity || !walletSessionVerified) return false
+    return adminWallets.includes(accountIdentity)
+  }, [accountIdentity, walletSessionVerified, adminWallets])
 
   const referralWalletFromUrl = useMemo(() => {
     if (typeof window === 'undefined') return ''
@@ -3473,6 +3523,9 @@ function App() {
       secureSessionInitRef.current = false
       setWalletSessionVerified(false)
       setSecurityAuthError('')
+      setPayoutWallet('')
+      setPayoutWalletDraft('')
+      setPayoutWalletError('')
       setActivePanel(null)
       setHud(null)
       setStage('auth')
@@ -3536,6 +3589,7 @@ function App() {
       normalized.includes('sign-in required') ||
       normalized.includes('invalid jwt') ||
       normalized.includes('wallet login failed') ||
+      normalized.includes('telegram login failed') ||
       normalized.includes('wallet signature') ||
       normalized.includes('signature was rejected')
   }
@@ -3560,8 +3614,9 @@ function App() {
   }
 
   const ensureDungeonSession = async (interactive = true) => {
-    const wallet = walletAuthReady ? walletAddress : ''
-    if (!wallet) return null
+    const wallet = usingWalletAuth ? walletAddress : ''
+    const hasTelegramSessionInput = usingTelegramAuth && telegramInitData.length > 0
+    if (!wallet && !hasTelegramSessionInput) return null
 
     const cached = dungeonSessionRef.current
     if (cached && cached.expiresAt > Date.now() + 5000) {
@@ -3572,12 +3627,32 @@ function App() {
       return dungeonSessionRequestRef.current
     }
 
-    if (!interactive || !signMessage) {
+    if (usingWalletAuth && (!interactive || !signMessage)) {
       setWalletSessionVerified(false)
       return null
     }
 
     const request = (async () => {
+      if (hasTelegramSessionInput) {
+        const login = await callDungeonSecure({
+          action: 'telegram_login',
+          initData: telegramInitData,
+        })
+        if (!login.ok || !login.token) {
+          handleSecurityAuthFailure(login.error || 'Telegram login failed.', interactive)
+          return null
+        }
+
+        const expiresAtMs = login.expiresAt ? new Date(login.expiresAt).getTime() : Number.NaN
+        dungeonSessionRef.current = {
+          token: login.token,
+          expiresAt: Number.isFinite(expiresAtMs) ? expiresAtMs : Date.now() + 24 * 60 * 60 * 1000,
+        }
+        setWalletSessionVerified(true)
+        setSecurityAuthError('')
+        return login.token
+      }
+
       const challenge = await callDungeonSecure({ action: 'challenge', wallet })
       if (!challenge.ok || !challenge.message) {
         handleSecurityAuthFailure(challenge.error || 'Wallet login failed.', interactive)
@@ -3586,7 +3661,7 @@ function App() {
 
       let signature: Uint8Array
       try {
-        signature = await signMessage(new TextEncoder().encode(challenge.message))
+        signature = await signMessage!(new TextEncoder().encode(challenge.message))
       } catch {
         setWalletSessionVerified(false)
         dungeonSessionRef.current = null
@@ -3749,6 +3824,42 @@ function App() {
       profileUpdatedAtRef.current = result.profile.updated_at
     }
     return result
+  }
+
+  const loadPayoutWalletStatus = async (interactive = false) => {
+    const result = await callGameSecureAuthed('payout_wallet_status', {}, interactive)
+    if (!result.ok) {
+      if (interactive) {
+        setPayoutWalletError(result.error || 'Failed to load payout wallet.')
+      }
+      return false
+    }
+
+    const value = sanitizePayoutWalletInput(String(result.payoutWallet ?? ''))
+    setPayoutWallet(value)
+    setPayoutWalletDraft(value)
+    setPayoutWalletError('')
+    return true
+  }
+
+  const savePayoutWalletStatus = async () => {
+    if (payoutWalletLoading) return
+    const nextValue = sanitizePayoutWalletInput(payoutWalletDraft)
+    setPayoutWalletLoading(true)
+    setPayoutWalletError('')
+    try {
+      const result = await callGameSecureAuthed('payout_wallet_save', { payoutWallet: nextValue }, true)
+      if (!result.ok) {
+        setPayoutWalletError(result.error || 'Failed to save payout wallet.')
+        return
+      }
+      const saved = sanitizePayoutWalletInput(String(result.payoutWallet ?? nextValue))
+      setPayoutWallet(saved)
+      setPayoutWalletDraft(saved)
+      setPayoutWalletError('')
+    } finally {
+      setPayoutWalletLoading(false)
+    }
   }
 
   const isPaymentCreditRetryableError = (errorText: string) => {
@@ -4734,6 +4845,9 @@ function App() {
       setFortuneWheelSpinning(false)
       setWalletSessionVerified(false)
       setSecurityAuthError('')
+      setPayoutWallet('')
+      setPayoutWalletDraft('')
+      setPayoutWalletError('')
       setActivePanel(null)
       setHud(null)
       setStage('auth')
@@ -4746,7 +4860,12 @@ function App() {
     dungeonSessionRequestRef.current = null
     secureSessionInitRef.current = false
     setWalletSessionVerified(false)
-    if (!usingWalletAuth || !signMessage) {
+    if (usingWalletAuth && !signMessage) {
+      return () => {
+        active = false
+      }
+    }
+    if (!usingWalletAuth && !usingTelegramAuth) {
       return () => {
         active = false
       }
@@ -4784,7 +4903,7 @@ function App() {
     return () => {
       active = false
     }
-  }, [accountIdentity, usingWalletAuth, signMessage])
+  }, [accountIdentity, usingWalletAuth, usingTelegramAuth, signMessage])
 
   useEffect(() => {
     if (stage !== 'game') return
@@ -4976,6 +5095,11 @@ function App() {
 
   useEffect(() => {
     if (stage !== 'game') return
+    void loadPayoutWalletStatus(false)
+  }, [stage, accountIdentity])
+
+  useEffect(() => {
+    if (stage !== 'game') return
     const interval = window.setInterval(() => {
       void syncDungeonStateFromServer()
       void syncWorldBossTicketsFromServer(false)
@@ -5013,6 +5137,12 @@ function App() {
       }
     }
   }, [])
+
+  useEffect(() => {
+    if (stage !== 'game') return
+    if (activePanel !== 'settings') return
+    void loadPayoutWalletStatus(true)
+  }, [stage, activePanel, accountIdentity])
 
   const syncHud = () => {
     const state = gameStateRef.current
@@ -5059,6 +5189,10 @@ function App() {
       setFortuneStatusLoading(false)
       setFortuneSpinLoading(false)
       setFortuneBuyLoading(null)
+    }
+    if (activePanel !== 'settings') {
+      setPayoutWalletError('')
+      setPayoutWalletLoading(false)
     }
     if (activePanel !== 'season') {
       setSeasonError('')
@@ -6052,7 +6186,15 @@ function App() {
   const shortKey = walletAddress
     ? `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`
     : ''
-  const accountHint = usingWalletAuth ? `Wallet: ${shortKey}` : ''
+  const accountHint = usingWalletAuth
+    ? `Wallet: ${shortKey}`
+    : usingTelegramAuth
+      ? telegramUsername
+        ? `Telegram: @${telegramUsername}`
+        : telegramUserId > 0
+          ? `Telegram ID: ${telegramUserId}`
+          : 'Telegram connected'
+      : ''
 
   const levelUpNotice = hud?.levelUpNotice ?? null
   const currentDayKey = getDayKey()
@@ -6198,7 +6340,7 @@ function App() {
                 </button>
               )}
             </div>
-            {(usingWalletAuth || isAdmin) && (
+            {(usingWalletAuth || usingTelegramAuth || isAdmin) && (
               <div className="wallet-hint-row">
                 {isAdmin && (
                   <button type="button" className="admin-inline" onClick={() => setActivePanel('admin')}>
@@ -6229,7 +6371,30 @@ function App() {
         </div>
       )}
 
-      {stage === 'auth' && (
+      {stage === 'auth' && usingTelegramAuth && (
+        <section className="auth-page tg-auth-page">
+          <div className="auth-hero">
+            <div className="auth-hero-copy reveal">
+              <h1 className="auth-title">DOGE QUEST</h1>
+              <p className="auth-lead">Connecting your Telegram session...</p>
+              <p className="auth-note">If login did not complete, tap retry.</p>
+              <div className="auth-cta">
+                <button
+                  type="button"
+                  className="wallet-button auth-wallet"
+                  onClick={() => {
+                    void ensureDungeonSession(true)
+                  }}
+                >
+                  Retry login
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {stage === 'auth' && !usingTelegramAuth && (
         <section className="auth-page">
           <div className="auth-social-buttons">
             <a className="auth-social-button auth-discord-button" href="https://discord.gg/jmSgBw8s75" target="_blank" rel="noreferrer">
@@ -6613,7 +6778,7 @@ function App() {
               className="start-button"
               disabled={playerName.trim().length < 2}
               onClick={async () => {
-                if (usingWalletAuth && !walletSessionVerified) {
+                if (!walletSessionVerified) {
                   const token = await ensureDungeonSession(true)
                   if (!token) return
                 }
@@ -6698,6 +6863,10 @@ function App() {
                     <button type="button" className="menu-big" onClick={() => setActivePanel('shop')}>
                       <img className="icon-img" src={iconShop} alt="" />
                       Shop
+                    </button>
+                    <button type="button" className="menu-big" onClick={() => setActivePanel('settings')}>
+                      <img className="icon-img" src={iconName} alt="" />
+                      Settings
                     </button>
                     <button type="button" className="menu-big" onClick={() => setActivePanel('fortune')}>
                       <img className="icon-img" src={iconFortuneWheel} alt="" />
@@ -6811,6 +6980,10 @@ function App() {
                   <button type="button" onClick={() => setActivePanel('shop')}>
                     <img className="icon-img" src={iconShop} alt="" />
                     <span>Shop</span>
+                  </button>
+                  <button type="button" onClick={() => setActivePanel('settings')}>
+                    <img className="icon-img" src={iconName} alt="" />
+                    <span>Settings</span>
                   </button>
                   <button type="button" onClick={() => setActivePanel('fortune')}>
                     <img className="icon-img" src={iconFortuneWheel} alt="" />
@@ -8227,6 +8400,42 @@ function App() {
         </div>
       )}
 
+
+      {activePanel === 'settings' && hud && (
+        <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Payout Wallet</h3>
+              <button type="button" onClick={() => setActivePanel(null)}>Close</button>
+            </div>
+            <div className="withdraw-body">
+              <div className="withdraw-note">Set the wallet where you want to receive manual season payouts. You can update it any time before season close.</div>
+              <label>
+                USDT/SOL wallet
+                <input
+                  type="text"
+                  value={payoutWalletDraft}
+                  onChange={(event) => setPayoutWalletDraft(sanitizePayoutWalletInput(event.target.value))}
+                  placeholder="Enter payout wallet"
+                  maxLength={96}
+                />
+              </label>
+              <div className="withdraw-note">Current saved wallet: {payoutWallet ? payoutWallet : 'Not set'}</div>
+              <button
+                type="button"
+                className="withdraw-submit"
+                onClick={() => {
+                  void savePayoutWalletStatus()
+                }}
+                disabled={payoutWalletLoading}
+              >
+                {payoutWalletLoading ? 'Saving...' : 'Save wallet'}
+              </button>
+              {payoutWalletError && <div className="withdraw-error">{payoutWalletError}</div>}
+            </div>
+          </div>
+        </div>
+      )}
 
       {activePanel === 'stake' && hud && (
         <div className="modal-backdrop" onClick={() => setActivePanel(null)}>

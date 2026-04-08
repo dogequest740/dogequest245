@@ -9,6 +9,7 @@ const SHOP_TICKET_CAP = 30;
 const SESSION_TTL_SECONDS = 24 * 60 * 60;
 const CHALLENGE_TTL_SECONDS = 5 * 60;
 const CHALLENGE_REUSE_WINDOW_SECONDS = 10;
+const TELEGRAM_AUTH_MAX_AGE_SECONDS = 24 * 60 * 60;
 const ITEM_TIER_SCORE_MULTIPLIER = 0.5;
 const PREMIUM_DUNGEON_CRYSTAL_MULTIPLIER = 1.5;
 const BLOCKED_ERROR_MESSAGE = "You have been banned for cheating.";
@@ -61,6 +62,82 @@ const decodeBase64 = (value: string) => {
   } catch {
     return null;
   }
+};
+
+const toHex = (bytes: Uint8Array) =>
+  Array.from(bytes).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+
+const hmacSha256 = async (key: Uint8Array, message: string) => {
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    key,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", cryptoKey, textEncoder.encode(message));
+  return new Uint8Array(signature);
+};
+
+const verifyTelegramInitData = async (
+  initDataRaw: string,
+  botTokenRaw: string,
+) => {
+  const initData = String(initDataRaw ?? "").trim();
+  const botToken = String(botTokenRaw ?? "").trim();
+  if (!initData) return { ok: false as const, error: "Missing Telegram initData." };
+  if (!botToken) return { ok: false as const, error: "Telegram bot token is not configured." };
+
+  const params = new URLSearchParams(initData);
+  const hash = String(params.get("hash") ?? "").trim().toLowerCase();
+  if (!hash) return { ok: false as const, error: "Telegram hash is missing." };
+
+  params.delete("hash");
+  const dataCheckString = Array.from(params.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+
+  const secretKey = await hmacSha256(textEncoder.encode("WebAppData"), botToken);
+  const calculatedHash = toHex(await hmacSha256(secretKey, dataCheckString)).toLowerCase();
+  if (calculatedHash !== hash) {
+    return { ok: false as const, error: "Telegram auth signature mismatch." };
+  }
+
+  const authDate = asInt(params.get("auth_date"), 0);
+  if (authDate <= 0) return { ok: false as const, error: "Telegram auth date is missing." };
+  const ageSec = Math.max(0, Math.floor(Date.now() / 1000) - authDate);
+  if (ageSec > TELEGRAM_AUTH_MAX_AGE_SECONDS) {
+    return { ok: false as const, error: "Telegram auth data is too old. Reopen the game from Telegram." };
+  }
+
+  const userJson = String(params.get("user") ?? "");
+  if (!userJson) return { ok: false as const, error: "Telegram user payload is missing." };
+
+  let user: Record<string, unknown> | null = null;
+  try {
+    const parsed = JSON.parse(userJson) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { ok: false as const, error: "Invalid Telegram user payload." };
+    }
+    user = parsed as Record<string, unknown>;
+  } catch {
+    return { ok: false as const, error: "Invalid Telegram user payload." };
+  }
+
+  const telegramUserId = asInt(user.id, 0);
+  if (telegramUserId <= 0) return { ok: false as const, error: "Telegram user id is invalid." };
+
+  const username = String(user.username ?? "").trim().slice(0, 64);
+  const firstName = String(user.first_name ?? "").trim().slice(0, 64);
+  const lastName = String(user.last_name ?? "").trim().slice(0, 64);
+  return {
+    ok: true as const,
+    telegramUserId,
+    username,
+    firstName,
+    lastName,
+  };
 };
 
 
@@ -568,6 +645,48 @@ serve(async (req) => {
 
   const action = String(body.action ?? "");
 
+  if (action === "telegram_login") {
+    const initData = String(body.initData ?? "").trim();
+    const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN") || Deno.env.get("TG_BOT_TOKEN") || "";
+    const authResult = await verifyTelegramInitData(initData, botToken);
+    if (!authResult.ok) {
+      return json({ ok: false, error: authResult.error });
+    }
+
+    const wallet = `tg:${authResult.telegramUserId}`;
+    const blocked = await getBlockedWallet(supabase, wallet);
+    if (blocked) {
+      await supabase.from("wallet_sessions").delete().eq("wallet", wallet);
+      await auditEvent(supabase, wallet, "blocked_login_attempt", { reason: blocked.reason, action: "telegram_login" });
+      return json({ ok: false, error: BLOCKED_ERROR_MESSAGE });
+    }
+
+    await supabase
+      .from("wallet_sessions")
+      .delete()
+      .eq("wallet", wallet)
+      .lte("expires_at", now.toISOString());
+
+    const token = randomToken(32);
+    const expiresAt = new Date(now.getTime() + SESSION_TTL_SECONDS * 1000).toISOString();
+    const { error: sessionError } = await supabase.from("wallet_sessions").insert({
+      token,
+      wallet,
+      expires_at: expiresAt,
+      updated_at: now.toISOString(),
+    });
+
+    if (sessionError) return json({ ok: false, error: "Failed to create session." });
+
+    await auditEvent(supabase, wallet, "telegram_login_success", {
+      telegramUserId: authResult.telegramUserId,
+      username: authResult.username,
+      firstName: authResult.firstName,
+      lastName: authResult.lastName,
+    });
+
+    return json({ ok: true, token, expiresAt, authType: "telegram", wallet });
+  }
 
   if (action === "challenge") {
     const wallet = String(body.wallet ?? "");
@@ -862,4 +981,5 @@ serve(async (req) => {
 
   return json({ ok: false, error: "Unknown action." });
 });
+
 
