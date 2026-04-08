@@ -22,6 +22,8 @@
 }
 
 .app.mobile {
+  --tg-top-offset: 42px;
+  --mobile-bottom-nav-height: 112px;
   padding: 10px 12px 14px;
   gap: 12px;
   height: auto;
@@ -31,6 +33,7 @@
 }
 
 .app.mobile .topbar {
+  margin-top: calc(var(--tg-top-offset) + env(safe-area-inset-top));
   flex-direction: column;
   align-items: stretch;
 }
@@ -240,12 +243,36 @@
 
 .inventory-super-tabs {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 2px 0 12px;
 }
 
-.inventory-super-tabs.with-settings {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.inventory-super-tabs .tab-btn {
+  border: 1px solid rgba(116, 191, 255, 0.45);
+  background: linear-gradient(160deg, rgba(12, 22, 34, 0.94), rgba(8, 14, 22, 0.96));
+  color: rgba(196, 231, 255, 0.9);
+  border-radius: 12px;
+  min-height: 38px;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.45px;
+  font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
+  text-transform: uppercase;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+  box-shadow:
+    0 8px 14px rgba(0, 0, 0, 0.28),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+}
+
+.inventory-super-tabs .tab-btn.active {
+  border-color: rgba(168, 244, 255, 0.9);
+  background: linear-gradient(160deg, #57b6ff, #2f81cf);
+  color: #081321;
+  text-shadow: none;
+  box-shadow: 0 10px 18px rgba(83, 174, 255, 0.35);
 }
 
 .mobile-account-panel {
@@ -666,6 +693,22 @@
   box-shadow: 0 10px 20px rgba(248, 225, 161, 0.28);
 }
 
+.app.mobile .inventory-tabs,
+.app.mobile .inventory-subtabs,
+.app.mobile .inventory-super-tabs {
+  width: 100%;
+  align-items: stretch;
+}
+
+.app.mobile .inventory-tabs .tab-btn,
+.app.mobile .inventory-subtabs .tab-btn,
+.app.mobile .inventory-super-tabs .tab-btn {
+  min-width: 0;
+  min-height: 40px;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
 .app.mobile .inventory-modal .slot-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
@@ -764,7 +807,7 @@
 .app.mobile .modal.wide {
   width: 100%;
   max-width: 100%;
-  max-height: 90vh;
+  max-height: calc(100dvh - (var(--tg-top-offset) + env(safe-area-inset-top)) - (14px + env(safe-area-inset-bottom)));
   overflow: auto;
 }
 
@@ -1272,6 +1315,36 @@
 .buygold-card button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.app.mobile .buygold-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.app.mobile .buygold-card {
+  padding: 10px 8px;
+  gap: 7px;
+}
+
+.app.mobile .buygold-card .shop-icon {
+  width: 72px;
+  height: 72px;
+}
+
+.app.mobile .buygold-card .shop-title {
+  font-size: 12px;
+  line-height: 1.1;
+}
+
+.app.mobile .buygold-card .shop-meta {
+  font-size: 12px;
+}
+
+.app.mobile .buygold-card button {
+  min-height: 38px;
+  font-size: 11px;
+  padding: 7px 8px;
 }
 
 
@@ -3103,7 +3176,16 @@
 }
 
 .modal-backdrop-top {
-  z-index: 40;
+  z-index: 80;
+}
+
+.app.mobile .modal-backdrop {
+  align-items: flex-start;
+  padding:
+    calc(var(--tg-top-offset) + env(safe-area-inset-top) + 8px)
+    10px
+    calc(12px + env(safe-area-inset-bottom));
+  z-index: 70;
 }
 
 .app.mobile .modal-backdrop.mobile-tab-screen {
@@ -3120,12 +3202,33 @@
   border-left: none;
   border-right: none;
   border-bottom: none;
-  padding: 14px 12px calc(146px + env(safe-area-inset-bottom));
+  padding:
+    calc(14px + var(--tg-top-offset) + env(safe-area-inset-top))
+    12px
+    calc(18px + env(safe-area-inset-bottom));
 }
 
 .app.mobile .modal.mobile-tab-modal::after,
 .app.mobile .modal.mobile-tab-modal::before {
   display: none;
+}
+
+.app.mobile .modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding-bottom: 8px;
+  background: linear-gradient(180deg, rgba(11, 17, 24, 0.98), rgba(11, 17, 24, 0.72));
+}
+
+.app.mobile .modal-header .ghost {
+  min-height: 34px;
+  min-width: 72px;
+  font-weight: 700;
+}
+
+.app.mobile .modal {
+  max-height: calc(100dvh - (var(--tg-top-offset) + env(safe-area-inset-top)) - (14px + env(safe-area-inset-bottom)));
 }
 
 .modal {
@@ -3292,13 +3395,17 @@
   gap: 6px;
 }
 
-.shop-card button {
+ .shop-card button {
   border: none;
   border-radius: 10px;
-  padding: 8px 12px;
+  min-height: 40px;
+  padding: 9px 12px;
   background: linear-gradient(180deg, #f7d38b 0%, #c98b38 100%);
   color: #2b1a0a;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-shadow: 0 1px 0 rgba(255, 240, 204, 0.55);
   font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
   cursor: pointer;
 }
@@ -5282,8 +5389,8 @@ button.ghost {
 }
 
 .app.mobile .village-modal {
-  height: calc(100dvh - 6px);
-  max-height: calc(100dvh - 6px);
+  height: auto;
+  max-height: calc(100dvh - (var(--tg-top-offset) + env(safe-area-inset-top)) - (14px + env(safe-area-inset-bottom)));
   padding: 10px;
   gap: 8px;
 }

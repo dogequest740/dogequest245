@@ -7664,7 +7664,7 @@ function App() {
             </div>
 
             {isMobile && (
-              <div className={`inventory-super-tabs ${usingTelegramAuth ? 'with-settings' : ''}`}>
+              <div className="inventory-super-tabs">
                 <button
                   type="button"
                   className={`tab-btn ${mobileProfileTab === 'profile' ? 'active' : ''}`}
@@ -7679,15 +7679,13 @@ function App() {
                 >
                   Inventory
                 </button>
-                {usingTelegramAuth && (
-                  <button
-                    type="button"
-                    className={`tab-btn ${mobileProfileTab === 'settings' ? 'active' : ''}`}
-                    onClick={() => setMobileProfileTab('settings')}
-                  >
-                    Settings
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className={`tab-btn ${mobileProfileTab === 'settings' ? 'active' : ''}`}
+                  onClick={() => setMobileProfileTab('settings')}
+                >
+                  Settings
+                </button>
               </div>
             )}
 
@@ -7729,23 +7727,6 @@ function App() {
                   {hud.crystalFlaskRuns > 0 && <div>Crystal Flask ready: +25% dungeon crystals for {hud.crystalFlaskRuns} more run(s).</div>}
                   {hud.bossMarkCycleStart !== hud.worldBoss.cycleStart && hud.crystalFlaskRuns <= 0 && (
                     <div>No active boosts right now.</div>
-                  )}
-                </div>
-                <div className="mobile-account-actions">
-                  <button
-                    type="button"
-                    className={`music-toggle ${musicEnabled ? 'on' : 'off'}`}
-                    onClick={() => setMusicEnabled((prev) => !prev)}
-                  >
-                    {musicEnabled ? 'Music On' : 'Music Off'}
-                  </button>
-                  <button type="button" className="resource-action" onClick={() => setMobileProfileTab('inventory')}>
-                    Open Inventory
-                  </button>
-                  {usingTelegramAuth && (
-                    <button type="button" className="resource-action secondary" onClick={() => setMobileProfileTab('settings')}>
-                      Payout Settings
-                    </button>
                   )}
                 </div>
               </div>
@@ -7890,31 +7871,48 @@ function App() {
               </>
             )}
 
-            {isMobile && usingTelegramAuth && mobileProfileTab === 'settings' && (
+            {isMobile && mobileProfileTab === 'settings' && (
               <div className="mobile-account-settings">
-                <div className="withdraw-note">Set the wallet where you want to receive manual season payouts. You can update it any time before season close.</div>
-                <label className="withdraw-label">
-                  USDT/SOL wallet
-                  <input
-                    type="text"
-                    value={payoutWalletDraft}
-                    onChange={(event) => setPayoutWalletDraft(sanitizePayoutWalletInput(event.target.value))}
-                    placeholder="Enter payout wallet"
-                    maxLength={96}
-                  />
-                </label>
-                <div className="withdraw-note">Current saved wallet: {payoutWallet ? payoutWallet : 'Not set'}</div>
-                <button
-                  type="button"
-                  className="withdraw-submit"
-                  onClick={() => {
-                    void savePayoutWalletStatus()
-                  }}
-                  disabled={payoutWalletLoading}
-                >
-                  {payoutWalletLoading ? 'Saving...' : 'Save wallet'}
-                </button>
-                {payoutWalletError && <div className="withdraw-error">{payoutWalletError}</div>}
+                <div className="mobile-settings-audio-row">
+                  <span>Music</span>
+                  <button
+                    type="button"
+                    className={`music-toggle ${musicEnabled ? 'on' : 'off'}`}
+                    onClick={() => setMusicEnabled((prev) => !prev)}
+                  >
+                    {musicEnabled ? 'Music On' : 'Music Off'}
+                  </button>
+                </div>
+
+                {usingTelegramAuth ? (
+                  <>
+                    <div className="withdraw-note">Set the wallet where you want to receive manual season payouts. You can update it any time before season close.</div>
+                    <label className="withdraw-label">
+                      USDT/SOL wallet
+                      <input
+                        type="text"
+                        value={payoutWalletDraft}
+                        onChange={(event) => setPayoutWalletDraft(sanitizePayoutWalletInput(event.target.value))}
+                        placeholder="Enter payout wallet"
+                        maxLength={96}
+                      />
+                    </label>
+                    <div className="withdraw-note">Current saved wallet: {payoutWallet ? payoutWallet : 'Not set'}</div>
+                    <button
+                      type="button"
+                      className="withdraw-submit"
+                      onClick={() => {
+                        void savePayoutWalletStatus()
+                      }}
+                      disabled={payoutWalletLoading}
+                    >
+                      {payoutWalletLoading ? 'Saving...' : 'Save wallet'}
+                    </button>
+                    {payoutWalletError && <div className="withdraw-error">{payoutWalletError}</div>}
+                  </>
+                ) : (
+                  <div className="withdraw-note">Audio settings are available here. Wallet payout settings are only used in Telegram mode.</div>
+                )}
               </div>
             )}
           </div>
@@ -8101,7 +8099,7 @@ function App() {
                     <div className="shop-meta">
                       {!usingTelegramAuth && <img className="icon-img small" src={iconSolana} alt="" />}
                       {usingTelegramAuth
-                        ? `Price: ${GOLD_PACKAGES_STARS[pack.id]} Stars`
+                        ? `Price: ⭐ ${GOLD_PACKAGES_STARS[pack.id]} Stars`
                         : `Price: ${pack.sol} SOL`}
                     </div>
                     <button
@@ -8114,7 +8112,7 @@ function App() {
                       {buyGoldLoading === pack.id
                         ? 'Processing...'
                         : usingTelegramAuth
-                          ? `Buy for ${GOLD_PACKAGES_STARS[pack.id]} Stars`
+                          ? `⭐ Buy • ${GOLD_PACKAGES_STARS[pack.id]} Stars`
                           : 'Buy with SOL'}
                     </button>
                   </div>
@@ -8147,7 +8145,7 @@ function App() {
                   <div className="starterpack-title">Starter Pack</div>
                   <div className="starterpack-price">
                     {!usingTelegramAuth && <img className="icon-img small" src={iconSolana} alt="" />}
-                    {usingTelegramAuth ? `${STARTER_PACK_PRICE_STARS} Stars` : `${STARTER_PACK_PRICE} SOL`}
+                    {usingTelegramAuth ? `⭐ ${STARTER_PACK_PRICE_STARS} Stars` : `${STARTER_PACK_PRICE} SOL`}
                   </div>
                 </div>
               </div>
@@ -8190,7 +8188,7 @@ function App() {
                   void buyStarterPack()
                 }}
               >
-                {starterPackLoading ? 'Processing...' : usingTelegramAuth ? `Buy Starter Pack (${STARTER_PACK_PRICE_STARS} Stars)` : 'Buy Starter Pack (SOL)'}
+                {starterPackLoading ? 'Processing...' : usingTelegramAuth ? `⭐ Buy Starter Pack • ${STARTER_PACK_PRICE_STARS} Stars` : 'Buy Starter Pack (SOL)'}
               </button>
               <div className="withdraw-note">This pack can be purchased only once.</div>
             </div>
@@ -8248,7 +8246,7 @@ function App() {
                     )}
                     <div className="shop-meta premium-price-new">
                       {usingTelegramAuth ? (
-                        <>Price: {PREMIUM_PLAN_PRICES_STARS[plan.id]} Stars</>
+                        <>Price: ⭐ {PREMIUM_PLAN_PRICES_STARS[plan.id]} Stars</>
                       ) : (
                         <>
                           <img className="icon-img small" src={iconSolana} alt="" />
@@ -8267,8 +8265,8 @@ function App() {
                         ? 'PROCESSING...'
                         : usingTelegramAuth
                           ? (premiumActive
-                            ? `EXTEND +${plan.days}D (${PREMIUM_PLAN_PRICES_STARS[plan.id]} Stars)`
-                            : `BUY ${plan.days}D (${PREMIUM_PLAN_PRICES_STARS[plan.id]} Stars)`)
+                            ? `⭐ EXTEND +${plan.days}D • ${PREMIUM_PLAN_PRICES_STARS[plan.id]} Stars`
+                             : `⭐ BUY ${plan.days}D • ${PREMIUM_PLAN_PRICES_STARS[plan.id]} Stars`)
                           : premiumActive
                             ? `EXTEND +${plan.days}D`
                             : `BUY ${plan.days}D`}
@@ -8511,10 +8509,10 @@ function App() {
                       'Processing...'
                     ) : (
                       <>
-                        <span className="fortune-buy-title">Buy {spins} {spins === 1 ? 'Spin' : 'Spins'}</span>
+                        <span className="fortune-buy-title">{usingTelegramAuth ? `⭐ ${spins} ${spins === 1 ? 'Spin' : 'Spins'}` : `Buy ${spins} ${spins === 1 ? 'Spin' : 'Spins'}`}</span>
                         <span className="fortune-buy-price">
                           {usingTelegramAuth ? (
-                            <>Price: {FORTUNE_SPIN_PRICES_STARS[spins as FortunePackId]} Stars</>
+                            <>Price: ⭐ {FORTUNE_SPIN_PRICES_STARS[spins as FortunePackId]} Stars</>
                           ) : (
                             <>
                               <img className="icon-img tiny" src={iconSolana} alt="" />
