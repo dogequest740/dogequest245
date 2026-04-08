@@ -2953,32 +2953,7 @@ serve(async (req) => {
       }
     }
 
-    const { data: latestProfileRow, error: latestProfileError } = await supabase
-      .from("profiles")
-      .select("state, updated_at")
-      .eq("wallet", auth.wallet)
-      .maybeSingle();
-
-    if (latestProfileError) {
-      return json({ ok: false, error: "Failed to load profile." });
-    }
-    if (!latestProfileRow || !latestProfileRow.state || typeof latestProfileRow.state !== "object") {
-      return json({ ok: true, profile: null });
-    }
-
-    const latestState = normalizeState(latestProfileRow.state as unknown);
-    if (!latestState) {
-      return json({ ok: false, error: "Invalid profile state." });
-    }
-
-    return json({
-      ok: true,
-      profile: {
-        state: latestState,
-        updated_at: String(latestProfileRow.updated_at ?? new Date().toISOString()),
-      },
-      warning: "Deferred energy refresh persistence during profile load.",
-    });
+    return json({ ok: false, error: "Profile changed concurrently, retry load." });
   }
 
   if (action === "profile_save") {
@@ -5158,10 +5133,11 @@ serve(async (req) => {
 
   return json({ ok: false, error: "Unknown action." });
 });
-<<<<<<< HEAD
 
 
 
-=======
->>>>>>> parent of 7188911 (Fix energy regen timing and season panel loading)
+
+
+
+
 
