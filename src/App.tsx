@@ -302,6 +302,8 @@ type LoadedProfile = {
   updatedAt?: string
 }
 
+type LoadedProfileResult = LoadedProfile | null | 'error'
+
 type SecureProfileRow = {
   wallet: string
   state: PersistedState
@@ -3968,13 +3970,14 @@ function App() {
     syncHud()
   }
 
-  const loadProfileStateSecure = async (interactive = false): Promise<LoadedProfile | null> => {
+  const loadProfileStateSecure = async (interactive = false): Promise<LoadedProfileResult> => {
     const result = await callGameSecureAuthed('profile_load', {}, interactive)
     if (!result.ok) {
       if (result.error && result.error !== 'Sign-in required for secure actions.') {
         console.warn('Secure profile load skipped:', result.error)
+        setSecurityAuthError(result.error)
       }
-      return null
+      return 'error'
     }
     const profile = result.profile
     if (!profile || !profile.state) return null
@@ -4182,7 +4185,7 @@ function App() {
     const current = gameStateRef.current
     if (!current || !accountIdentity) return
     const fresh = await loadProfileStateSecure(false)
-    if (!fresh || !gameStateRef.current) return
+    if (!fresh || fresh === 'error' || !gameStateRef.current) return
     profileUpdatedAtRef.current = fresh.updatedAt || profileUpdatedAtRef.current
     applyPersistedState(gameStateRef.current, fresh.state, fresh.updatedAt)
     syncHud()
@@ -4784,6 +4787,12 @@ function App() {
 
       const saved = await loadProfileStateSecure(false)
       if (!active) return
+      if (saved === 'error') {
+        isNewProfileRef.current = false
+        pendingProfileRef.current = null
+        setStage('auth')
+        return
+      }
       if (saved) {
         isNewProfileRef.current = false
         referralProcessedRef.current = true
@@ -4927,6 +4936,11 @@ function App() {
     } else if (accountIdentity) {
       loadProfileStateSecure(false).then((saved) => {
         if (!gameStateRef.current) return
+        if (saved === 'error') {
+          serverLoadedRef.current = true
+          syncHud()
+          return
+        }
         if (saved) {
           isNewProfileRef.current = false
           referralProcessedRef.current = true
@@ -5192,7 +5206,7 @@ function App() {
         console.warn('Secure profile save skipped:', result.error)
         if (isStaleProfileError(result.error)) {
           const fresh = await loadProfileStateSecure(false)
-          if (fresh) {
+          if (fresh && fresh !== 'error') {
             if (fresh.updatedAt) {
               profileUpdatedAtRef.current = fresh.updatedAt
             }
@@ -6640,6 +6654,13 @@ function App() {
                 if (usingWalletAuth && !walletSessionVerified) {
                   const token = await ensureDungeonSession(true)
                   if (!token) return
+                }
+                const existingProfile = await loadProfileStateSecure(true)
+                if (existingProfile === 'error') return
+                if (existingProfile) {
+                  isNewProfileRef.current = false
+                  pendingProfileRef.current = existingProfile
+                  profileUpdatedAtRef.current = existingProfile.updatedAt || ''
                 }
                 setStage('game')
               }}
@@ -8754,4 +8775,5 @@ function App() {
   )
 }
 export default App
+
 
