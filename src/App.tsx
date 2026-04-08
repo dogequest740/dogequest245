@@ -83,6 +83,8 @@ type TelegramWebAppUser = {
   last_name?: string
 }
 
+type TelegramInvoiceStatus = 'paid' | 'cancelled' | 'failed' | 'pending'
+
 type TelegramWebApp = {
   initData?: string
   initDataUnsafe?: {
@@ -90,6 +92,7 @@ type TelegramWebApp = {
   }
   ready?: () => void
   expand?: () => void
+  openInvoice?: (url: string, callback?: (status: TelegramInvoiceStatus) => void) => void
 }
 
 const VILLAGE_FEATURE_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_VILLAGE === '1'
@@ -430,11 +433,27 @@ type DungeonSecureResponse = {
   crystalFlaskRuns?: number
 }
 
+type TelegramStarsOrder = {
+  id: string
+  kind: 'buy_gold' | 'starter_pack_buy' | 'premium_buy' | 'fortune_buy'
+  productRef: string
+  starsAmount: number
+  status: 'pending' | 'paid' | 'claiming' | 'claimed' | 'expired' | 'canceled' | 'failed'
+  invoiceLink: string
+  createdAt: string
+  paidAt: string | null
+  claimedAt: string | null
+}
+
 type GameSecureResponse = {
   ok: boolean
   error?: string
   message?: string
   savedAt?: string
+  tgStarsOrder?: TelegramStarsOrder | null
+  tgStarsReused?: boolean
+  tgStarsClaimed?: boolean
+  tgStarsAlreadyClaimed?: boolean
   buyGoldAlreadyProcessed?: boolean
   starterPackAlreadyProcessed?: boolean
   starterPackPurchased?: boolean
@@ -1047,6 +1066,13 @@ const GOLD_PACKAGES_SOL = [
   { id: 'gold-500k', gold: 500000, sol: 0.4, image: goldLargeImage },
   { id: 'gold-1200k', gold: 1200000, sol: 0.63, image: gold1200kImage },
 ] as const
+const GOLD_PACKAGES_STARS: Record<(typeof GOLD_PACKAGES_SOL)[number]['id'], number> = {
+  'gold-50k': 180,
+  'gold-100k': 350,
+  'gold-500k': 1400,
+  'gold-1200k': 2200,
+}
+const STARTER_PACK_PRICE_STARS = 900
 const STARTER_PACK_PRICE = 0.25
 const STARTER_PACK_GOLD = 300000
 const STARTER_PACK_WORLD_BOSS_TICKETS = 5
@@ -1064,6 +1090,10 @@ const PREMIUM_SALE_START_MS = Date.parse('2026-02-28T00:00:00Z')
 const PREMIUM_SALE_END_MS = Date.parse('2026-03-02T00:00:00Z')
 const PREMIUM_SALE_DISCOUNT_RATE = 0.5
 type PremiumPlanId = (typeof PREMIUM_PLANS)[number]['id']
+const PREMIUM_PLAN_PRICES_STARS: Record<PremiumPlanId, number> = {
+  'premium-30': 1100,
+  'premium-90': 2500,
+}
 const PREMIUM_DAILY_KEYS = 5
 const PREMIUM_DAILY_GOLD = 50000
 const PREMIUM_DAILY_SMALL_POTIONS = 5
@@ -1079,6 +1109,10 @@ const FORTUNE_SPIN_PRICES = {
 } as const
 const FORTUNE_SPIN_PACKS_SOL = [1, 10] as const
 type FortunePackId = keyof typeof FORTUNE_SPIN_PRICES
+const FORTUNE_SPIN_PRICES_STARS: Record<FortunePackId, number> = {
+  1: 25,
+  10: 200,
+}
 const FORTUNE_REWARDS: FortuneReward[] = [
   { id: 'energy_tonic', label: 'Energy Tonic', kind: 'consumable', consumableType: 'energy-small', amount: 1, chance: 24 },
   { id: 'grand_energy_elixir', label: 'Grand Energy Elixir', kind: 'consumable', consumableType: 'energy-full', amount: 1, chance: 9 },
@@ -3911,6 +3945,109 @@ function App() {
     return lastResult
   }
 
+  const isTelegramStarsPendingError = (errorText: string) => {
+    const normalized = errorText.toLowerCase()
+    return normalized.includes('payment not completed yet') ||
+      normalized.includes('being finalized') ||
+      normalized.includes('retry in a few seconds')
+  }
+
+  const openTelegramInvoice = async (invoiceLink: string): Promise<TelegramInvoiceStatus> => {
+    if (!invoiceLink) return 'failed'
+    if (!telegramWebApp?.openInvoice) {
+      window.open(invoiceLink, '_blank', 'noopener,noreferrer')
+      return 'pending'
+    }
+
+    return await new Promise<TelegramInvoiceStatus>((resolve, reject) => {
+      let done = false
+      const finish = (status: TelegramInvoiceStatus) => {
+        if (done) return
+        done = true
+        resolve(status)
+      }
+
+      const timeoutId = window.setTimeout(() => finish('pending'), 20000)
+      try {
+        telegramWebApp.openInvoice?.(invoiceLink, (status) => {
+          window.clearTimeout(timeoutId)
+          finish((status ?? 'pending') as TelegramInvoiceStatus)
+        })
+      } catch (error) {
+        window.clearTimeout(timeoutId)
+        if (done) return
+        done = true
+        reject(error)
+      }
+    })
+  }
+
+  const claimTelegramStarsOrder = async (orderId: string, attempts = 14, baseDelayMs = 900): Promise<GameSecureResponse> => {
+    let delayMs = Math.max(350, Math.floor(baseDelayMs))
+    let lastResult: GameSecureResponse = { ok: false, error: 'Stars claim failed.' }
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const result = await callGameSecureAuthed('tg_stars_claim', { orderId }, false)
+      if (result.ok) return result
+      lastResult = result
+
+      const errorText = String(result.error ?? '')
+      if (attempt >= attempts - 1 || !isTelegramStarsPendingError(errorText)) {
+        return result
+      }
+
+      await new Promise<void>((resolve) => window.setTimeout(resolve, delayMs))
+      delayMs = Math.min(3200, Math.round(delayMs * 1.4))
+    }
+
+    return lastResult
+  }
+
+  const createAndClaimTelegramStarsOrder = async (
+    payload: Record<string, unknown>,
+    setError: (value: string) => void,
+    finalizeLabel: string,
+  ) => {
+    const createResult = await callGameSecureAuthed('tg_stars_create', payload, true)
+    if (!createResult.ok || !createResult.tgStarsOrder) {
+      setError(createResult.error || 'Failed to create Telegram Stars invoice.')
+      return null
+    }
+
+    const order = createResult.tgStarsOrder
+    if (!order.invoiceLink) {
+      setError('Invoice link is missing. Try again.')
+      return null
+    }
+
+    let invoiceStatus: TelegramInvoiceStatus = 'pending'
+    try {
+      invoiceStatus = await openTelegramInvoice(order.invoiceLink)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setError(`Failed to open Telegram invoice: ${message}`)
+      return null
+    }
+
+    if (invoiceStatus === 'cancelled') {
+      setError('Payment cancelled.')
+      return null
+    }
+    if (invoiceStatus === 'failed') {
+      setError('Telegram invoice failed. Please retry.')
+      return null
+    }
+
+    setError(finalizeLabel)
+    const claimResult = await claimTelegramStarsOrder(order.id)
+    if (!claimResult.ok) {
+      setError(claimResult.error || 'Payment received, but credit is pending. Retry in a few seconds.')
+      return null
+    }
+
+    return claimResult
+  }
+
   const submitTreasuryPayment = async (solAmount: number) => {
     if (!publicKey) {
       throw new Error('Connect your wallet first.')
@@ -3956,6 +4093,21 @@ function App() {
     setBuyGoldLoading(packId)
     setBuyGoldError('')
     try {
+      if (usingTelegramAuth) {
+        const claimResult = await createAndClaimTelegramStarsOrder(
+          { kind: 'buy_gold', packId: pack.id },
+          setBuyGoldError,
+          'Payment confirmed. Crediting gold...',
+        )
+        if (!claimResult) return
+
+        state.gold = Math.max(0, Math.floor(Number(claimResult.gold ?? state.gold)))
+        pushLog(state.eventLog, `Gold purchased: +${formatNumber(pack.gold)} gold.`)
+        syncHud()
+        setBuyGoldError('')
+        return
+      }
+
       const signature = await submitTreasuryPayment(pack.sol)
       setBuyGoldError('Payment confirmed. Crediting gold...')
       const result = await finalizePaymentCredit('buy_gold', { packId: pack.id, txSignature: signature }, 7, 1200)
@@ -3979,9 +4131,31 @@ function App() {
   const buyStarterPack = async () => {
     const state = gameStateRef.current
     if (!state) return
+    if (state.starterPackPurchased) {
+      setStarterPackError('Starter pack already purchased.')
+      return
+    }
+
     setStarterPackLoading(true)
     setStarterPackError('')
     try {
+      if (usingTelegramAuth) {
+        const claimResult = await createAndClaimTelegramStarsOrder(
+          { kind: 'starter_pack_buy' },
+          setStarterPackError,
+          'Payment confirmed. Activating starter pack...',
+        )
+        if (!claimResult) return
+
+        state.gold = Math.max(0, Math.floor(Number(claimResult.gold ?? state.gold)))
+        applyServerConsumables(state, claimResult.consumables)
+        state.starterPackPurchased = Boolean(claimResult.starterPackPurchased ?? true)
+        pushLog(state.eventLog, 'Starter Pack activated.')
+        syncHud()
+        setStarterPackError('')
+        return
+      }
+
       const signature = await submitTreasuryPayment(STARTER_PACK_PRICE)
       setStarterPackError('Payment confirmed. Activating starter pack...')
       const result = await finalizePaymentCredit('starter_pack_buy', { txSignature: signature }, 7, 1200)
@@ -4016,6 +4190,23 @@ function App() {
     setPremiumLoading(planId)
     setPremiumError('')
     try {
+      if (usingTelegramAuth) {
+        const claimResult = await createAndClaimTelegramStarsOrder(
+          { kind: 'premium_buy', planId: plan.id },
+          setPremiumError,
+          'Payment confirmed. Activating premium...',
+        )
+        if (!claimResult) return
+
+        if (typeof claimResult.premiumEndsAt === 'number') {
+          state.premiumEndsAt = Math.max(0, Math.floor(Number(claimResult.premiumEndsAt)))
+        }
+        pushLog(state.eventLog, `Premium ${premiumActive ? 'extended' : 'activated'} for ${plan.days} days.`)
+        syncHud()
+        setPremiumError('')
+        return
+      }
+
       const signature = await submitTreasuryPayment(pricing.sol)
       setPremiumError('Payment confirmed. Activating premium...')
       const result = await finalizePaymentCredit('premium_buy', { planId: plan.id, txSignature: signature }, 7, 1200)
@@ -4489,14 +4680,33 @@ function App() {
   }
 
   const buyFortuneSpins = async (spins: FortunePackId) => {
-    if (!publicKey) {
-      setFortuneError('Connect your wallet to buy spins.')
-      return
-    }
     const price = FORTUNE_SPIN_PRICES[spins]
     setFortuneBuyLoading(spins)
     setFortuneError('')
     try {
+      if (usingTelegramAuth) {
+        const claimResult = await createAndClaimTelegramStarsOrder(
+          { kind: 'fortune_buy', spins },
+          setFortuneError,
+          'Payment confirmed. Finalizing spin credit...',
+        )
+        if (!claimResult) return
+
+        applyFortuneStatus(claimResult)
+        const state = gameStateRef.current
+        if (state) {
+          pushLog(state.eventLog, `Fortune spins purchased: +${spins}.`)
+          syncHud()
+        }
+        void loadFortuneStatus(false, true)
+        return
+      }
+
+      if (!publicKey) {
+        setFortuneError('Connect your wallet to buy spins.')
+        return
+      }
+
       const secureToken = await ensureDungeonSession(true)
       if (!secureToken) {
         setFortuneError('Wallet signature required before payment.')
@@ -7423,13 +7633,15 @@ function App() {
               </button>
             </div>
             <div className="withdraw-body buygold-body">
-              <div className="withdraw-info">
-                <span className="withdraw-info-label">
-                  <img className="icon-img small" src={iconSolana} alt="" />
-                  Wallet balance
-                </span>
-                <strong>{solBalanceLoading ? 'Loading...' : `${solBalance.toFixed(4)} SOL`}</strong>
-              </div>
+              {!usingTelegramAuth && (
+                <div className="withdraw-info">
+                  <span className="withdraw-info-label">
+                    <img className="icon-img small" src={iconSolana} alt="" />
+                    Wallet balance
+                  </span>
+                  <strong>{solBalanceLoading ? 'Loading...' : `${solBalance.toFixed(4)} SOL`}</strong>
+                </div>
+              )}
               <div className="buygold-grid">
                 {GOLD_PACKAGES_SOL.map((pack) => (
                   <div key={pack.id} className="shop-card buygold-card">
@@ -7437,8 +7649,10 @@ function App() {
                     <div className="shop-title">{formatNumber(pack.gold)} Gold</div>
                     <div className="shop-desc">Instant delivery</div>
                     <div className="shop-meta">
-                      <img className="icon-img small" src={iconSolana} alt="" />
-                      Price: {pack.sol} SOL
+                      {!usingTelegramAuth && <img className="icon-img small" src={iconSolana} alt="" />}
+                      {usingTelegramAuth
+                        ? `Price: ${GOLD_PACKAGES_STARS[pack.id]} Stars`
+                        : `Price: ${pack.sol} SOL`}
                     </div>
                     <button
                       type="button"
@@ -7447,13 +7661,21 @@ function App() {
                         void buyGoldPackage(pack.id)
                       }}
                     >
-                      {buyGoldLoading === pack.id ? 'Processing...' : 'Buy with SOL'}
+                      {buyGoldLoading === pack.id
+                        ? 'Processing...'
+                        : usingTelegramAuth
+                          ? `Buy for ${GOLD_PACKAGES_STARS[pack.id]} Stars`
+                          : 'Buy with SOL'}
                     </button>
                   </div>
                 ))}
               </div>
               {buyGoldError && <div className="withdraw-error">{buyGoldError}</div>}
-              <div className="withdraw-note">Gold is added instantly after the SOL transaction confirms.</div>
+              <div className="withdraw-note">
+                {usingTelegramAuth
+                  ? 'Gold is added right after Telegram confirms the Stars payment.'
+                  : 'Gold is added instantly after the SOL transaction confirms.'}
+              </div>
             </div>
           </div>
         </div>
@@ -7474,8 +7696,8 @@ function App() {
                 <div className="starterpack-meta">
                   <div className="starterpack-title">Starter Pack</div>
                   <div className="starterpack-price">
-                    <img className="icon-img small" src={iconSolana} alt="" />
-                    {STARTER_PACK_PRICE} SOL
+                    {!usingTelegramAuth && <img className="icon-img small" src={iconSolana} alt="" />}
+                    {usingTelegramAuth ? `${STARTER_PACK_PRICE_STARS} Stars` : `${STARTER_PACK_PRICE} SOL`}
                   </div>
                 </div>
               </div>
@@ -7518,7 +7740,7 @@ function App() {
                   void buyStarterPack()
                 }}
               >
-                {starterPackLoading ? 'Processing...' : 'Buy Starter Pack (SOL)'}
+                {starterPackLoading ? 'Processing...' : usingTelegramAuth ? `Buy Starter Pack (${STARTER_PACK_PRICE_STARS} Stars)` : 'Buy Starter Pack (SOL)'}
               </button>
               <div className="withdraw-note">This pack can be purchased only once.</div>
             </div>
@@ -7552,13 +7774,15 @@ function App() {
                   )}
                 </div>
               </div>
-              <div className="withdraw-info">
-                <span className="withdraw-info-label">
-                  <img className="icon-img small" src={iconSolana} alt="" />
-                  Wallet balance
-                </span>
-                <strong>{solBalanceLoading ? 'Loading...' : `${solBalance.toFixed(4)} SOL`}</strong>
-              </div>
+              {!usingTelegramAuth && (
+                <div className="withdraw-info">
+                  <span className="withdraw-info-label">
+                    <img className="icon-img small" src={iconSolana} alt="" />
+                    Wallet balance
+                  </span>
+                  <strong>{solBalanceLoading ? 'Loading...' : `${solBalance.toFixed(4)} SOL`}</strong>
+                </div>
+              )}
               <div className="shop-grid premium-plans">
                 {PREMIUM_PLANS.map((plan) => {
                   const pricing = getPremiumPlanPrice(plan, premiumSaleNowMs)
@@ -7566,15 +7790,21 @@ function App() {
                   <div key={plan.id} className="shop-card premium-card">
                     <div className="shop-title">{plan.days} days</div>
                     <div className="shop-desc">{plan.id === 'premium-90' ? 'Best value' : 'Starter premium plan'}</div>
-                    {pricing.saleActive && (
+                    {!usingTelegramAuth && pricing.saleActive && (
                       <div className="premium-price-old">
                         <img className="icon-img tiny" src={iconSolana} alt="" />
                         {pricing.baseSol} SOL
                       </div>
                     )}
                     <div className="shop-meta premium-price-new">
-                      <img className="icon-img small" src={iconSolana} alt="" />
-                      {pricing.sol} SOL
+                      {usingTelegramAuth ? (
+                        <>Price: {PREMIUM_PLAN_PRICES_STARS[plan.id]} Stars</>
+                      ) : (
+                        <>
+                          <img className="icon-img small" src={iconSolana} alt="" />
+                          {pricing.sol} SOL
+                        </>
+                      )}
                     </div>
                     <button
                       type="button"
@@ -7585,9 +7815,13 @@ function App() {
                     >
                       {premiumLoading === plan.id
                         ? 'PROCESSING...'
-                        : premiumActive
-                          ? `EXTEND +${plan.days}D`
-                          : `BUY ${plan.days}D`}
+                        : usingTelegramAuth
+                          ? (premiumActive
+                            ? `EXTEND +${plan.days}D (${PREMIUM_PLAN_PRICES_STARS[plan.id]} Stars)`
+                            : `BUY ${plan.days}D (${PREMIUM_PLAN_PRICES_STARS[plan.id]} Stars)`)
+                          : premiumActive
+                            ? `EXTEND +${plan.days}D`
+                            : `BUY ${plan.days}D`}
                     </button>
                   </div>
                 )})}
@@ -7729,7 +7963,7 @@ function App() {
                 <img className="starterpack-image fortune-image" src={iconFortuneWheel} alt="" />
                 <div className="starterpack-meta">
                   <div className="starterpack-title">Wheel of Fortune</div>
-                  <div className="withdraw-note">1 free spin daily at 00:00 UTC. Extra spins are bought only with SOL.</div>
+                  <div className="withdraw-note">{usingTelegramAuth ? '1 free spin daily at 00:00 UTC. Extra spins are bought with Telegram Stars.' : '1 free spin daily at 00:00 UTC. Extra spins are bought only with SOL.'}</div>
                 </div>
               </div>
 
@@ -7747,9 +7981,11 @@ function App() {
                 <span>
                   Paid spins: <strong>{formatNumber(fortunePaidSpins)}</strong>
                 </span>
-                <span>
-                  Wallet: <strong>{solBalanceLoading ? 'Loading...' : `${solBalance.toFixed(4)} SOL`}</strong>
-                </span>
+                {!usingTelegramAuth && (
+                  <span>
+                    Wallet: <strong>{solBalanceLoading ? 'Loading...' : `${solBalance.toFixed(4)} SOL`}</strong>
+                  </span>
+                )}
               </div>
 
               <div className="fortune-wheel-stage">
@@ -7820,8 +8056,14 @@ function App() {
                       <>
                         <span className="fortune-buy-title">Buy {spins} {spins === 1 ? 'Spin' : 'Spins'}</span>
                         <span className="fortune-buy-price">
-                          <img className="icon-img tiny" src={iconSolana} alt="" />
-                          {FORTUNE_SPIN_PRICES[spins as FortunePackId]} SOL
+                          {usingTelegramAuth ? (
+                            <>Price: {FORTUNE_SPIN_PRICES_STARS[spins as FortunePackId]} Stars</>
+                          ) : (
+                            <>
+                              <img className="icon-img tiny" src={iconSolana} alt="" />
+                              {FORTUNE_SPIN_PRICES[spins as FortunePackId]} SOL
+                            </>
+                          )}
                         </span>
                       </>
                     )}
@@ -8945,3 +9187,4 @@ function App() {
   )
 }
 export default App
+

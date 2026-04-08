@@ -61,6 +61,31 @@ const PREMIUM_PLANS = [
   { id: "premium-30", days: 30, lamports: Math.round(0.3 * SOL_LAMPORTS) },
   { id: "premium-90", days: 90, lamports: Math.round(0.7 * SOL_LAMPORTS) },
 ] as const;
+const TELEGRAM_STARS_STARTER_PACK = 900;
+const TELEGRAM_STARS_GOLD_PACKS: Record<(typeof GOLD_PACKS_SOL)[number]["id"], number> = {
+  "gold-50k": 180,
+  "gold-100k": 350,
+  "gold-500k": 1400,
+  "gold-1200k": 2200,
+};
+const TELEGRAM_STARS_PREMIUM_PLANS: Record<(typeof PREMIUM_PLANS)[number]["id"], number> = {
+  "premium-30": 1100,
+  "premium-90": 2500,
+};
+const TELEGRAM_STARS_FORTUNE_PACKS: Record<(typeof FORTUNE_SPIN_PACKS_SOL)[number], number> = {
+  1: 25,
+  10: 200,
+};
+const TELEGRAM_STARS_PENDING_REUSE_MS = 20 * 60 * 1000;
+const TELEGRAM_STARS_ORDER_STATUSES = [
+  "pending",
+  "paid",
+  "claiming",
+  "claimed",
+  "expired",
+  "canceled",
+  "failed",
+] as const;
 const PREMIUM_SALE_START_MS = Date.parse("2026-02-28T00:00:00Z");
 const PREMIUM_SALE_END_MS = Date.parse("2026-03-02T00:00:00Z");
 const PREMIUM_SALE_DISCOUNT_RATE = 0.5;
@@ -288,6 +313,48 @@ type SeasonComputedRow = {
   updatedAt: string;
 };
 
+type TelegramStarsOrderStatus = (typeof TELEGRAM_STARS_ORDER_STATUSES)[number];
+type TelegramStarsOrderKind = "buy_gold" | "starter_pack_buy" | "premium_buy" | "fortune_buy";
+
+type TelegramStarsOrderRow = {
+  id: string;
+  wallet: string;
+  tg_user_id: string;
+  kind: string;
+  product_ref: string;
+  stars_amount: number;
+  status: string;
+  invoice_payload: string;
+  invoice_link: string;
+  telegram_charge_id: string;
+  provider_charge_id: string;
+  reward: Record<string, unknown>;
+  paid_at: string | null;
+  claimed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type TelegramStarsPreparedPurchase = {
+  kind: TelegramStarsOrderKind;
+  productRef: string;
+  starsAmount: number;
+  title: string;
+  description: string;
+  reward: Record<string, unknown>;
+};
+
+type TelegramStarsOrderPublic = {
+  id: string;
+  kind: TelegramStarsOrderKind;
+  productRef: string;
+  starsAmount: number;
+  status: TelegramStarsOrderStatus;
+  invoiceLink: string;
+  createdAt: string;
+  paidAt: string | null;
+  claimedAt: string | null;
+};
 type VillageBuildingId = "castle" | "mine" | "lab" | "storage";
 type VillageBuildingState = {
   level: number;
@@ -581,6 +648,179 @@ const getGoldPackSol = (packIdRaw: unknown) => {
   return GOLD_PACKS_SOL.find((entry) => entry.id === packId) ?? null;
 };
 
+const TELEGRAM_STARS_ORDER_SELECT = "id, wallet, tg_user_id, kind, product_ref, stars_amount, status, invoice_payload, invoice_link, telegram_charge_id, provider_charge_id, reward, paid_at, claimed_at, created_at, updated_at";
+
+const isTelegramStarsOrderKind = (value: string): value is TelegramStarsOrderKind =>
+  value === "buy_gold" || value === "starter_pack_buy" || value === "premium_buy" || value === "fortune_buy";
+
+const isTelegramStarsOrderStatus = (value: string): value is TelegramStarsOrderStatus =>
+  (TELEGRAM_STARS_ORDER_STATUSES as readonly string[]).includes(value);
+
+const getTelegramUserIdFromIdentity = (wallet: string) => {
+  if (!isTelegramIdentity(wallet)) return "";
+  const raw = wallet.slice(3).trim();
+  if (!/^[0-9]{3,20}$/.test(raw)) return "";
+  return raw;
+};
+
+const normalizeTelegramStarsOrder = (rowRaw: unknown): TelegramStarsOrderPublic | null => {
+  if (!rowRaw || typeof rowRaw !== "object" || Array.isArray(rowRaw)) return null;
+  const row = rowRaw as Record<string, unknown>;
+  const kind = String(row.kind ?? "").trim();
+  const statusRaw = String(row.status ?? "").trim();
+  if (!isTelegramStarsOrderKind(kind)) return null;
+  if (!isTelegramStarsOrderStatus(statusRaw)) return null;
+
+  return {
+    id: String(row.id ?? ""),
+    kind,
+    productRef: String(row.product_ref ?? ""),
+    starsAmount: Math.max(0, asInt(row.stars_amount, 0)),
+    status: statusRaw,
+    invoiceLink: String(row.invoice_link ?? ""),
+    createdAt: String(row.created_at ?? ""),
+    paidAt: row.paid_at ? String(row.paid_at) : null,
+    claimedAt: row.claimed_at ? String(row.claimed_at) : null,
+  };
+};
+
+const prepareTelegramStarsPurchase = (
+  body: Record<string, unknown>,
+): { ok: true; purchase: TelegramStarsPreparedPurchase } | { ok: false; error: string } => {
+  const kindRaw = String(body.kind ?? "").trim();
+  if (!isTelegramStarsOrderKind(kindRaw)) {
+    return { ok: false, error: "Invalid Stars purchase kind." };
+  }
+
+  if (kindRaw === "buy_gold") {
+    const pack = getGoldPackSol(body.packId);
+    if (!pack) return { ok: false, error: "Invalid gold package." };
+    const starsAmount = TELEGRAM_STARS_GOLD_PACKS[pack.id];
+    if (!Number.isFinite(starsAmount) || starsAmount <= 0) {
+      return { ok: false, error: "Stars pricing is not configured for this gold package." };
+    }
+    return {
+      ok: true,
+      purchase: {
+        kind: "buy_gold",
+        productRef: pack.id,
+        starsAmount,
+        title: `${pack.gold} Gold`,
+        description: `Instant credit: ${pack.gold} gold coins.`,
+        reward: { packId: pack.id, gold: pack.gold },
+      },
+    };
+  }
+
+  if (kindRaw === "starter_pack_buy") {
+    return {
+      ok: true,
+      purchase: {
+        kind: "starter_pack_buy",
+        productRef: "starter-pack-v1",
+        starsAmount: TELEGRAM_STARS_STARTER_PACK,
+        title: "Starter Pack",
+        description: "One-time bundle with gold, consumables, and World Boss tickets.",
+        reward: {
+          gold: STARTER_PACK_GOLD,
+          items: STARTER_PACK_ITEMS,
+          worldBossTickets: WORLD_BOSS_STARTER_TICKETS,
+        },
+      },
+    };
+  }
+
+  if (kindRaw === "premium_buy") {
+    const plan = getPremiumPlan(body.planId, body.days);
+    if (!plan) return { ok: false, error: "Invalid Premium plan." };
+    const starsAmount = TELEGRAM_STARS_PREMIUM_PLANS[plan.id];
+    if (!Number.isFinite(starsAmount) || starsAmount <= 0) {
+      return { ok: false, error: "Stars pricing is not configured for this Premium plan." };
+    }
+    return {
+      ok: true,
+      purchase: {
+        kind: "premium_buy",
+        productRef: plan.id,
+        starsAmount,
+        title: `Premium ${plan.days}d`,
+        description: `Activate Premium for ${plan.days} days.`,
+        reward: { planId: plan.id, days: plan.days },
+      },
+    };
+  }
+
+  const spins = asInt(body.spins, 0);
+  if (!(FORTUNE_SPIN_PACKS_SOL as readonly number[]).includes(spins)) {
+    return { ok: false, error: "Invalid fortune spin pack." };
+  }
+  const starsAmount = TELEGRAM_STARS_FORTUNE_PACKS[spins as (typeof FORTUNE_SPIN_PACKS_SOL)[number]];
+  if (!Number.isFinite(starsAmount) || starsAmount <= 0) {
+    return { ok: false, error: "Stars pricing is not configured for this fortune pack." };
+  }
+  return {
+    ok: true,
+    purchase: {
+      kind: "fortune_buy",
+      productRef: String(spins),
+      starsAmount,
+      title: `${spins} Fortune Spin${spins === 1 ? "" : "s"}`,
+      description: `Add ${spins} paid spin${spins === 1 ? "" : "s"} to your Fortune Wheel.`,
+      reward: { spins },
+    },
+  };
+};
+
+const createTelegramStarsInvoiceLink = async (
+  botToken: string,
+  payload: {
+    title: string;
+    description: string;
+    invoicePayload: string;
+    starsAmount: number;
+  },
+) => {
+  const url = `https://api.telegram.org/bot${botToken}/createInvoiceLink`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: payload.title.slice(0, 32),
+        description: payload.description.slice(0, 255),
+        payload: payload.invoicePayload,
+        currency: "XTR",
+        prices: [{ label: payload.title.slice(0, 32), amount: Math.max(1, Math.floor(payload.starsAmount)) }],
+      }),
+      signal: controller.signal,
+    });
+
+    const rawText = await response.text();
+    let parsed: Record<string, unknown> | null = null;
+    try {
+      parsed = rawText ? JSON.parse(rawText) as Record<string, unknown> : null;
+    } catch {
+      parsed = null;
+    }
+
+    const ok = Boolean(parsed?.ok);
+    const result = String(parsed?.result ?? "").trim();
+    if (response.ok && ok && result) {
+      return { ok: true as const, invoiceLink: result };
+    }
+
+    const desc = String(parsed?.description ?? "").trim();
+    const message = desc || rawText || `${response.status} ${response.statusText}`;
+    return { ok: false as const, error: `Telegram invoice error: ${message}` };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false as const, error: `Telegram invoice request failed: ${message}` };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
 const wasTxAlreadyProcessed = async (
   supabase: ReturnType<typeof createClient>,
   wallet: string,
@@ -3262,6 +3502,395 @@ serve(async (req) => {
     });
   }
 
+  if (action === "tg_stars_create") {
+    if (!isTelegramIdentity(auth.wallet)) {
+      return json({ ok: false, error: "Telegram Stars are available only in Telegram Mini App." });
+    }
+
+    const telegramUserId = getTelegramUserIdFromIdentity(auth.wallet);
+    if (!telegramUserId) {
+      return json({ ok: false, error: "Invalid Telegram identity." });
+    }
+
+    const botToken = String(Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "").trim();
+    if (!botToken) {
+      return json({ ok: false, error: "Telegram payments are not configured." });
+    }
+
+    const prepared = prepareTelegramStarsPurchase(body);
+    if (!prepared.ok) {
+      return json({ ok: false, error: prepared.error });
+    }
+
+    if (prepared.purchase.kind === "starter_pack_buy") {
+      const { data: profileRow, error: profileError } = await supabase
+        .from("profiles")
+        .select("state")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+      if (profileError) {
+        return json({ ok: false, error: "Failed to load profile." });
+      }
+      const state = normalizeState(profileRow?.state ?? null);
+      if (!state) {
+        return json({ ok: false, error: "Profile not found." });
+      }
+      if (Boolean(state.starterPackPurchased)) {
+        return json({ ok: false, error: "Starter pack already purchased." });
+      }
+    }
+
+    const reuseSinceIso = new Date(now.getTime() - TELEGRAM_STARS_PENDING_REUSE_MS).toISOString();
+    const { data: reusableRow } = await supabase
+      .from("telegram_stars_orders")
+      .select(TELEGRAM_STARS_ORDER_SELECT)
+      .eq("wallet", auth.wallet)
+      .eq("kind", prepared.purchase.kind)
+      .eq("product_ref", prepared.purchase.productRef)
+      .eq("status", "pending")
+      .gte("created_at", reuseSinceIso)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const reusable = normalizeTelegramStarsOrder(reusableRow);
+    if (reusable && reusable.invoiceLink) {
+      return json({ ok: true, tgStarsOrder: reusable, tgStarsReused: true });
+    }
+
+    const orderId = crypto.randomUUID();
+    const invoicePayload = `dgq-stars:${orderId}`;
+    const createdAtIso = now.toISOString();
+
+    const { data: createdRow, error: createError } = await supabase
+      .from("telegram_stars_orders")
+      .insert({
+        id: orderId,
+        wallet: auth.wallet,
+        tg_user_id: telegramUserId,
+        kind: prepared.purchase.kind,
+        product_ref: prepared.purchase.productRef,
+        stars_amount: prepared.purchase.starsAmount,
+        status: "pending",
+        invoice_payload: invoicePayload,
+        invoice_link: "",
+        telegram_charge_id: "",
+        provider_charge_id: "",
+        reward: prepared.purchase.reward,
+        created_at: createdAtIso,
+        updated_at: createdAtIso,
+      })
+      .select(TELEGRAM_STARS_ORDER_SELECT)
+      .maybeSingle();
+
+    if (createError || !createdRow) {
+      return json({ ok: false, error: "Failed to create Stars payment order." });
+    }
+
+    const invoiceResult = await createTelegramStarsInvoiceLink(botToken, {
+      title: prepared.purchase.title,
+      description: prepared.purchase.description,
+      invoicePayload,
+      starsAmount: prepared.purchase.starsAmount,
+    });
+
+    if (!invoiceResult.ok) {
+      await supabase
+        .from("telegram_stars_orders")
+        .update({
+          status: "failed",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", orderId)
+        .eq("wallet", auth.wallet)
+        .eq("status", "pending");
+      return json({ ok: false, error: invoiceResult.error });
+    }
+
+    const { data: updatedRow, error: updateError } = await supabase
+      .from("telegram_stars_orders")
+      .update({
+        invoice_link: invoiceResult.invoiceLink,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", orderId)
+      .eq("wallet", auth.wallet)
+      .eq("status", "pending")
+      .select(TELEGRAM_STARS_ORDER_SELECT)
+      .maybeSingle();
+
+    if (updateError || !updatedRow) {
+      return json({ ok: false, error: "Failed to save Telegram invoice link." });
+    }
+
+    const normalizedOrder = normalizeTelegramStarsOrder(updatedRow);
+    if (!normalizedOrder) {
+      return json({ ok: false, error: "Failed to encode Stars order." });
+    }
+
+    await auditEvent(supabase, auth.wallet, "tg_stars_create", {
+      orderId,
+      kind: prepared.purchase.kind,
+      productRef: prepared.purchase.productRef,
+      starsAmount: prepared.purchase.starsAmount,
+      reused: false,
+    });
+
+    return json({ ok: true, tgStarsOrder: normalizedOrder, tgStarsReused: false });
+  }
+
+  if (action === "tg_stars_claim") {
+    if (!isTelegramIdentity(auth.wallet)) {
+      return json({ ok: false, error: "Telegram Stars are available only in Telegram Mini App." });
+    }
+
+    const orderId = String(body.orderId ?? "").trim().slice(0, 80);
+    if (!orderId) {
+      return json({ ok: false, error: "Missing Stars order id." });
+    }
+
+    const lockTs = now.toISOString();
+    const { data: lockedRow, error: lockError } = await supabase
+      .from("telegram_stars_orders")
+      .update({ status: "claiming", updated_at: lockTs })
+      .eq("id", orderId)
+      .eq("wallet", auth.wallet)
+      .eq("status", "paid")
+      .select(TELEGRAM_STARS_ORDER_SELECT)
+      .maybeSingle();
+
+    if (lockError) {
+      return json({ ok: false, error: "Failed to lock Stars order." });
+    }
+
+    let orderRow = lockedRow as TelegramStarsOrderRow | null;
+    if (!orderRow) {
+      const { data: existingRow, error: existingError } = await supabase
+        .from("telegram_stars_orders")
+        .select(TELEGRAM_STARS_ORDER_SELECT)
+        .eq("id", orderId)
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+      if (existingError || !existingRow) {
+        return json({ ok: false, error: "Stars order not found." });
+      }
+
+      orderRow = existingRow as TelegramStarsOrderRow;
+      const normalized = normalizeTelegramStarsOrder(orderRow);
+      const status = String(orderRow.status ?? "");
+
+      if (status === "claimed") {
+        return json({ ok: true, tgStarsAlreadyClaimed: true, tgStarsOrder: normalized });
+      }
+      if (status === "pending") {
+        return json({ ok: false, error: "Payment not completed yet.", tgStarsOrder: normalized });
+      }
+      if (status === "claiming") {
+        return json({ ok: false, error: "Purchase is being finalized. Retry in a few seconds.", tgStarsOrder: normalized });
+      }
+      return json({ ok: false, error: `Purchase status: ${status || "unknown"}.`, tgStarsOrder: normalized });
+    }
+
+    const orderKindRaw = String(orderRow.kind ?? "").trim();
+    if (!isTelegramStarsOrderKind(orderKindRaw)) {
+      await supabase
+        .from("telegram_stars_orders")
+        .update({ status: "paid", updated_at: new Date().toISOString() })
+        .eq("id", orderId)
+        .eq("wallet", auth.wallet)
+        .eq("status", "claiming");
+      return json({ ok: false, error: "Unknown Stars order kind." });
+    }
+
+    const orderKind = orderKindRaw as TelegramStarsOrderKind;
+    let payload: Record<string, unknown> = {};
+
+    if (orderKind === "buy_gold") {
+      const pack = getGoldPackSol(orderRow.product_ref);
+      if (!pack) {
+        await supabase
+          .from("telegram_stars_orders")
+          .update({ status: "paid", updated_at: new Date().toISOString() })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: "Invalid gold package in Stars order." });
+      }
+
+      const creditResult = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
+        state.gold = Math.max(0, asInt(state.gold, 0)) + pack.gold;
+      });
+      if (!creditResult.ok || !creditResult.state) {
+        await supabase
+          .from("telegram_stars_orders")
+          .update({ status: "paid", updated_at: new Date().toISOString() })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: creditResult.error || "Failed to credit gold package." });
+      }
+
+      payload = {
+        gold: Math.max(0, asInt(creditResult.state.gold, 0)),
+        savedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
+      };
+    } else if (orderKind === "starter_pack_buy") {
+      const creditResult = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
+        if (Boolean(state.starterPackPurchased)) {
+          throw new Error("Starter pack is already activated on this account.");
+        }
+        state.gold = Math.max(0, asInt(state.gold, 0)) + STARTER_PACK_GOLD;
+        for (const entry of STARTER_PACK_ITEMS) {
+          for (let i = 0; i < entry.qty; i += 1) {
+            addConsumableToState(state, entry.type);
+          }
+        }
+        state.starterPackPurchased = true;
+      });
+
+      if (!creditResult.ok || !creditResult.state) {
+        await supabase
+          .from("telegram_stars_orders")
+          .update({ status: "paid", updated_at: new Date().toISOString() })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: creditResult.error || "Failed to activate starter pack." });
+      }
+
+      payload = {
+        starterPackPurchased: true,
+        gold: Math.max(0, asInt(creditResult.state.gold, 0)),
+        consumables: normalizeConsumables(creditResult.state.consumables).rows,
+        savedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
+      };
+    } else if (orderKind === "premium_buy") {
+      const plan = getPremiumPlan(orderRow.product_ref, 0);
+      if (!plan) {
+        await supabase
+          .from("telegram_stars_orders")
+          .update({ status: "paid", updated_at: new Date().toISOString() })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: "Invalid premium plan in Stars order." });
+      }
+
+      const creditResult = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
+        const nowMs = Date.now();
+        const currentPremiumEndsAt = Math.max(0, asInt(state.premiumEndsAt, 0));
+        const base = Math.max(nowMs, currentPremiumEndsAt);
+        const nextPremiumEndsAt = base + plan.days * 24 * 60 * 60 * 1000;
+        state.premiumEndsAt = nextPremiumEndsAt;
+      });
+
+      if (!creditResult.ok || !creditResult.state) {
+        await supabase
+          .from("telegram_stars_orders")
+          .update({ status: "paid", updated_at: new Date().toISOString() })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: creditResult.error || "Failed to activate premium." });
+      }
+
+      payload = {
+        premiumEndsAt: Math.max(0, asInt(creditResult.state.premiumEndsAt, 0)),
+        premiumDaysAdded: plan.days,
+        savedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
+      };
+    } else {
+      const spins = asInt(orderRow.product_ref, 0);
+      if (!(FORTUNE_SPIN_PACKS_SOL as readonly number[]).includes(spins)) {
+        await supabase
+          .from("telegram_stars_orders")
+          .update({ status: "paid", updated_at: new Date().toISOString() })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: "Invalid fortune pack in Stars order." });
+      }
+
+      const dayKey = todayKeyUtc(now);
+      let fortuneUpdated: FortuneStateRow | null = null;
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        const fortuneState = await ensureFortuneState(supabase, auth.wallet, now);
+        if (!fortuneState.ok) {
+          await supabase
+            .from("telegram_stars_orders")
+            .update({ status: "paid", updated_at: new Date().toISOString() })
+            .eq("id", orderId)
+            .eq("wallet", auth.wallet)
+            .eq("status", "claiming");
+          return json({ ok: false, error: fortuneState.error });
+        }
+
+        const nextPaidSpins = Math.max(0, asInt(fortuneState.state.paid_spins, 0)) + spins;
+        const updated = await updateFortuneState(supabase, fortuneState.state, {
+          paid_spins: nextPaidSpins,
+        });
+        if (updated.ok) {
+          fortuneUpdated = updated.state;
+          break;
+        }
+      }
+
+      if (!fortuneUpdated) {
+        await supabase
+          .from("telegram_stars_orders")
+          .update({ status: "paid", updated_at: new Date().toISOString() })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: "Failed to register fortune spin purchase, retry." });
+      }
+
+      payload = {
+        fortuneFreeSpinAvailable: fortuneUpdated.free_spin_day !== dayKey,
+        fortunePaidSpins: Math.max(0, asInt(fortuneUpdated.paid_spins, 0)),
+      };
+    }
+
+    const claimedAtIso = new Date().toISOString();
+    const { data: claimedRow, error: claimError } = await supabase
+      .from("telegram_stars_orders")
+      .update({
+        status: "claimed",
+        claimed_at: claimedAtIso,
+        updated_at: claimedAtIso,
+      })
+      .eq("id", orderId)
+      .eq("wallet", auth.wallet)
+      .eq("status", "claiming")
+      .select(TELEGRAM_STARS_ORDER_SELECT)
+      .maybeSingle();
+
+    if (claimError || !claimedRow) {
+      await supabase
+        .from("telegram_stars_orders")
+        .update({ status: "paid", updated_at: new Date().toISOString() })
+        .eq("id", orderId)
+        .eq("wallet", auth.wallet)
+        .eq("status", "claiming");
+      return json({ ok: false, error: "Failed to finalize Stars purchase claim." });
+    }
+
+    const normalizedOrder = normalizeTelegramStarsOrder(claimedRow);
+
+    await auditEvent(supabase, auth.wallet, "tg_stars_claim", {
+      orderId,
+      kind: orderKind,
+      productRef: String(orderRow.product_ref ?? ""),
+      starsAmount: Math.max(0, asInt(orderRow.stars_amount, 0)),
+    });
+
+    return json({
+      ok: true,
+      tgStarsClaimed: true,
+      tgStarsOrder: normalizedOrder,
+      ...payload,
+    });
+  }
   if (action === "fortune_buy") {
     const spins = asInt(body.spins, 0);
     if (!(FORTUNE_SPIN_PACKS_SOL as readonly number[]).includes(spins)) {
@@ -5226,6 +5855,10 @@ serve(async (req) => {
 
   return json({ ok: false, error: "Unknown action." });
 });
+
+
+
+
 
 
 
