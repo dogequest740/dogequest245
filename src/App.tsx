@@ -3621,6 +3621,7 @@ function App() {
     if (!usingTelegramAuth) return
     telegramWebApp?.ready?.()
     telegramWebApp?.expand?.()
+    telegramWebApp?.MainButton?.hide?.()
   }, [usingTelegramAuth, telegramWebApp])
 
   const isAdmin = useMemo(() => {
@@ -5533,7 +5534,7 @@ function App() {
       setActivePanel('season')
       return
     }
-    setActivePanel(usingTelegramAuth ? 'settings' : 'inventory')
+    setActivePanel('inventory')
   }
 
   useEffect(() => {
@@ -5733,38 +5734,6 @@ function App() {
     syncHud()
   }
 
-  useEffect(() => {
-    if (!usingTelegramAuth || stage !== 'game') return
-
-    const mainButton = telegramWebApp?.MainButton
-    if (!mainButton) return
-
-    const shouldShow = isMobile && mobileGameTab === 'battle' && !activePanel
-    const canBattle = Boolean(hud && hud.energy > 0)
-    const handleMainBattle = () => {
-      startBattleOnce()
-      telegramWebApp?.HapticFeedback?.selectionChanged?.()
-    }
-
-    if (shouldShow) {
-      mainButton.setText?.(canBattle ? '⚔️ Battle now' : '⚠️ No energy')
-      if (canBattle) {
-        mainButton.enable?.()
-      } else {
-        mainButton.disable?.()
-      }
-      mainButton.show?.()
-      mainButton.onClick?.(handleMainBattle)
-    } else {
-      mainButton.hide?.()
-    }
-
-    return () => {
-      mainButton.offClick?.(handleMainBattle)
-      if (!shouldShow) return
-      mainButton.hide?.()
-    }
-  }, [usingTelegramAuth, stage, telegramWebApp, isMobile, mobileGameTab, activePanel, hud?.energy])
 
   const saveGameState = async (force = false) => {
     if (profileSaveInFlightRef.current) return
@@ -6832,7 +6801,7 @@ function App() {
       </div>
     </>
   ) : null
-  const resourceActionRow = (
+  const resourceActionRow = isMobile ? null : (
     <div className="resources-actions-row">
       <button type="button" className="resource-action season-action" onClick={() => setActivePanel('season')} aria-label="Open season panel">
         <img className="season-action-art" src={iconCrystalSeason} alt="Crystal Season" />
@@ -7499,6 +7468,19 @@ function App() {
               </div>
               {isMobile && hud && (
                 <>
+                  <div className="mobile-profile-summary">
+                    <div className="mobile-profile-title">
+                      <strong>{hud.name}</strong>
+                      <span>Lvl {hud.level} · {hud.classLabel}</span>
+                    </div>
+                    <div className="mobile-profile-stats-grid">
+                      <div><span>ATK</span><strong>{hud.attack}</strong></div>
+                      <div><span>Power</span><strong>{hud.power}</strong></div>
+                      <div><span>Fortune</span><strong>{hud.fortune}</strong></div>
+                      <div><span>Prosperity</span><strong>{hud.prosperity}</strong></div>
+                    </div>
+                  </div>
+
                   <div className="mobile-hub-cards">
                     <button type="button" className="mobile-hub-card" onClick={() => openMobileGameTab('boss')}>
                       <div className="mobile-hub-head">
@@ -7517,8 +7499,11 @@ function App() {
                       <small>{seasonInfo ? `Ends in ${formatLongTimer(seasonRemainingSec)}` : 'Waiting for next season'}</small>
                     </button>
                   </div>
-
-                  <div className="mobile-hub-actions">
+                  <div className={`mobile-hub-actions ${usingTelegramAuth ? 'with-settings' : ''}`}>
+                    <button type="button" className="mobile-hub-action" onClick={() => setActivePanel('inventory')}>
+                      <img className="icon-img" src={iconInventory} alt="" />
+                      Inventory
+                    </button>
                     <button type="button" className="mobile-hub-action" onClick={() => setActivePanel('dungeons')}>
                       <img className="icon-img" src={iconDungeons} alt="" />
                       Dungeons
@@ -7531,10 +7516,12 @@ function App() {
                       <img className="icon-img" src={iconFortuneWheel} alt="" />
                       Fortune
                     </button>
-                    <button type="button" className="mobile-hub-action" onClick={() => setActivePanel('referrals')}>
-                      <img className="icon-img" src={iconReferrals} alt="" />
-                      Referrals
-                    </button>
+                    {usingTelegramAuth && (
+                      <button type="button" className="mobile-hub-action" onClick={() => setActivePanel('settings')}>
+                        <img className="icon-img" src={iconName} alt="" />
+                        Settings
+                      </button>
+                    )}
                   </div>
 
                   <nav className="mobile-game-tabs" aria-label="Game sections">
@@ -7556,7 +7543,7 @@ function App() {
                     </button>
                     <button type="button" className={mobileGameTab === 'profile' ? 'active' : ''} onClick={() => openMobileGameTab('profile')}>
                       <img className="icon-img" src={iconInventory} alt="" />
-                      <span>{usingTelegramAuth ? 'Settings' : 'Profile'}</span>
+                      <span>Profile</span>
                     </button>
                   </nav>
                 </>
@@ -7670,8 +7657,8 @@ function App() {
       )}
 
       {activePanel === 'inventory' && hud && (
-        <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
-          <div className="modal wide inventory-modal" onClick={(event) => event.stopPropagation()}>
+        <div className={`modal-backdrop ${isMobile ? 'mobile-tab-screen' : ''}`} onClick={() => { if (!isMobile) setActivePanel(null) }}>
+          <div className={`modal wide inventory-modal ${isMobile ? 'mobile-tab-modal' : ''}`} onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <h3>Inventory</h3>
               <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
@@ -7817,8 +7804,8 @@ function App() {
       )}
 
       {activePanel === 'dungeons' && hud && (
-        <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
-          <div className="modal wide season-modal" onClick={(event) => event.stopPropagation()}>
+        <div className={`modal-backdrop ${isMobile ? 'mobile-tab-screen' : ''}`} onClick={() => { if (!isMobile) setActivePanel(null) }}>
+          <div className={`modal wide season-modal ${isMobile ? 'mobile-tab-modal' : ''}`} onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <h3>Dungeons</h3>
               <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
@@ -7869,8 +7856,8 @@ function App() {
       )}
 
       {activePanel === 'shop' && hud && (
-        <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
-          <div className="modal wide" onClick={(event) => event.stopPropagation()}>
+        <div className={`modal-backdrop ${isMobile ? 'mobile-tab-screen' : ''}`} onClick={() => { if (!isMobile) setActivePanel(null) }}>
+          <div className={`modal wide ${isMobile ? 'mobile-tab-modal' : ''}`} onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <h3>Merchant Shop</h3>
               <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
@@ -8749,8 +8736,8 @@ function App() {
       )}
 
       {activePanel === 'season' && hud && (
-        <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
-          <div className="modal wide" onClick={(event) => event.stopPropagation()}>
+        <div className={`modal-backdrop ${isMobile ? 'mobile-tab-screen' : ''}`} onClick={() => { if (!isMobile) setActivePanel(null) }}>
+          <div className={`modal wide ${isMobile ? 'mobile-tab-modal' : ''}`} onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <h3>Crystal Season</h3>
               <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
@@ -9003,8 +8990,8 @@ function App() {
 
 
       {usingTelegramAuth && activePanel === 'settings' && hud && (
-        <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
+        <div className={`modal-backdrop ${isMobile ? 'mobile-tab-screen' : ''}`} onClick={() => { if (!isMobile) setActivePanel(null) }}>
+          <div className={`modal ${isMobile ? 'mobile-tab-modal' : ''}`} onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <h3>Payout Wallet</h3>
               <button type="button" onClick={() => setActivePanel(null)}>Close</button>
@@ -9220,8 +9207,8 @@ function App() {
       )}
 
       {activePanel === 'worldboss' && hud && (
-        <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
-          <div className="modal wide worldboss-modal" onClick={(event) => event.stopPropagation()}>
+        <div className={`modal-backdrop ${isMobile ? 'mobile-tab-screen' : ''}`} onClick={() => { if (!isMobile) setActivePanel(null) }}>
+          <div className={`modal wide worldboss-modal ${isMobile ? 'mobile-tab-modal' : ''}`} onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <h3>World Boss</h3>
               <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
@@ -9540,11 +9527,3 @@ function App() {
   )
 }
 export default App
-
-
-
-
-
-
-
-

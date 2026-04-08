@@ -229,6 +229,62 @@
   padding: 12px 14px;
 }
 
+.mobile-profile-summary {
+  margin-top: 8px;
+  border: 1px solid rgba(142, 224, 255, 0.28);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(9, 20, 28, 0.86), rgba(8, 15, 22, 0.9));
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.mobile-profile-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mobile-profile-title strong {
+  font-size: 14px;
+  color: #c9f5ff;
+}
+
+.mobile-profile-title span {
+  font-size: 10px;
+  color: rgba(214, 245, 255, 0.8);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.mobile-profile-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.mobile-profile-stats-grid > div {
+  border: 1px solid rgba(142, 224, 255, 0.26);
+  border-radius: 10px;
+  background: rgba(7, 16, 24, 0.78);
+  padding: 7px 6px;
+  display: grid;
+  gap: 2px;
+  text-align: center;
+}
+
+.mobile-profile-stats-grid span {
+  font-size: 9px;
+  color: rgba(192, 238, 252, 0.78);
+  text-transform: uppercase;
+}
+
+.mobile-profile-stats-grid strong {
+  font-size: 12px;
+  color: #8ce8ff;
+}
+
 .mobile-hub-cards {
   margin-top: 10px;
   display: grid;
@@ -277,6 +333,10 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
+}
+
+.mobile-hub-actions.with-settings {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .mobile-hub-action {
@@ -2898,6 +2958,28 @@
 
 .modal-backdrop-top {
   z-index: 40;
+}
+
+.app.mobile .modal-backdrop.mobile-tab-screen {
+  padding: 0;
+  align-items: stretch;
+  background: rgba(5, 9, 14, 0.94);
+}
+
+.app.mobile .modal.mobile-tab-modal {
+  width: 100%;
+  max-width: 100%;
+  max-height: 100dvh;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+  padding: 14px 12px calc(96px + env(safe-area-inset-bottom));
+}
+
+.app.mobile .modal.mobile-tab-modal::after,
+.app.mobile .modal.mobile-tab-modal::before {
+  display: none;
 }
 
 .modal {
