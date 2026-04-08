@@ -1009,6 +1009,7 @@ const createStarterProfileState = (seed: Record<string, unknown>, nowMs: number)
     energy: ENERGY_MAX,
     energyMax: ENERGY_MAX,
     energyTimer: ENERGY_REGEN_SECONDS,
+    energyUpdatedAt: nowMs,
     gold: 0,
     crystals: 0,
     crystalsEarned: 0,
@@ -1458,6 +1459,7 @@ const normalizeState = (raw: unknown) => {
   state.energy = Math.max(0, asInt(state.energy, 0));
   state.energyMax = Math.max(1, asInt(state.energyMax, ENERGY_MAX));
   state.energyTimer = clampInt(state.energyTimer, 1, ENERGY_REGEN_SECONDS);
+  state.energyUpdatedAt = Math.max(0, asInt(state.energyUpdatedAt, 0));
   if (state.energy >= state.energyMax) {
     state.energy = state.energyMax;
     state.energyTimer = ENERGY_REGEN_SECONDS;
@@ -1719,23 +1721,30 @@ const validateStateTransition = (
 const applyOfflineEnergyRegen = (
   state: Record<string, unknown>,
   elapsedSecRaw: number,
+  nowMsRaw?: number,
 ) => {
   const energyMax = Math.max(1, asInt(state.energyMax, 50));
   let energy = clampInt(state.energy, 0, energyMax);
   let timer = clampInt(state.energyTimer, 1, ENERGY_REGEN_SECONDS);
   const elapsedSec = Math.max(0, Math.floor(elapsedSecRaw));
+  const nowMs = Number.isFinite(nowMsRaw ?? Number.NaN)
+    ? Math.max(0, Math.floor(Number(nowMsRaw)))
+    : Date.now();
 
   const prevEnergy = energy;
   const prevTimer = timer;
+  const prevEnergyUpdatedAt = Math.max(0, asInt(state.energyUpdatedAt, 0));
 
   if (energy >= energyMax) {
     state.energy = energyMax;
     state.energyTimer = ENERGY_REGEN_SECONDS;
-    return prevEnergy !== energyMax || prevTimer !== ENERGY_REGEN_SECONDS;
+    state.energyUpdatedAt = prevEnergyUpdatedAt > 0 ? prevEnergyUpdatedAt : nowMs;
+    return prevEnergy !== energyMax || prevTimer !== ENERGY_REGEN_SECONDS || prevEnergyUpdatedAt <= 0;
   }
   if (elapsedSec <= 0) {
     state.energy = energy;
     state.energyTimer = timer;
+    state.energyUpdatedAt = prevEnergyUpdatedAt;
     return false;
   }
 
@@ -1766,7 +1775,10 @@ const applyOfflineEnergyRegen = (
 
   state.energy = clampInt(energy, 0, energyMax);
   state.energyTimer = clampInt(timer, 1, ENERGY_REGEN_SECONDS);
-  return prevEnergy !== asInt(state.energy, 0) || prevTimer !== asInt(state.energyTimer, ENERGY_REGEN_SECONDS);
+  state.energyUpdatedAt = nowMs;
+  return prevEnergy !== asInt(state.energy, 0) ||
+    prevTimer !== asInt(state.energyTimer, ENERGY_REGEN_SECONDS) ||
+    prevEnergyUpdatedAt !== nowMs;
 };
 
 const getSessionWallet = async (
@@ -2840,12 +2852,18 @@ serve(async (req) => {
       const state = normalizeState(profileRow.state as unknown);
       if (!state) return json({ ok: false, error: "Invalid profile state." });
 
-      const updatedAtMs = profileRow.updated_at ? new Date(String(profileRow.updated_at)).getTime() : Number.NaN;
-      const elapsedSec = Number.isFinite(updatedAtMs)
-        ? Math.max(0, Math.floor((attemptNow.getTime() - updatedAtMs) / 1000))
+      const energyUpdatedAtMs = Math.max(0, asInt(state.energyUpdatedAt, 0));
+      const fallbackUpdatedAtMs = profileRow.updated_at ? new Date(String(profileRow.updated_at)).getTime() : Number.NaN;
+      const baseUpdatedAtMs = energyUpdatedAtMs > 0 ? energyUpdatedAtMs : fallbackUpdatedAtMs;
+      const elapsedSec = Number.isFinite(baseUpdatedAtMs)
+        ? Math.max(0, Math.floor((attemptNow.getTime() - baseUpdatedAtMs) / 1000))
         : 0;
 
-      const changed = applyOfflineEnergyRegen(state, elapsedSec);
+      let changed = applyOfflineEnergyRegen(state, elapsedSec, attemptNow.getTime());
+      if (energyUpdatedAtMs <= 0) {
+        state.energyUpdatedAt = attemptNow.getTime();
+        changed = true;
+      }
       if (!changed) {
         const savedAt = String(profileRow.updated_at ?? attemptNowIso);
         return json({
@@ -2908,11 +2926,17 @@ serve(async (req) => {
         return json({ ok: false, error: "Invalid profile state." });
       }
 
-      const updatedAtMs = profileRow.updated_at ? new Date(String(profileRow.updated_at)).getTime() : Number.NaN;
-      const elapsedSec = Number.isFinite(updatedAtMs)
-        ? Math.max(0, Math.floor((attemptNow.getTime() - updatedAtMs) / 1000))
+      const energyUpdatedAtMs = Math.max(0, asInt(state.energyUpdatedAt, 0));
+      const fallbackUpdatedAtMs = profileRow.updated_at ? new Date(String(profileRow.updated_at)).getTime() : Number.NaN;
+      const baseUpdatedAtMs = energyUpdatedAtMs > 0 ? energyUpdatedAtMs : fallbackUpdatedAtMs;
+      const elapsedSec = Number.isFinite(baseUpdatedAtMs)
+        ? Math.max(0, Math.floor((attemptNow.getTime() - baseUpdatedAtMs) / 1000))
         : 0;
-      const changed = applyOfflineEnergyRegen(state, elapsedSec);
+      let changed = applyOfflineEnergyRegen(state, elapsedSec, attemptNow.getTime());
+      if (energyUpdatedAtMs <= 0) {
+        state.energyUpdatedAt = attemptNow.getTime();
+        changed = true;
+      }
 
       if (!changed) {
         return json({
@@ -3038,6 +3062,21 @@ serve(async (req) => {
       }
       // Village writes are server-authoritative and must never be accepted from client profile_save.
       normalizedState.village = normalizeVillageState(prevState.village, now.getTime());
+
+      const prevEnergy = clampInt(prevState.energy, 0, Math.max(1, asInt(prevState.energyMax, ENERGY_MAX)));
+      const prevTimer = clampInt(prevState.energyTimer, 1, ENERGY_REGEN_SECONDS);
+      const nextEnergy = clampInt(normalizedState.energy, 0, Math.max(1, asInt(normalizedState.energyMax, ENERGY_MAX)));
+      const nextTimer = clampInt(normalizedState.energyTimer, 1, ENERGY_REGEN_SECONDS);
+      const prevEnergyUpdatedAt = Math.max(0, asInt(prevState.energyUpdatedAt, 0));
+      const nextEnergyUpdatedAt = Math.max(0, asInt(normalizedState.energyUpdatedAt, 0));
+      if (nextEnergy != prevEnergy || nextTimer != prevTimer) {
+        normalizedState.energyUpdatedAt = now.getTime();
+      } else {
+        normalizedState.energyUpdatedAt = nextEnergyUpdatedAt > 0 ? nextEnergyUpdatedAt : prevEnergyUpdatedAt;
+      }
+      if (Math.max(0, asInt(normalizedState.energyUpdatedAt, 0)) <= 0) {
+        normalizedState.energyUpdatedAt = now.getTime();
+      }
     } else if (!existing) {
       normalizedState = createStarterProfileState(normalizedState, now.getTime());
     } else {
@@ -5133,6 +5172,14 @@ serve(async (req) => {
 
   return json({ ok: false, error: "Unknown action." });
 });
+
+
+
+
+
+
+
+
 
 
 
