@@ -99,6 +99,7 @@ const LANDING_BANNERS = [
 ] as const
 const EDGE_BASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || ''
 const EDGE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() || ''
+const SAME_ORIGIN_SECURE_PROXY = typeof window !== 'undefined' && /^https?:\/\//.test(window.location.origin)
 const SEASON_SNAPSHOT_MIN_CRYSTALS = 500
 
 type CharacterClass = {
@@ -3515,7 +3516,8 @@ function App() {
         authorization: `Bearer ${EDGE_ANON_KEY}`,
         ...(headers ?? {}),
       }
-      const response = await fetch(`${EDGE_BASE_URL}/functions/v1/dungeon-secure`, {
+      const secureUrl = SAME_ORIGIN_SECURE_PROXY ? '/api/dungeon-secure' : `${EDGE_BASE_URL}/functions/v1/dungeon-secure`
+      const response = await fetch(secureUrl, {
         method: 'POST',
         headers: mergedHeaders,
         body: JSON.stringify(payload),
@@ -3702,7 +3704,8 @@ function App() {
         authorization: `Bearer ${EDGE_ANON_KEY}`,
         ...(headers ?? {}),
       }
-      const response = await fetch(`${EDGE_BASE_URL}/functions/v1/game-secure`, {
+      const secureUrl = SAME_ORIGIN_SECURE_PROXY ? '/api/game-secure' : `${EDGE_BASE_URL}/functions/v1/game-secure`
+      const response = await fetch(secureUrl, {
         method: 'POST',
         headers: mergedHeaders,
         body: JSON.stringify(payload),
@@ -8775,5 +8778,8 @@ function App() {
   )
 }
 export default App
+
+
+
 
 
