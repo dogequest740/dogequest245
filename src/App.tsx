@@ -3640,7 +3640,7 @@ function App() {
       if (!TELEGRAM_BOT_USERNAME) return ''
       const startParam = encodeTelegramStartReferral(accountIdentity)
       if (!startParam) return ''
-      return `https://t.me/${TELEGRAM_BOT_USERNAME}/app?startapp=${encodeURIComponent(startParam)}`
+      return `https://t.me/${TELEGRAM_BOT_USERNAME}?startapp=${encodeURIComponent(startParam)}`
     }
 
     if (typeof window === 'undefined') return `?ref=${accountIdentity}`
@@ -5002,7 +5002,7 @@ function App() {
   const shareReferralLink = () => {
     if (!referralLink) return
 
-    const inviteText = 'Join me in Doge Quest and use my referral link to start your journey.'
+    const inviteText = 'Join me in Doge Quest.'
     const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent(inviteText)}`
 
     if (usingTelegramAuth && telegramWebApp?.openTelegramLink) {
@@ -9362,6 +9362,7 @@ function App() {
   )
 }
 export default App
+
 
 
 
