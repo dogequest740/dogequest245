@@ -2077,6 +2077,37 @@ const decodeReferralIdentity = (rawValue: string) => {
 
   return isValidWalletAddress(payload) ? payload : ''
 }
+const getQueryParam = (rawQuery: string, key: string) => {
+  const normalized = rawQuery.startsWith('?') || rawQuery.startsWith('#') ? rawQuery.slice(1) : rawQuery
+  if (!normalized) return ''
+  const value = new URLSearchParams(normalized).get(key)
+  return value ? String(value).trim() : ''
+}
+const getLaunchParamCandidates = (telegramStartParam: string, telegramInitDataRaw: string) => {
+  const candidates: string[] = []
+  const add = (value: string) => {
+    const next = String(value ?? '').trim()
+    if (!next) return
+    if (candidates.includes(next)) return
+    candidates.push(next)
+  }
+
+  add(telegramStartParam)
+
+  const keys = ['start_param', 'tgWebAppStartParam', 'startapp', 'start', 'ref'] as const
+  for (const key of keys) {
+    add(getQueryParam(telegramInitDataRaw, key))
+  }
+
+  if (typeof window !== 'undefined') {
+    for (const key of keys) {
+      add(getQueryParam(window.location.search, key))
+      add(getQueryParam(window.location.hash, key))
+    }
+  }
+
+  return candidates
+}
 const isPremiumActiveAt = (premiumEndsAt: number, nowMs = Date.now()) => premiumEndsAt > nowMs
 const getPremiumDaysLeft = (premiumEndsAt: number, nowMs = Date.now()) => {
   if (!isPremiumActiveAt(premiumEndsAt, nowMs)) return 0
@@ -3576,30 +3607,34 @@ function App() {
     return adminWallets.includes(accountIdentity)
   }, [accountIdentity, walletSessionVerified, adminWallets])
 
-  const telegramStartParam = useMemo(() => String(telegramWebApp?.initDataUnsafe?.start_param ?? '').trim(), [telegramWebApp])
+  const telegramStartParam = useMemo(() => {
+    const fromUnsafe = String(telegramWebApp?.initDataUnsafe?.start_param ?? '').trim()
+    if (fromUnsafe) return fromUnsafe
+
+    const fromInitData = getQueryParam(telegramInitData, 'start_param')
+    if (fromInitData) return fromInitData
+
+    const fromInitStart = getQueryParam(telegramInitData, 'start')
+    if (fromInitStart) return fromInitStart
+
+    const fromInitStartApp = getQueryParam(telegramInitData, 'startapp')
+    if (fromInitStartApp) return fromInitStartApp
+
+    return getQueryParam(telegramInitData, 'tgWebAppStartParam')
+  }, [telegramWebApp, telegramInitData])
 
   const referralIdentityFromLaunch = useMemo(() => {
-    if (typeof window === 'undefined') return decodeReferralIdentity(telegramStartParam)
-
-    const params = new URLSearchParams(window.location.search)
-    const rawCandidates = [
-      telegramStartParam,
-      params.get('ref') ?? '',
-      params.get('startapp') ?? '',
-      params.get('start') ?? '',
-      params.get('tgWebAppStartParam') ?? '',
-    ]
-
+    const rawCandidates = getLaunchParamCandidates(telegramStartParam, telegramInitData)
     for (const raw of rawCandidates) {
-      const decoded = decodeReferralIdentity(String(raw ?? ''))
+      const decoded = decodeReferralIdentity(raw)
       if (decoded) return decoded
     }
 
     return ''
-  }, [telegramStartParam])
+  }, [telegramStartParam, telegramInitData])
 
   const referralLink = useMemo(() => {
-    if (!accountIdentity || accountIdentity === 'tg:webapp') return ''
+    if (!accountIdentity) return ''
 
     if (usingTelegramAuth) {
       if (!TELEGRAM_BOT_USERNAME) return ''
@@ -9327,4 +9362,7 @@ function App() {
   )
 }
 export default App
+
+
+
 
