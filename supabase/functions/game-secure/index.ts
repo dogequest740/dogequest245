@@ -71,6 +71,7 @@ const XP_LEVEL_REQUIREMENT_MULTIPLIER = 1.4;
 const ENERGY_MAX = 50;
 const ITEM_TIER_SCORE_BASE = 18;
 const ITEM_TIER_SCORE_PER_LEVEL = 14;
+const ITEM_TIER_SCORE_MULTIPLIER = 0.5;
 const INVENTORY_ITEM_CAP = 512;
 const VILLAGE_CASTLE_MAX_LEVEL = 3;
 const VILLAGE_OTHER_MAX_LEVEL = 25;
@@ -5140,4 +5141,5 @@ serve(async (req) => {
 
   return json({ ok: false, error: "Unknown action." });
 });
+
 
