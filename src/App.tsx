@@ -115,7 +115,7 @@ type TelegramWebApp = {
   }
 }
 
-type MobileGameTab = 'battle' | 'boss' | 'shop' | 'season' | 'profile'
+type MobileGameTab = 'battle' | 'dungeons' | 'quests' | 'boss' | 'shop' | 'season' | 'village' | 'profile'
 
 const VILLAGE_FEATURE_ENABLED = import.meta.env.DEV || import.meta.env.VITE_ENABLE_VILLAGE === '1'
 const villageBackgroundImage = villageBackgroundPng
@@ -3507,6 +3507,7 @@ function App() {
   const [hoveredPlayerStat, setHoveredPlayerStat] = useState<'power' | 'fortune' | 'prosperity' | null>(null)
   const [isMobile, setIsMobile] = useState(false)
   const [mobileGameTab, setMobileGameTab] = useState<MobileGameTab>('battle')
+  const [mobileProfileTab, setMobileProfileTab] = useState<'profile' | 'inventory' | 'settings'>('profile')
   const [dungeonRunBusy, setDungeonRunBusy] = useState(false)
   const [, setConsumableBusyVersion] = useState(0)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -3606,7 +3607,6 @@ function App() {
       return 0
     }
   }, [telegramUser, telegramInitData])
-  const telegramUsername = String(telegramUser?.username ?? '').trim()
   const usingTelegramAuth = telegramInitData.length > 0
 
   const walletAddress = publicKey?.toBase58() ?? ''
@@ -5522,6 +5522,14 @@ function App() {
       setActivePanel(null)
       return
     }
+    if (tab === 'dungeons') {
+      setActivePanel('dungeons')
+      return
+    }
+    if (tab === 'quests') {
+      setActivePanel('quests')
+      return
+    }
     if (tab === 'boss') {
       setActivePanel('worldboss')
       return
@@ -5534,6 +5542,13 @@ function App() {
       setActivePanel('season')
       return
     }
+    if (tab === 'village') {
+      if (VILLAGE_FEATURE_ENABLED) {
+        setActivePanel('village')
+      }
+      return
+    }
+    setMobileProfileTab('profile')
     setActivePanel('inventory')
   }
 
@@ -5542,6 +5557,16 @@ function App() {
 
     if (!activePanel) {
       setMobileGameTab('battle')
+      return
+    }
+
+    if (activePanel === 'dungeons') {
+      setMobileGameTab('dungeons')
+      return
+    }
+
+    if (activePanel === 'quests') {
+      setMobileGameTab('quests')
       return
     }
 
@@ -5560,15 +5585,17 @@ function App() {
       return
     }
 
+    if (activePanel === 'village') {
+      setMobileGameTab('village')
+      return
+    }
+
     if (
       activePanel === 'settings' ||
       activePanel === 'inventory' ||
-      activePanel === 'quests' ||
       activePanel === 'referrals' ||
       activePanel === 'stake' ||
-      activePanel === 'dungeons' ||
       activePanel === 'fortune' ||
-      activePanel === 'village' ||
       activePanel === 'admin'
     ) {
       setMobileGameTab('profile')
@@ -5608,6 +5635,12 @@ function App() {
   useEffect(() => {
     if (activePanel === 'inventory') {
       setInventoryTab('equipment')
+      if (isMobile) {
+        setMobileProfileTab('profile')
+      }
+    }
+    if (activePanel === 'settings' && isMobile) {
+      setMobileProfileTab('settings')
     }
     if (activePanel !== 'buygold') {
       setBuyGoldError('')
@@ -5652,7 +5685,7 @@ function App() {
     if (activePanel !== 'season') {
       setSeasonError('')
     }
-  }, [activePanel])
+  }, [activePanel, isMobile])
 
   useEffect(() => {
     if (activePanel !== 'village') return
@@ -6687,15 +6720,7 @@ function App() {
   const shortKey = walletAddress
     ? `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`
     : ''
-  const accountHint = usingWalletAuth
-    ? `Wallet: ${shortKey}`
-    : usingTelegramAuth
-      ? telegramUsername
-        ? `Telegram: @${telegramUsername}`
-        : telegramUserId > 0
-          ? `Telegram ID: ${telegramUserId}`
-          : 'Telegram connected'
-      : ''
+  const accountHint = usingWalletAuth ? `Wallet: ${shortKey}` : ''
 
   const levelUpNotice = hud?.levelUpNotice ?? null
   const currentDayKey = getDayKey()
@@ -6707,6 +6732,7 @@ function App() {
   const premiumDaysLeft = hud ? getPremiumDaysLeft(hud.premiumEndsAt) : 0
   const premiumClaimReady = Boolean(hud && premiumActive && hud.premiumClaimDay !== currentDayKey)
   const seasonRemainingSec = seasonInfo ? Math.max(0, Math.floor((new Date(seasonInfo.endAt).getTime() - Date.now()) / 1000)) : 0
+  const xpProgressPercent = hud ? Math.max(0, Math.min(100, Math.round((hud.xp / Math.max(1, hud.xpNext)) * 100))) : 0
   const seasonPlayerCrystals = seasonPlayer?.crystals ?? hud?.crystals ?? 0
   const fortuneCanSpin = fortuneFreeSpinAvailable || fortunePaidSpins > 0
   const villagePending = hud ? getVillagePendingRewards(hud.village, Date.now()) : null
@@ -6828,20 +6854,22 @@ function App() {
           </div>
           <div className="wallet">
             <div className="wallet-row">
-              <button
-                type="button"
-                className={`music-toggle ${musicEnabled ? 'on' : 'off'}`}
-                onClick={() => setMusicEnabled((prev) => !prev)}
-              >
-                {musicEnabled ? 'Music On' : 'Music Off'}
-              </button>
+              {!isMobile && (
+                <button
+                  type="button"
+                  className={`music-toggle ${musicEnabled ? 'on' : 'off'}`}
+                  onClick={() => setMusicEnabled((prev) => !prev)}
+                >
+                  {musicEnabled ? 'Music On' : 'Music Off'}
+                </button>
+              )}
               {usingWalletAuth && (
                 <button type="button" className="wallet-button wallet-logout-btn" onClick={signOutWalletAuth} disabled={walletLogoutBusy}>
                   {walletLogoutBusy ? '...' : 'Log out'}
                 </button>
               )}
             </div>
-            {(usingWalletAuth || usingTelegramAuth || isAdmin) && (
+            {(isAdmin || (!isMobile && accountHint)) && (
               <div className="wallet-hint-row">
                 {isAdmin && (
                   <button type="button" className="admin-inline" onClick={() => setActivePanel('admin')}>
@@ -6849,7 +6877,7 @@ function App() {
                     Admin
                   </button>
                 )}
-                {accountHint && <div className="wallet-hint">{accountHint}</div>}
+                {!isMobile && accountHint && <div className="wallet-hint">{accountHint}</div>}
               </div>
             )}
           </div>
@@ -7425,7 +7453,18 @@ function App() {
                       <strong>Invite Friends</strong>
                     </div>
                   </button>
-                  {VILLAGE_FEATURE_ENABLED && (
+                  {isMobile ? (
+                    <button
+                      type="button"
+                      className={`starter-pack-btn starter-pack-float village-float ${!hud?.starterPackPurchased ? 'with-starterpack' : ''}`}
+                      onClick={() => setActivePanel('fortune')}
+                    >
+                      <img className="starter-pack-icon" src={iconFortuneWheel} alt="" />
+                      <div className="starter-pack-text">
+                        <strong>Fortune Wheel</strong>
+                      </div>
+                    </button>
+                  ) : VILLAGE_FEATURE_ENABLED ? (
                     <button
                       type="button"
                       className={`starter-pack-btn starter-pack-float village-float ${!hud?.starterPackPurchased ? 'with-starterpack' : ''}`}
@@ -7436,7 +7475,7 @@ function App() {
                         <strong>Your Village</strong>
                       </div>
                     </button>
-                  )}
+                  ) : null}
                 </div>
                 <canvas ref={canvasRef} className="game-canvas" />
                 <div className="buff-stack">
@@ -7468,66 +7507,18 @@ function App() {
               </div>
               {isMobile && hud && (
                 <>
-                  <div className="mobile-profile-summary">
-                    <div className="mobile-profile-title">
-                      <strong>{hud.name}</strong>
-                      <span>Lvl {hud.level} · {hud.classLabel}</span>
-                    </div>
-                    <div className="mobile-profile-stats-grid">
-                      <div><span>ATK</span><strong>{hud.attack}</strong></div>
-                      <div><span>Power</span><strong>{hud.power}</strong></div>
-                      <div><span>Fortune</span><strong>{hud.fortune}</strong></div>
-                      <div><span>Prosperity</span><strong>{hud.prosperity}</strong></div>
-                    </div>
-                  </div>
-
-                  <div className="mobile-hub-cards">
-                    <button type="button" className="mobile-hub-card" onClick={() => openMobileGameTab('boss')}>
-                      <div className="mobile-hub-head">
-                        <img className="icon-img" src={iconWorldBoss} alt="" />
-                        <span>World Boss</span>
-                      </div>
-                      <strong>{formatLongTimer(hud.worldBoss.remaining)}</strong>
-                      <small>{hud.worldBossTickets > 0 ? `${hud.worldBossTickets} ticket(s) ready` : 'No tickets yet'}</small>
-                    </button>
-                    <button type="button" className="mobile-hub-card" onClick={() => openMobileGameTab('season')}>
-                      <div className="mobile-hub-head">
-                        <img className="icon-img" src={iconCrystalSeason} alt="" />
-                        <span>Crystal Season</span>
-                      </div>
-                      <strong>{seasonInfo ? `${formatNumber(Math.max(0, Math.round(seasonInfo.poolUsdt)))} USDT` : 'No active season'}</strong>
-                      <small>{seasonInfo ? `Ends in ${formatLongTimer(seasonRemainingSec)}` : 'Waiting for next season'}</small>
-                    </button>
-                  </div>
-                  <div className={`mobile-hub-actions ${usingTelegramAuth ? 'with-settings' : ''}`}>
-                    <button type="button" className="mobile-hub-action" onClick={() => setActivePanel('inventory')}>
-                      <img className="icon-img" src={iconInventory} alt="" />
-                      Inventory
-                    </button>
-                    <button type="button" className="mobile-hub-action" onClick={() => setActivePanel('dungeons')}>
-                      <img className="icon-img" src={iconDungeons} alt="" />
-                      Dungeons
-                    </button>
-                    <button type="button" className="mobile-hub-action" onClick={() => setActivePanel('quests')}>
-                      <img className="icon-img" src={iconQuests} alt="" />
-                      Quests
-                    </button>
-                    <button type="button" className="mobile-hub-action" onClick={() => setActivePanel('fortune')}>
-                      <img className="icon-img" src={iconFortuneWheel} alt="" />
-                      Fortune
-                    </button>
-                    {usingTelegramAuth && (
-                      <button type="button" className="mobile-hub-action" onClick={() => setActivePanel('settings')}>
-                        <img className="icon-img" src={iconName} alt="" />
-                        Settings
-                      </button>
-                    )}
-                  </div>
-
                   <nav className="mobile-game-tabs" aria-label="Game sections">
                     <button type="button" className={mobileGameTab === 'battle' ? 'active' : ''} onClick={() => openMobileGameTab('battle')}>
                       <img className="icon-img" src={iconBattle} alt="" />
                       <span>Battle</span>
+                    </button>
+                    <button type="button" className={mobileGameTab === 'dungeons' ? 'active' : ''} onClick={() => openMobileGameTab('dungeons')}>
+                      <img className="icon-img" src={iconDungeons} alt="" />
+                      <span>Dungeons</span>
+                    </button>
+                    <button type="button" className={mobileGameTab === 'quests' ? 'active' : ''} onClick={() => openMobileGameTab('quests')}>
+                      <img className="icon-img" src={iconQuests} alt="" />
+                      <span>Quests</span>
                     </button>
                     <button type="button" className={mobileGameTab === 'boss' ? 'active' : ''} onClick={() => openMobileGameTab('boss')}>
                       <img className="icon-img" src={iconWorldBoss} alt="" />
@@ -7539,8 +7530,14 @@ function App() {
                     </button>
                     <button type="button" className={mobileGameTab === 'season' ? 'active' : ''} onClick={() => openMobileGameTab('season')}>
                       <img className="icon-img" src={iconCrystalSeason} alt="" />
-                      <span>Seasons</span>
+                      <span>Season</span>
                     </button>
+                    {VILLAGE_FEATURE_ENABLED && (
+                      <button type="button" className={mobileGameTab === 'village' ? 'active' : ''} onClick={() => openMobileGameTab('village')}>
+                        <img className="icon-img" src={villageCastleLv1Image} alt="" />
+                        <span>Village</span>
+                      </button>
+                    )}
                     <button type="button" className={mobileGameTab === 'profile' ? 'active' : ''} onClick={() => openMobileGameTab('profile')}>
                       <img className="icon-img" src={iconInventory} alt="" />
                       <span>Profile</span>
@@ -7660,149 +7657,269 @@ function App() {
         <div className={`modal-backdrop ${isMobile ? 'mobile-tab-screen' : ''}`} onClick={() => { if (!isMobile) setActivePanel(null) }}>
           <div className={`modal wide inventory-modal ${isMobile ? 'mobile-tab-modal' : ''}`} onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
-              <h3>Inventory</h3>
+              <h3>{isMobile ? 'Profile' : 'Inventory'}</h3>
               <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
                 Close
               </button>
             </div>
-            <div className="inventory-tabs">
-              <button
-                type="button"
-                className={`tab-btn ${inventoryTab === 'equipment' ? 'active' : ''}`}
-                onClick={() => setInventoryTab('equipment')}
-              >
-                Equipment
-              </button>
-              <button
-                type="button"
-                className={`tab-btn ${inventoryTab === 'consumables' ? 'active' : ''}`}
-                onClick={() => setInventoryTab('consumables')}
-              >
-                Consumables
-              </button>
-            </div>
-            {isMobile && inventoryTab === 'equipment' && (
-              <div className="inventory-subtabs">
+
+            {isMobile && (
+              <div className={`inventory-super-tabs ${usingTelegramAuth ? 'with-settings' : ''}`}>
                 <button
                   type="button"
-                  className={`tab-btn ${inventoryView === 'equipped' ? 'active' : ''}`}
-                  onClick={() => setInventoryView('equipped')}
+                  className={`tab-btn ${mobileProfileTab === 'profile' ? 'active' : ''}`}
+                  onClick={() => setMobileProfileTab('profile')}
                 >
-                  Equipped
+                  Profile
                 </button>
                 <button
                   type="button"
-                  className={`tab-btn ${inventoryView === 'bag' ? 'active' : ''}`}
-                  onClick={() => setInventoryView('bag')}
+                  className={`tab-btn ${mobileProfileTab === 'inventory' ? 'active' : ''}`}
+                  onClick={() => setMobileProfileTab('inventory')}
                 >
-                  Bag
+                  Inventory
                 </button>
+                {usingTelegramAuth && (
+                  <button
+                    type="button"
+                    className={`tab-btn ${mobileProfileTab === 'settings' ? 'active' : ''}`}
+                    onClick={() => setMobileProfileTab('settings')}
+                  >
+                    Settings
+                  </button>
+                )}
               </div>
             )}
-            {inventoryTab === 'equipment' && (
+
+            {(!isMobile || mobileProfileTab === 'profile') && (
+              <div className="mobile-account-panel">
+                <div className="mobile-account-card">
+                  <div className="mobile-account-name">{hud.name}</div>
+                  <div className="mobile-account-meta">Level {hud.level} · {hud.classLabel}</div>
+                </div>
+                <div className="mobile-account-xp">
+                  <div className="mobile-account-xp-head">
+                    <span>XP Progress</span>
+                    <strong>{hud.xp}/{hud.xpNext}</strong>
+                  </div>
+                  <div className="mobile-account-xp-bar">
+                    <div className="mobile-account-xp-fill" style={{ width: `${xpProgressPercent}%` }} />
+                  </div>
+                </div>
+                <div className="mobile-account-stats">
+                  <div className="mobile-account-stat-row mobile-account-stat-atk">
+                    <span>ATK</span>
+                    <strong>{hud.attack}</strong>
+                    <small>Base damage in battles and World Boss fights.</small>
+                  </div>
+                  {(['power', 'fortune', 'prosperity'] as const).map((key) => {
+                    const insight = getPlayerStatInsight(hud, key)
+                    const value = key === 'power' ? hud.power : key === 'fortune' ? hud.fortune : hud.prosperity
+                    return (
+                      <div key={key} className="mobile-account-stat-row">
+                        <span>{insight.label}</span>
+                        <strong>{value}</strong>
+                        <small>{insight.detail}</small>
+                      </div>
+                    )
+                  })}
+                </div>
+                <div className="mobile-account-buffs">
+                  {hud.bossMarkCycleStart === hud.worldBoss.cycleStart && <div>Boss Mark active: +25% World Boss damage this cycle.</div>}
+                  {hud.crystalFlaskRuns > 0 && <div>Crystal Flask ready: +25% dungeon crystals for {hud.crystalFlaskRuns} more run(s).</div>}
+                  {hud.bossMarkCycleStart !== hud.worldBoss.cycleStart && hud.crystalFlaskRuns <= 0 && (
+                    <div>No active boosts right now.</div>
+                  )}
+                </div>
+                <div className="mobile-account-actions">
+                  <button
+                    type="button"
+                    className={`music-toggle ${musicEnabled ? 'on' : 'off'}`}
+                    onClick={() => setMusicEnabled((prev) => !prev)}
+                  >
+                    {musicEnabled ? 'Music On' : 'Music Off'}
+                  </button>
+                  <button type="button" className="resource-action" onClick={() => setMobileProfileTab('inventory')}>
+                    Open Inventory
+                  </button>
+                  {usingTelegramAuth && (
+                    <button type="button" className="resource-action secondary" onClick={() => setMobileProfileTab('settings')}>
+                      Payout Settings
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {(!isMobile || mobileProfileTab === 'inventory') && (
               <>
-                {(!isMobile || inventoryView === 'equipped') && (
-                  <div className="slot-grid">
-                    {EQUIPMENT_SLOTS.map((slot) => {
-                      const item = hud.equipment[slot.id]
-                      const rarityId = item ? getRarityId(item.rarity) : ''
-                      return (
-                        <div key={slot.id} className={`slot-card slot-${slot.id} ${rarityId ? `rarity-${rarityId}` : ''}`}>
-                          <div className="slot-header">
-                            <img className="icon-img equip-icon" src={EQUIPMENT_ICONS[slot.id]} alt="" />
-                            <div className="slot-label">{slot.label}</div>
-                          </div>
-                          {item ? (
-                            <>
-                              <div className="slot-item" style={{ color: item.color }}>
-                                {item.rarity} {item.name}
-                              </div>
-                              <div className="slot-score">Lv. {item.level}</div>
-                              <div className="slot-score">Score {getDisplayItemTierScore(item.tierScore)}</div>
-                              <div className="slot-score">{getEquipmentStatRows(item).join(' · ')}</div>
-                              {getEquipmentEffectRow(item) && <div className="slot-effect">{getEquipmentEffectRow(item)}</div>}
-                            </>
-                          ) : (
-                            <div className="slot-empty">Empty</div>
-                          )}
-                        </div>
-                      )
-                    })}
+                <div className="inventory-tabs">
+                  <button
+                    type="button"
+                    className={`tab-btn ${inventoryTab === 'equipment' ? 'active' : ''}`}
+                    onClick={() => setInventoryTab('equipment')}
+                  >
+                    Equipment
+                  </button>
+                  <button
+                    type="button"
+                    className={`tab-btn ${inventoryTab === 'consumables' ? 'active' : ''}`}
+                    onClick={() => setInventoryTab('consumables')}
+                  >
+                    Consumables
+                  </button>
+                </div>
+                {isMobile && inventoryTab === 'equipment' && (
+                  <div className="inventory-subtabs">
+                    <button
+                      type="button"
+                      className={`tab-btn ${inventoryView === 'equipped' ? 'active' : ''}`}
+                      onClick={() => setInventoryView('equipped')}
+                    >
+                      Equipped
+                    </button>
+                    <button
+                      type="button"
+                      className={`tab-btn ${inventoryView === 'bag' ? 'active' : ''}`}
+                      onClick={() => setInventoryView('bag')}
+                    >
+                      Bag
+                    </button>
                   </div>
                 )}
-                {(!isMobile || inventoryView === 'bag') && (
+                {inventoryTab === 'equipment' && (
+                  <>
+                    {(!isMobile || inventoryView === 'equipped') && (
+                      <div className="slot-grid">
+                        {EQUIPMENT_SLOTS.map((slot) => {
+                          const item = hud.equipment[slot.id]
+                          const rarityId = item ? getRarityId(item.rarity) : ''
+                          return (
+                            <div key={slot.id} className={`slot-card slot-${slot.id} ${rarityId ? `rarity-${rarityId}` : ''}`}>
+                              <div className="slot-header">
+                                <img className="icon-img equip-icon" src={EQUIPMENT_ICONS[slot.id]} alt="" />
+                                <div className="slot-label">{slot.label}</div>
+                              </div>
+                              {item ? (
+                                <>
+                                  <div className="slot-item" style={{ color: item.color }}>
+                                    {item.rarity} {item.name}
+                                  </div>
+                                  <div className="slot-score">Lv. {item.level}</div>
+                                  <div className="slot-score">Score {getDisplayItemTierScore(item.tierScore)}</div>
+                                  <div className="slot-score">{getEquipmentStatRows(item).join(' · ')}</div>
+                                  {getEquipmentEffectRow(item) && <div className="slot-effect">{getEquipmentEffectRow(item)}</div>}
+                                </>
+                              ) : (
+                                <div className="slot-empty">Empty</div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                    {(!isMobile || inventoryView === 'bag') && (
+                      <div className="inventory-section">
+                        {!isMobile && <h4>Equipment</h4>}
+                        <div className="inventory-list">
+                          {hud.inventory.length === 0 && <div className="muted">No items yet.</div>}
+                          {hud.inventory.map((item) => {
+                            const rarityId = getRarityId(item.rarity)
+                            return (
+                              <div
+                                key={item.id}
+                                className={`inventory-item rarity-${rarityId}`}
+                                style={{ borderColor: item.color, ['--item-color' as never]: item.color }}
+                              >
+                                <div>
+                                  <div className="inventory-name" style={{ color: item.color }}>
+                                    <img className="icon-img equip-icon small" src={EQUIPMENT_ICONS[item.slot]} alt="" />
+                                    {item.rarity} {item.name}
+                                  </div>
+                                  <div className="inventory-slot">
+                                    Lv. {item.level} - {EQUIPMENT_SLOTS.find((slot) => slot.id === item.slot)?.label ?? item.slot} - Score {getDisplayItemTierScore(item.tierScore)}
+                                  </div>
+                                  <div className="inventory-slot">{getEquipmentStatRows(item).join(' · ')}</div>
+                                  {getEquipmentEffectRow(item) && <div className="inventory-effect">{getEquipmentEffectRow(item)}</div>}
+                                </div>
+                                <div className="inventory-actions">
+                                  <button type="button" onClick={() => equipItem(item, 'inventory')}>
+                                    Equip
+                                  </button>
+                                  <button type="button" className="ghost" onClick={() => sellItem(item, 'inventory')}>
+                                    <img className="icon-img small" src={iconGold} alt="" />
+                                    Sell {getLootSellPrice(item.sellValue, hud.equipment)}
+                                  </button>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+                {inventoryTab === 'consumables' && (
                   <div className="inventory-section">
-                    {!isMobile && <h4>Equipment</h4>}
+                    <h4>Consumables</h4>
                     <div className="inventory-list">
-                      {hud.inventory.length === 0 && <div className="muted">No items yet.</div>}
-                      {hud.inventory.map((item) => {
-                        const rarityId = getRarityId(item.rarity)
-                        return (
-                          <div
-                            key={item.id}
-                            className={`inventory-item rarity-${rarityId}`}
-                            style={{ borderColor: item.color, ['--item-color' as never]: item.color }}
-                          >
-                            <div>
-                              <div className="inventory-name" style={{ color: item.color }}>
-                                <img className="icon-img equip-icon small" src={EQUIPMENT_ICONS[item.slot]} alt="" />
-                                {item.rarity} {item.name}
-                              </div>
-                              <div className="inventory-slot">
-                                Lv. {item.level} - {EQUIPMENT_SLOTS.find((slot) => slot.id === item.slot)?.label ?? item.slot} - Score {getDisplayItemTierScore(item.tierScore)}
-                              </div>
-                              <div className="inventory-slot">{getEquipmentStatRows(item).join(' · ')}</div>
-                              {getEquipmentEffectRow(item) && <div className="inventory-effect">{getEquipmentEffectRow(item)}</div>}
+                      {hud.consumables.length === 0 && <div className="muted">No consumables yet.</div>}
+                      {hud.consumables.map((item) => (
+                        <div key={item.id} className="inventory-item consumable-item">
+                          <div>
+                            <div className="inventory-name">
+                              <img className="icon-img equip-icon small" src={item.icon} alt="" />
+                              {item.name}
                             </div>
-                            <div className="inventory-actions">
-                              <button type="button" onClick={() => equipItem(item, 'inventory')}>
-                                Equip
-                              </button>
-                              <button type="button" className="ghost" onClick={() => sellItem(item, 'inventory')}>
-                                <img className="icon-img small" src={iconGold} alt="" />
-                                Sell {getLootSellPrice(item.sellValue, hud.equipment)}
-                              </button>
-                            </div>
+                            <div className="inventory-slot">{item.description}</div>
                           </div>
-                        )
-                      })}
+                          <div className="inventory-actions">
+                            <button
+                              type="button"
+                              disabled={consumableBusyIdsRef.current.has(item.id)}
+                              onClick={() => useConsumable(item)}
+                            >
+                              {consumableBusyIdsRef.current.has(item.id) ? 'Using...' : 'Use'}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
               </>
             )}
-            {inventoryTab === 'consumables' && (
-              <div className="inventory-section">
-                <h4>Consumables</h4>
-                <div className="inventory-list">
-                  {hud.consumables.length === 0 && <div className="muted">No consumables yet.</div>}
-                  {hud.consumables.map((item) => (
-                    <div key={item.id} className="inventory-item consumable-item">
-                      <div>
-                        <div className="inventory-name">
-                          <img className="icon-img equip-icon small" src={item.icon} alt="" />
-                          {item.name}
-                        </div>
-                        <div className="inventory-slot">{item.description}</div>
-                      </div>
-                      <div className="inventory-actions">
-                        <button
-                          type="button"
-                          disabled={consumableBusyIdsRef.current.has(item.id)}
-                          onClick={() => useConsumable(item)}
-                        >
-                          {consumableBusyIdsRef.current.has(item.id) ? 'Using...' : 'Use'}
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+
+            {isMobile && usingTelegramAuth && mobileProfileTab === 'settings' && (
+              <div className="mobile-account-settings">
+                <div className="withdraw-note">Set the wallet where you want to receive manual season payouts. You can update it any time before season close.</div>
+                <label className="withdraw-label">
+                  USDT/SOL wallet
+                  <input
+                    type="text"
+                    value={payoutWalletDraft}
+                    onChange={(event) => setPayoutWalletDraft(sanitizePayoutWalletInput(event.target.value))}
+                    placeholder="Enter payout wallet"
+                    maxLength={96}
+                  />
+                </label>
+                <div className="withdraw-note">Current saved wallet: {payoutWallet ? payoutWallet : 'Not set'}</div>
+                <button
+                  type="button"
+                  className="withdraw-submit"
+                  onClick={() => {
+                    void savePayoutWalletStatus()
+                  }}
+                  disabled={payoutWalletLoading}
+                >
+                  {payoutWalletLoading ? 'Saving...' : 'Save wallet'}
+                </button>
+                {payoutWalletError && <div className="withdraw-error">{payoutWalletError}</div>}
               </div>
             )}
           </div>
         </div>
       )}
-
       {activePanel === 'dungeons' && hud && (
         <div className={`modal-backdrop ${isMobile ? 'mobile-tab-screen' : ''}`} onClick={() => { if (!isMobile) setActivePanel(null) }}>
           <div className={`modal wide season-modal ${isMobile ? 'mobile-tab-modal' : ''}`} onClick={(event) => event.stopPropagation()}>
@@ -9527,3 +9644,4 @@ function App() {
   )
 }
 export default App
+

@@ -41,24 +41,24 @@
 
 .app.mobile .resources {
   justify-content: flex-start;
-  gap: 8px;
+  gap: 5px;
   width: 100%;
   flex-direction: column;
   align-items: stretch;
 }
 
 .app.mobile .resource-chip {
-  padding: 10px 14px;
-  font-size: 14px;
+  padding: 6px 8px;
+  font-size: 11px;
 }
 
 .app.mobile .resource-chip strong {
-  font-size: 16px;
+  font-size: 13px;
 }
 
 .app.mobile .resource-action {
-  font-size: 10px;
-  min-height: 30px;
+  font-size: 9px;
+  min-height: 24px;
 }
 
 .app.mobile .resource-chip.with-action .resource-actions {
@@ -70,7 +70,7 @@
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 8px;
+  gap: 4px;
   width: 100%;
 }
 
@@ -88,7 +88,7 @@
 .app.mobile .resources-strip {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
   overflow: visible;
   padding-bottom: 2px;
 }
@@ -102,7 +102,7 @@
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
   align-items: stretch;
 }
 
@@ -134,11 +134,20 @@
 .app.mobile .resources-actions-row .resource-action {
   flex: 1 1 120px;
   justify-content: center;
-  min-height: 36px;
+  min-height: 30px;
 }
 
 .app.mobile .wallet {
   align-items: flex-start;
+}
+
+.app.mobile .wallet-row {
+  gap: 6px;
+}
+
+.app.mobile .wallet-button.wallet-logout-btn {
+  padding: 5px 8px;
+  font-size: 11px;
 }
 
 .app.mobile .game-layout {
@@ -229,6 +238,142 @@
   padding: 12px 14px;
 }
 
+.inventory-super-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.inventory-super-tabs.with-settings {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.mobile-account-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.mobile-account-card {
+  border: 1px solid rgba(214, 178, 95, 0.3);
+  border-radius: 12px;
+  background: rgba(10, 15, 22, 0.78);
+  padding: 10px;
+}
+
+.mobile-account-name {
+  font-family: 'Cinzel Decorative', 'Cinzel', 'Manrope', system-ui, sans-serif;
+  font-size: 18px;
+  color: #f8e8ba;
+}
+
+.mobile-account-meta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: rgba(241, 227, 188, 0.82);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.mobile-account-xp {
+  border: 1px solid rgba(126, 184, 255, 0.3);
+  border-radius: 12px;
+  background: rgba(9, 16, 25, 0.75);
+  padding: 9px 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.mobile-account-xp-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+.mobile-account-xp-head strong {
+  color: #a6d5ff;
+}
+
+.mobile-account-xp-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.mobile-account-xp-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #58a7ff, #9fd0ff);
+}
+
+.mobile-account-stats {
+  display: grid;
+  gap: 8px;
+}
+
+.mobile-account-stat-row {
+  border: 1px solid rgba(214, 178, 95, 0.26);
+  border-radius: 12px;
+  background: rgba(12, 18, 27, 0.76);
+  padding: 8px 10px;
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.mobile-account-stat-row span {
+  font-size: 12px;
+  color: #f7ddb0;
+}
+
+.mobile-account-stat-row strong {
+  justify-self: end;
+  font-size: 14px;
+  color: #fff0c8;
+}
+
+.mobile-account-stat-row small {
+  grid-column: 1 / -1;
+  color: rgba(228, 236, 250, 0.84);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.mobile-account-stat-row.mobile-account-stat-atk {
+  border-color: rgba(255, 158, 121, 0.35);
+}
+
+.mobile-account-buffs {
+  border: 1px solid rgba(113, 217, 176, 0.3);
+  border-radius: 12px;
+  background: rgba(10, 20, 20, 0.7);
+  padding: 9px 10px;
+  display: grid;
+  gap: 6px;
+  font-size: 11px;
+  color: rgba(214, 245, 232, 0.92);
+}
+
+.mobile-account-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.mobile-account-actions .music-toggle {
+  width: 100%;
+  min-height: 34px;
+}
+
+.mobile-account-actions .resource-action {
+  width: 100%;
+  justify-content: center;
+}
+
+.mobile-account-settings {
+  display: grid;
+  gap: 10px;
+}
 .mobile-profile-summary {
   margin-top: 8px;
   border: 1px solid rgba(142, 224, 255, 0.28);
@@ -367,7 +512,8 @@
   bottom: max(10px, env(safe-area-inset-bottom));
   z-index: 35;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: minmax(46px, auto);
   gap: 6px;
   padding: 8px;
   border-radius: 14px;
@@ -381,8 +527,8 @@
   background: rgba(15, 21, 31, 0.75);
   color: #f5d38a;
   border-radius: 10px;
-  padding: 7px 4px;
-  font-size: 9px;
+  padding: 6px 3px;
+  font-size: 8px;
   letter-spacing: 0.38px;
   text-transform: uppercase;
   font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
@@ -398,8 +544,8 @@
 }
 
 .mobile-game-tabs .icon-img {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
 }
 
 .mobile-game-tabs span {
@@ -2974,7 +3120,7 @@
   border-left: none;
   border-right: none;
   border-bottom: none;
-  padding: 14px 12px calc(96px + env(safe-area-inset-bottom));
+  padding: 14px 12px calc(146px + env(safe-area-inset-bottom));
 }
 
 .app.mobile .modal.mobile-tab-modal::after,
