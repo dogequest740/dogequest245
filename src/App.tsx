@@ -3430,6 +3430,7 @@ function App() {
   const [stakeError, setStakeError] = useState('')
   const [stakeTab, setStakeTab] = useState<'stake' | 'my'>('stake')
   const [musicEnabled, setMusicEnabled] = useState(true)
+  const [startAdventureBusy, setStartAdventureBusy] = useState(false)
   const [referralCopied, setReferralCopied] = useState(false)
   const [referralLoading, setReferralLoading] = useState(false)
   const [referralClaimLoading, setReferralClaimLoading] = useState(false)
@@ -3538,7 +3539,21 @@ function App() {
     if (!raw || typeof raw !== 'object') return null
     return raw
   }, [telegramWebApp])
-  const telegramUserId = Math.max(0, Math.floor(Number(telegramUser?.id ?? 0)))
+  const telegramUserId = useMemo(() => {
+    const unsafeId = Math.max(0, Math.floor(Number(telegramUser?.id ?? 0)))
+    if (unsafeId > 0) return unsafeId
+
+    const params = new URLSearchParams(telegramInitData)
+    const userJson = String(params.get('user') ?? '').trim()
+    if (!userJson) return 0
+
+    try {
+      const parsed = JSON.parse(userJson) as Record<string, unknown>
+      return Math.max(0, Math.floor(Number(parsed.id ?? 0)))
+    } catch {
+      return 0
+    }
+  }, [telegramUser, telegramInitData])
   const telegramUsername = String(telegramUser?.username ?? '').trim()
   const usingTelegramAuth = telegramInitData.length > 0
 
@@ -3546,7 +3561,7 @@ function App() {
   const walletAuthReady = Boolean(walletAddress && signMessage)
   const usingWalletAuth = walletAuthReady && !usingTelegramAuth
   const accountIdentity = useMemo(() => {
-    if (usingTelegramAuth) return telegramUserId > 0 ? `tg:${telegramUserId}` : 'tg:webapp'
+    if (usingTelegramAuth) return telegramUserId > 0 ? `tg:${telegramUserId}` : ''
     return usingWalletAuth ? walletAddress : ''
   }, [usingTelegramAuth, telegramUserId, usingWalletAuth, walletAddress])
 
@@ -4493,7 +4508,6 @@ function App() {
     const applyReferrer =
       (usingWalletAuth || usingTelegramAuth) &&
       !referralProcessedRef.current &&
-      isNewProfileRef.current &&
       referralIdentityFromLaunch &&
       referralIdentityFromLaunch !== accountIdentity
         ? referralIdentityFromLaunch
@@ -5173,7 +5187,7 @@ function App() {
       if (!active) return
       if (saved) {
         isNewProfileRef.current = false
-        referralProcessedRef.current = true
+        referralProcessedRef.current = false
         profileUpdatedAtRef.current = saved.updatedAt || ''
         pendingProfileRef.current = saved
         setSelectedId(normalizeCharacterClassId(saved.state.classId) || CHARACTER_CLASSES[0].id)
@@ -5304,7 +5318,7 @@ function App() {
 
     if (pendingProfile) {
       isNewProfileRef.current = false
-      referralProcessedRef.current = true
+      referralProcessedRef.current = false
       profileUpdatedAtRef.current = pendingProfile.updatedAt || ''
       applyPersistedState(state, pendingProfile.state, pendingProfile.updatedAt)
       pendingProfileRef.current = null
@@ -5316,7 +5330,7 @@ function App() {
         if (!gameStateRef.current) return
         if (saved) {
           isNewProfileRef.current = false
-          referralProcessedRef.current = true
+          referralProcessedRef.current = false
           profileUpdatedAtRef.current = saved.updatedAt || ''
           applyPersistedState(gameStateRef.current, saved.state, saved.updatedAt)
         } else {
@@ -6473,6 +6487,51 @@ function App() {
     syncHud()
   }
 
+  const startAdventure = async () => {
+    if (startAdventureBusy) return
+
+    const safeName = sanitizePlayerName(playerName)
+    if (safeName.length < 2) {
+      setSecurityAuthError('Character name must be at least 2 characters.')
+      return
+    }
+
+    setStartAdventureBusy(true)
+    try {
+      if (!walletSessionVerified) {
+        const token = await ensureDungeonSession(true)
+        if (!token) return
+      }
+
+      const starterState = initGameState(selectedClass, safeName)
+      const createResult = await callGameSecureAuthed(
+        'profile_save',
+        { state: buildPersistedState(starterState) },
+        true,
+      )
+
+      if (!createResult.ok) {
+        if (createResult.error && isStaleProfileError(createResult.error)) {
+          // Profile may have been created by another active tab/session.
+        } else {
+          setSecurityAuthError(createResult.error || 'Failed to create profile. Please retry.')
+          return
+        }
+      }
+
+      if (typeof createResult.savedAt === 'string' && createResult.savedAt.trim()) {
+        profileUpdatedAtRef.current = createResult.savedAt
+      }
+      setPlayerName(safeName)
+      isNewProfileRef.current = true
+      referralProcessedRef.current = false
+      setSecurityAuthError('')
+      setStage('game')
+    } finally {
+      setStartAdventureBusy(false)
+    }
+  }
+
   const shortKey = walletAddress
     ? `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`
     : ''
@@ -7066,16 +7125,12 @@ function App() {
             </label>
             <button
               className="start-button"
-              disabled={playerName.trim().length < 2}
-              onClick={async () => {
-                if (!walletSessionVerified) {
-                  const token = await ensureDungeonSession(true)
-                  if (!token) return
-                }
-                setStage('game')
+              disabled={playerName.trim().length < 2 || startAdventureBusy}
+              onClick={() => {
+                void startAdventure()
               }}
             >
-              Start adventure
+              {startAdventureBusy ? 'Starting...' : 'Start adventure'}
             </button>
           </div>
         </section>
