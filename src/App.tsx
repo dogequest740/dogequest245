@@ -89,9 +89,11 @@ type TelegramWebApp = {
   initData?: string
   initDataUnsafe?: {
     user?: TelegramWebAppUser
+    start_param?: string
   }
   ready?: () => void
   expand?: () => void
+  openTelegramLink?: (url: string) => void
   openInvoice?: (url: string, callback?: (status: TelegramInvoiceStatus) => void) => void
 }
 
@@ -118,6 +120,7 @@ const LANDING_BANNERS = [
 ] as const
 const EDGE_BASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || ''
 const EDGE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() || ''
+const TELEGRAM_BOT_USERNAME = String(import.meta.env.VITE_TELEGRAM_BOT_USERNAME ?? 'dogemmorpgbot').trim().replace(/^@+/, '')
 const SEASON_SNAPSHOT_MIN_CRYSTALS = 500
 
 type CharacterClass = {
@@ -2036,6 +2039,44 @@ const isValidWalletAddress = (value: string) => {
     return false
   }
 }
+const TELEGRAM_IDENTITY_RE = /^tg:[0-9]{3,20}$/
+const isValidTelegramIdentity = (value: string) => TELEGRAM_IDENTITY_RE.test(value)
+const isValidPlayerIdentity = (value: string) => isValidWalletAddress(value) || isValidTelegramIdentity(value)
+const encodeTelegramStartReferral = (identity: string) => {
+  if (isValidTelegramIdentity(identity)) {
+    return `ref_tg_${identity.slice(3)}`
+  }
+  if (isValidWalletAddress(identity)) {
+    return `ref_${identity}`
+  }
+  return ''
+}
+const decodeReferralIdentity = (rawValue: string) => {
+  const raw = rawValue.trim()
+  if (!raw) return ''
+
+  const maybeDecoded = (() => {
+    try {
+      return decodeURIComponent(raw)
+    } catch {
+      return raw
+    }
+  })().trim()
+
+  if (!maybeDecoded) return ''
+  if (isValidPlayerIdentity(maybeDecoded)) return maybeDecoded
+
+  if (!maybeDecoded.startsWith('ref_')) return ''
+  const payload = maybeDecoded.slice(4).trim()
+  if (!payload) return ''
+
+  if (payload.startsWith('tg_')) {
+    const tgId = payload.slice(3).trim()
+    return /^[0-9]{3,20}$/.test(tgId) ? `tg:${tgId}` : ''
+  }
+
+  return isValidWalletAddress(payload) ? payload : ''
+}
 const isPremiumActiveAt = (premiumEndsAt: number, nowMs = Date.now()) => premiumEndsAt > nowMs
 const getPremiumDaysLeft = (premiumEndsAt: number, nowMs = Date.now()) => {
   if (!isPremiumActiveAt(premiumEndsAt, nowMs)) return 0
@@ -3520,22 +3561,45 @@ function App() {
     return adminWallets.includes(accountIdentity)
   }, [accountIdentity, walletSessionVerified, adminWallets])
 
-  const referralWalletFromUrl = useMemo(() => {
-    if (typeof window === 'undefined') return ''
-    const raw = new URLSearchParams(window.location.search).get('ref')?.trim() ?? ''
-    if (!raw || !isValidWalletAddress(raw)) return ''
-    return raw
-  }, [])
+  const telegramStartParam = useMemo(() => String(telegramWebApp?.initDataUnsafe?.start_param ?? '').trim(), [telegramWebApp])
+
+  const referralIdentityFromLaunch = useMemo(() => {
+    if (typeof window === 'undefined') return decodeReferralIdentity(telegramStartParam)
+
+    const params = new URLSearchParams(window.location.search)
+    const rawCandidates = [
+      telegramStartParam,
+      params.get('ref') ?? '',
+      params.get('startapp') ?? '',
+      params.get('start') ?? '',
+      params.get('tgWebAppStartParam') ?? '',
+    ]
+
+    for (const raw of rawCandidates) {
+      const decoded = decodeReferralIdentity(String(raw ?? ''))
+      if (decoded) return decoded
+    }
+
+    return ''
+  }, [telegramStartParam])
 
   const referralLink = useMemo(() => {
-    if (!walletAddress) return ''
-    if (typeof window === 'undefined') return `?ref=${walletAddress}`
+    if (!accountIdentity || accountIdentity === 'tg:webapp') return ''
+
+    if (usingTelegramAuth) {
+      if (!TELEGRAM_BOT_USERNAME) return ''
+      const startParam = encodeTelegramStartReferral(accountIdentity)
+      if (!startParam) return ''
+      return `https://t.me/${TELEGRAM_BOT_USERNAME}/app?startapp=${encodeURIComponent(startParam)}`
+    }
+
+    if (typeof window === 'undefined') return `?ref=${accountIdentity}`
     const url = new URL(window.location.href)
     url.search = ''
     url.hash = ''
-    url.searchParams.set('ref', walletAddress)
+    url.searchParams.set('ref', accountIdentity)
     return url.toString()
-  }, [walletAddress])
+  }, [accountIdentity, usingTelegramAuth])
 
   useEffect(() => {
     if (!securityAuthError || isBlockedAuthError(securityAuthError)) return
@@ -4427,12 +4491,12 @@ function App() {
     if (!state || !accountIdentity) return
 
     const applyReferrer =
-      usingWalletAuth &&
+      (usingWalletAuth || usingTelegramAuth) &&
       !referralProcessedRef.current &&
       isNewProfileRef.current &&
-      referralWalletFromUrl &&
-      referralWalletFromUrl !== walletAddress
-        ? referralWalletFromUrl
+      referralIdentityFromLaunch &&
+      referralIdentityFromLaunch !== accountIdentity
+        ? referralIdentityFromLaunch
         : ''
 
     const result = await callGameSecureAuthed('referrals_status', { applyReferrer }, false)
@@ -4884,6 +4948,20 @@ function App() {
     await copyToClipboard(referralLink)
     setReferralCopied(true)
     window.setTimeout(() => setReferralCopied(false), 1400)
+  }
+
+  const shareReferralLink = () => {
+    if (!referralLink) return
+
+    const inviteText = 'Join me in Doge Quest and use my referral link to start your journey.'
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent(inviteText)}`
+
+    if (usingTelegramAuth && telegramWebApp?.openTelegramLink) {
+      telegramWebApp.openTelegramLink(shareUrl)
+      return
+    }
+
+    window.open(shareUrl, '_blank', 'noopener,noreferrer')
   }
 
   const claimReferralRewards = async () => {
@@ -7898,11 +7976,18 @@ function App() {
               </div>
               <label className="withdraw-label">
                 Your referral link
-                <input type="text" value={referralLink} readOnly />
+                <input type="text" value={referralLink} readOnly placeholder={usingTelegramAuth ? 'Telegram referral link will appear here.' : ''} />
               </label>
-              <button type="button" className="withdraw-submit" onClick={copyReferralLink}>
-                {referralCopied ? 'Copied' : 'Copy link'}
-              </button>
+              <div className="referral-actions">
+                <button type="button" className="withdraw-submit" onClick={copyReferralLink} disabled={!referralLink}>
+                  {referralCopied ? 'Copied' : 'Copy link'}
+                </button>
+                {usingTelegramAuth && (
+                  <button type="button" className="withdraw-submit" onClick={shareReferralLink} disabled={!referralLink}>
+                    Send to friend
+                  </button>
+                )}
+              </div>
               <div className="withdraw-info referral-conditions">
                 <strong>Conditions</strong>
                 <div className="referral-bonus keys">

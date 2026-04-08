@@ -4069,7 +4069,7 @@ serve(async (req) => {
     if (
       applyReferrer &&
       applyReferrer !== auth.wallet &&
-      isWalletLike(applyReferrer)
+      isPlayerIdentity(applyReferrer)
     ) {
       const { data: existing } = await supabase
         .from("referrals")
@@ -5855,23 +5855,4 @@ serve(async (req) => {
 
   return json({ ok: false, error: "Unknown action." });
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
