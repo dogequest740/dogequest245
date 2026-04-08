@@ -274,7 +274,6 @@ type PersistedState = {
   energy: number
   energyMax: number
   energyTimer: number
-  energyUpdatedAt: number
   gold: number
   crystals: number
   crystalsEarned: number
@@ -431,7 +430,6 @@ type GameSecureResponse = {
   profilesTotal?: number
   energy?: number
   energyTimer?: number
-  energyUpdatedAt?: number
   tickets?: number
   ticketDay?: string
   gold?: number
@@ -670,7 +668,6 @@ type GameState = {
   energy: number
   energyMax: number
   energyTimer: number
-  energyUpdatedAt: number
   gold: number
   crystals: number
   crystalsEarned: number
@@ -707,7 +704,6 @@ type HudState = {
   energy: number
   energyMax: number
   energyTimer: number
-  energyUpdatedAt: number
   xp: number
   xpNext: number
   attack: number
@@ -1476,7 +1472,6 @@ const buildPersistedState = (state: GameState): PersistedState => ({
   energy: state.energy,
   energyMax: state.energyMax,
   energyTimer: state.energyTimer,
-  energyUpdatedAt: state.energyUpdatedAt,
   gold: state.gold,
   crystals: state.crystals,
   crystalsEarned: state.crystalsEarned,
@@ -1527,7 +1522,6 @@ const applyPersistedState = (state: GameState, saved: PersistedState, _savedUpda
   state.energyMax = Math.max(1, saved.energyMax ?? state.energyMax)
   state.energy = clamp(saved.energy ?? state.energy, 0, state.energyMax)
   state.energyTimer = clamp(saved.energyTimer ?? state.energyTimer, 1, ENERGY_REGEN_SECONDS)
-  state.energyUpdatedAt = Math.max(0, Math.floor(Number(saved.energyUpdatedAt ?? state.energyUpdatedAt ?? Date.now())))
   if (state.energy >= state.energyMax) {
     state.energyTimer = ENERGY_REGEN_SECONDS
   }
@@ -2637,7 +2631,6 @@ const buildHud = (state: GameState): HudState => {
     energy: Math.round(state.energy),
     energyMax: state.energyMax,
     energyTimer: state.energyTimer,
-    energyUpdatedAt: state.energyUpdatedAt,
     xp: Math.round(state.player.xp),
     xpNext: Math.round(state.player.xpNext),
     attack: Math.round(state.player.attack),
@@ -2714,7 +2707,6 @@ const initGameState = (chosenClass: CharacterClass, name: string): GameState => 
     energy: ENERGY_MAX,
     energyMax: ENERGY_MAX,
     energyTimer: ENERGY_REGEN_SECONDS,
-    energyUpdatedAt: Date.now(),
     gold: 0,
     crystals: 0,
     crystalsEarned: 0,
@@ -2772,28 +2764,18 @@ const grantCrystals = (state: GameState, amount: number) => {
   state.crystalsEarned += value
 }
 
-const touchEnergyState = (state: GameState, atMs = Date.now()) => {
-  state.energyUpdatedAt = Math.max(0, Math.floor(atMs))
-}
-
 const applyEnergyRegen = (state: GameState, elapsedSecRaw: number) => {
   const elapsedSec = Math.max(0, elapsedSecRaw)
   if (elapsedSec <= 0) return
-  let changed = false
   if (state.energy < state.energyMax) {
     state.energyTimer -= elapsedSec
     while (state.energyTimer <= 0 && state.energy < state.energyMax) {
       state.energy += 1
       state.energyTimer += ENERGY_REGEN_SECONDS
-      changed = true
-    }
-    if (state.energy < state.energyMax) {
-      changed = true
     }
   } else {
     state.energyTimer = ENERGY_REGEN_SECONDS
   }
-  if (changed || state.energy >= state.energyMax) touchEnergyState(state)
 }
 
 const addEffect = (state: GameState, effect: EffectInput) => {
@@ -2893,7 +2875,6 @@ const updateGame = (state: GameState, dt: number) => {
     if (target) {
       state.battleTargetId = target.id
       state.energy = Math.max(0, state.energy - 1)
-      touchEnergyState(state)
       if (!state.autoBattle && state.battleQueue > 0) {
         state.battleQueue -= 1
       }
@@ -3964,7 +3945,6 @@ function App() {
     if (typeof result.energyTimer === 'number') {
       state.energyTimer = clamp(Math.floor(result.energyTimer), 1, ENERGY_REGEN_SECONDS)
     }
-    touchEnergyState(state)
     syncHud()
   }
 
@@ -5097,13 +5077,11 @@ function App() {
 
   useEffect(() => {
     if (activePanel !== 'season') return
-    setSeasonInfo(null)
-    setSeasonLeaderboard([])
-    setSeasonPlayer(null)
-    setSeasonPreviewRows([])
-    setSeasonSnapshotRows([])
     void loadSeasonStatus(false)
-  }, [activePanel, accountIdentity])
+    if (isAdmin && !seasonInfo) {
+      void loadLatestSeasonSnapshot()
+    }
+  }, [activePanel, accountIdentity, isAdmin])
 
   useEffect(() => {
     if (activePanel !== 'worldboss') return
@@ -5864,12 +5842,10 @@ function App() {
       switch (item.type) {
         case 'energy-small':
           state.energy = clamp(state.energy + 10, 0, state.energyMax)
-          touchEnergyState(state)
           message = 'Energy restored by 10.'
           break
         case 'energy-full':
           state.energy = state.energyMax
-          touchEnergyState(state)
           message = 'Energy fully restored.'
           break
         case 'boss-mark':
@@ -8754,4 +8730,3 @@ function App() {
   )
 }
 export default App
-
