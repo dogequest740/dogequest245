@@ -661,7 +661,11 @@
 .app.mobile .inventory-modal {
   width: min(96vw, 560px);
   max-height: 88vh;
-  overflow: hidden;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
 }
 
 .app.mobile .inventory-subtabs {
@@ -697,16 +701,20 @@
 .app.mobile .inventory-subtabs,
 .app.mobile .inventory-super-tabs {
   width: 100%;
-  align-items: stretch;
+  align-items: flex-start;
 }
 
 .app.mobile .inventory-tabs .tab-btn,
 .app.mobile .inventory-subtabs .tab-btn,
 .app.mobile .inventory-super-tabs .tab-btn {
   min-width: 0;
+  height: 34px;
   min-height: 34px;
   line-height: 1;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .app.mobile .inventory-tabs {
@@ -3216,6 +3224,11 @@
   border-left: none;
   border-right: none;
   border-bottom: none;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 10px;
   padding:
     calc(14px + var(--tg-top-offset) + env(safe-area-inset-top))
     12px
