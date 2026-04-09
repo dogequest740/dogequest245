@@ -252,12 +252,12 @@
   border: 1px solid rgba(116, 191, 255, 0.45);
   background: linear-gradient(160deg, rgba(12, 22, 34, 0.94), rgba(8, 14, 22, 0.96));
   color: rgba(196, 231, 255, 0.9);
-  border-radius: 12px;
-  min-height: 38px;
-  padding: 8px 10px;
-  font-size: 11px;
+  border-radius: 11px;
+  min-height: 34px;
+  padding: 6px 8px;
+  font-size: 10px;
   font-weight: 800;
-  letter-spacing: 0.45px;
+  letter-spacing: 0.35px;
   font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
   text-transform: uppercase;
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
@@ -672,10 +672,10 @@
 
 .app.mobile .inventory-subtabs .tab-btn {
   flex: 1;
-  padding: 10px 12px;
-  border-radius: 14px;
-  font-size: 12px;
-  letter-spacing: 0.8px;
+  padding: 7px 8px;
+  border-radius: 11px;
+  font-size: 10px;
+  letter-spacing: 0.45px;
   font-weight: 700;
   text-transform: uppercase;
   border: 1px solid rgba(255, 210, 120, 0.35);
@@ -704,9 +704,23 @@
 .app.mobile .inventory-subtabs .tab-btn,
 .app.mobile .inventory-super-tabs .tab-btn {
   min-width: 0;
-  min-height: 40px;
-  line-height: 1.1;
+  min-height: 34px;
+  line-height: 1;
   white-space: nowrap;
+}
+
+.app.mobile .inventory-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.app.mobile .inventory-tabs .tab-btn {
+  flex: 1;
+  padding: 7px 8px;
+  border-radius: 11px;
+  font-size: 10px;
+  letter-spacing: 0.45px;
 }
 
 .app.mobile .inventory-modal .slot-grid {
@@ -5389,14 +5403,25 @@ button.ghost {
 }
 
 .app.mobile .village-modal {
-  height: auto;
-  max-height: calc(100dvh - (var(--tg-top-offset) + env(safe-area-inset-top)) - (14px + env(safe-area-inset-bottom)));
-  padding: 10px;
-  gap: 8px;
+  height: calc(100dvh - (var(--tg-top-offset) + env(safe-area-inset-top)) - 8px);
+  min-height: calc(100dvh - (var(--tg-top-offset) + env(safe-area-inset-top)) - 8px);
+  max-height: calc(100dvh - (var(--tg-top-offset) + env(safe-area-inset-top)) - 8px);
+  padding: 8px;
+  gap: 6px;
 }
 
 .app.mobile .village-body {
   gap: 6px;
+  min-height: 0;
+}
+
+.app.mobile .village-body.is-ready {
+  height: 100%;
+  overflow: hidden;
+}
+
+.app.mobile .village-body.is-setup {
+  overflow: auto;
 }
 
 .app.mobile .village-scene {
@@ -5405,7 +5430,8 @@ button.ghost {
 }
 
 .app.mobile .village-scene-stage {
-  min-height: 220px;
+  height: 100%;
+  min-height: clamp(320px, 52dvh, 460px);
 }
 
 .app.mobile .village-top-note {
@@ -5414,7 +5440,7 @@ button.ghost {
 }
 
 .app.mobile .village-overlay-card {
-  padding: 5px;
+  padding: 4px;
 }
 
 .app.mobile .village-overlay {
@@ -5428,16 +5454,17 @@ button.ghost {
 }
 
 .app.mobile .village-overlay-bottom {
-  bottom: 8px;
+  bottom: 6px;
 }
 
 .app.mobile .village-claim-row {
-  font-size: 10px;
+  font-size: 9px;
+  gap: 6px;
 }
 
 .app.mobile .village-claim-button {
-  min-height: 30px;
-  font-size: 11px;
+  min-height: 28px;
+  font-size: 10px;
 }
 
 .app.mobile .village-slot-button {
