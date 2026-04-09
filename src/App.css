@@ -2013,6 +2013,52 @@
   border-radius: 16px !important;
   box-shadow: 0 12px 22px rgba(0, 0, 0, 0.35) !important;
 }
+.auth-telegram-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 1px solid rgba(156, 232, 255, 0.55);
+  background: linear-gradient(135deg, #2aa8e4, #1f8fd0 55%, #1b79b8);
+  color: #f5fcff;
+  text-decoration: none;
+  text-transform: uppercase;
+  letter-spacing: 0.55px;
+  font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
+  font-weight: 700;
+  border-radius: 16px;
+  box-shadow:
+    0 12px 22px rgba(0, 0, 0, 0.34),
+    0 0 18px rgba(56, 182, 255, 0.3),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.auth-telegram-button:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 14px 24px rgba(0, 0, 0, 0.38),
+    0 0 22px rgba(56, 182, 255, 0.45),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+  filter: brightness(1.04);
+}
+
+.auth-telegram-icon {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+  flex: 0 0 auto;
+}
+
+.auth-page .auth-telegram-button {
+  font-size: 14px;
+  padding: 14px 18px;
+}
+
+.app.mobile .auth-page .auth-telegram-button {
+  width: 100%;
+  padding: 12px 14px;
+}
 
 .auth-stats {
   display: grid;

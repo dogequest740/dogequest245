@@ -6950,6 +6950,13 @@ function App() {
                 <span className="auth-wallet-label">Login with Solana wallet</span>
                 <div className="auth-cta-row">
                   <WalletModalButton className="wallet-button auth-wallet" />
+                  <a className="auth-telegram-button" href="https://t.me/dogemmorpgbot" target="_blank" rel="noreferrer">
+                    <svg className="auth-telegram-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path d="M2.5 11.2L20.8 3.3c.7-.3 1.4.4 1.1 1.1L14 22.7c-.3.7-1.2.7-1.5 0l-2.1-5.3-5.3-2.1c-.7-.3-.7-1.2 0-1.5z" />
+                      <path d="M10.6 17.4l1.3-3.9 5.6-5.6-7 4.4-3.9-1.3 11.5-5-7.5 11.4z" />
+                    </svg>
+                    <span>Play in Telegram</span>
+                  </a>
                 </div>
                 <span className="auth-note">Connect your Solana wallet to continue. We only read your public address.</span>
               </div>
