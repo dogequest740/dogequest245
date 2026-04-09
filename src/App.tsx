@@ -5484,10 +5484,11 @@ function App() {
   useEffect(() => {
     if (stage !== 'game') return
     void loadFortuneStatus(false, true)
+    if (usingTelegramAuth) return
     if (fortuneAutoOpenRef.current) return
     fortuneAutoOpenRef.current = true
     setActivePanel('fortune')
-  }, [stage, accountIdentity])
+  }, [stage, accountIdentity, usingTelegramAuth])
 
   useEffect(() => {
     return () => {
@@ -6904,6 +6905,7 @@ function App() {
         <section className="auth-page tg-auth-page">
           <div className="auth-hero">
             <div className="auth-hero-copy reveal">
+              <div className="tg-auth-loader" aria-hidden />
               <h1 className="auth-title">DOGE QUEST</h1>
               <p className="auth-lead">Connecting your Telegram session...</p>
               <p className="auth-note">If login did not complete, tap retry.</p>
