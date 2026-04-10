@@ -1965,7 +1965,9 @@ const validateStateTransition = (
   const maxCrystalGain = dungeonDelta * maxCrystalPerDungeonRun + stakeAllowance;
   if (crystalGain > maxCrystalGain) return "Suspicious crystal gain detected.";
 
-  const maxGoldGain = Math.floor(safeElapsed / 60) * 15000 + killsDelta * 150 + dungeonDelta * 20000 + 100000;
+  // Gold in profile_save should mostly come from battle kills and modest item sells between autosaves.
+  // Large grants (shop, quests, premium, village, referrals, fortune, world boss) are server-side actions.
+  const maxGoldGain = Math.floor(safeElapsed / 60) * 15000 + killsDelta * 150 + dungeonDelta * 20000 + 4000;
   if (goldDelta > maxGoldGain) return "Suspicious gold gain detected.";
 
   const prevKeyItems = countConsumablesByType(prevState, "key");
