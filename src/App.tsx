@@ -147,7 +147,7 @@ const LANDING_BANNERS = [
 const EDGE_BASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || ''
 const EDGE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() || ''
 const TELEGRAM_BOT_USERNAME = String(import.meta.env.VITE_TELEGRAM_BOT_USERNAME ?? 'dogemmorpgbot').trim().replace(/^@+/, '')
-const SEASON_SNAPSHOT_MIN_CRYSTALS = 700
+const SEASON_SNAPSHOT_MIN_CRYSTALS = 1000
 const REFERRAL_CONTEST_FALLBACK: ReferralContestInfo = {
   id: 'referral-rush-2026-04-10',
   name: 'Referral Rush',
@@ -1184,7 +1184,7 @@ const DUNGEONS = DUNGEON_REQUIREMENTS.map((tierScore, index) => ({
 }))
 
 const WORLD_BOSS_DURATION = 12 * 60 * 60
-const WORLD_BOSS_REWARD = 500
+const WORLD_BOSS_REWARD = 1000
 const STAKE_BONUS = 0.05
 const STAKE_MIN = 50
 const STAKE_LOCK_HOURS = 24
@@ -1196,12 +1196,12 @@ const GOLD_PACKAGES_SOL = [
   { id: 'gold-1200k', gold: 1200000, sol: 0.63, image: gold1200kImage },
 ] as const
 const GOLD_PACKAGES_STARS: Record<(typeof GOLD_PACKAGES_SOL)[number]['id'], number> = {
-  'gold-50k': 180,
-  'gold-100k': 350,
-  'gold-500k': 1400,
-  'gold-1200k': 2200,
+  'gold-50k': 140,
+  'gold-100k': 260,
+  'gold-500k': 1050,
+  'gold-1200k': 1650,
 }
-const STARTER_PACK_PRICE_STARS = 900
+const STARTER_PACK_PRICE_STARS = 500
 const STARTER_PACK_PRICE = 0.25
 const STARTER_PACK_GOLD = 300000
 const STARTER_PACK_WORLD_BOSS_TICKETS = 5
@@ -1220,8 +1220,8 @@ const PREMIUM_SALE_END_MS = Date.parse('2026-03-02T00:00:00Z')
 const PREMIUM_SALE_DISCOUNT_RATE = 0.5
 type PremiumPlanId = (typeof PREMIUM_PLANS)[number]['id']
 const PREMIUM_PLAN_PRICES_STARS: Record<PremiumPlanId, number> = {
-  'premium-30': 1100,
-  'premium-90': 2500,
+  'premium-30': 749,
+  'premium-90': 1700,
 }
 const PREMIUM_DAILY_KEYS = 5
 const PREMIUM_DAILY_GOLD = 50000
@@ -1230,7 +1230,7 @@ const PREMIUM_DAILY_BIG_POTIONS = 3
 const PREMIUM_XP_MULTIPLIER = 1.5
 const PREMIUM_DUNGEON_CRYSTAL_MULTIPLIER = 1.5
 const REFERRAL_LEVEL_TARGET = 15
-const REFERRAL_KEY_BONUS = 3
+const REFERRAL_KEY_BONUS = 7
 const REFERRAL_CRYSTAL_RATE = 0.05
 const FORTUNE_SPIN_PRICES = {
   1: 0.007,
@@ -1239,8 +1239,8 @@ const FORTUNE_SPIN_PRICES = {
 const FORTUNE_SPIN_PACKS_SOL = [1, 10] as const
 type FortunePackId = keyof typeof FORTUNE_SPIN_PRICES
 const FORTUNE_SPIN_PRICES_STARS: Record<FortunePackId, number> = {
-  1: 25,
-  10: 200,
+  1: 20,
+  10: 150,
 }
 const FORTUNE_REWARDS: FortuneReward[] = [
   { id: 'energy_tonic', label: 'Energy Tonic', kind: 'consumable', consumableType: 'energy-small', amount: 1, chance: 22 },
@@ -10429,6 +10429,7 @@ function App() {
   )
 }
 export default App
+
 
 
 

@@ -6,7 +6,7 @@ const MAX_LEVEL = 255;
 const MAX_TICKETS = 30;
 const DUNGEON_DAILY_TICKETS = 5;
 const WORLD_BOSS_DURATION_SECONDS = 12 * 60 * 60;
-const WORLD_BOSS_PRIZE_POOL = 500;
+const WORLD_BOSS_PRIZE_POOL = 1000;
 const WORLD_BOSS_DAMAGE_PER_SEC_CAP = 5000;
 const WORLD_BOSS_TICKET_COST_GOLD = 18000;
 const WORLD_BOSS_PREMIUM_DAILY_TICKETS = 2;
@@ -15,8 +15,21 @@ const SHOP_DUNGEON_KEY_COST_GOLD = 50000;
 const SHOP_DUNGEON_KEY_DAILY_LIMIT = 10;
 const SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT = 2;
 const REFERRAL_LEVEL_TARGET = 15;
-const REFERRAL_KEY_BONUS = 3;
+const REFERRAL_KEY_BONUS = 7;
 const REFERRAL_CRYSTAL_RATE = 0.05;
+const REFERRAL_CONTEST_ID = "referral-rush-2026-04-10";
+const REFERRAL_CONTEST_NAME = "Referral Rush";
+const REFERRAL_CONTEST_START_AT = "2026-04-09T21:00:00.000Z";
+const REFERRAL_CONTEST_END_AT = "2026-05-05T20:59:59.999Z";
+const REFERRAL_CONTEST_REVIEW_DELAY_SECONDS = 12 * 60 * 60;
+const REFERRAL_CONTEST_LEVEL_TARGET = 10;
+const REFERRAL_CONTEST_BASE_POINTS = 5;
+const REFERRAL_CONTEST_PREMIUM_POINTS = 100;
+const REFERRAL_CONTEST_PRIZE_FIRST = 3000;
+const REFERRAL_CONTEST_PRIZE_SECOND = 2000;
+const REFERRAL_CONTEST_PRIZE_THIRD = 1000;
+const REFERRAL_CONTEST_LEADERBOARD_DEFAULT_LIMIT = 20;
+const REFERRAL_CONTEST_LEADERBOARD_MAX_LIMIT = 100;
 const CRYSTAL_TASK_REFERRAL_LEVEL_MIN = 5;
 const CRYSTAL_TASK_AD_COOLDOWN_SECONDS = 15 * 60;
 const CRYSTAL_TASK_CHANNEL_REWARD = 20;
@@ -66,26 +79,26 @@ const FORTUNE_SPIN_PRICES_LAMPORTS: Record<(typeof FORTUNE_SPIN_PACKS_SOL)[numbe
   1: Math.round(0.007 * SOL_LAMPORTS),
   10: Math.round(0.06 * SOL_LAMPORTS),
 };
-const MIN_SEASON_SNAPSHOT_CRYSTALS = 700;
+const MIN_SEASON_SNAPSHOT_CRYSTALS = 1000;
 const ENERGY_REGEN_SECONDS = 420;
 const PREMIUM_PLANS = [
   { id: "premium-30", days: 30, lamports: Math.round(0.3 * SOL_LAMPORTS) },
   { id: "premium-90", days: 90, lamports: Math.round(0.7 * SOL_LAMPORTS) },
 ] as const;
-const TELEGRAM_STARS_STARTER_PACK = 900;
+const TELEGRAM_STARS_STARTER_PACK = 500;
 const TELEGRAM_STARS_GOLD_PACKS: Record<(typeof GOLD_PACKS_SOL)[number]["id"], number> = {
-  "gold-50k": 180,
-  "gold-100k": 350,
-  "gold-500k": 1400,
-  "gold-1200k": 2200,
+  "gold-50k": 140,
+  "gold-100k": 260,
+  "gold-500k": 1050,
+  "gold-1200k": 1650,
 };
 const TELEGRAM_STARS_PREMIUM_PLANS: Record<(typeof PREMIUM_PLANS)[number]["id"], number> = {
-  "premium-30": 1100,
-  "premium-90": 2500,
+  "premium-30": 749,
+  "premium-90": 1700,
 };
 const TELEGRAM_STARS_FORTUNE_PACKS: Record<(typeof FORTUNE_SPIN_PACKS_SOL)[number], number> = {
-  1: 25,
-  10: 200,
+  1: 20,
+  10: 150,
 };
 const TELEGRAM_STARS_PENDING_REUSE_MS = 20 * 60 * 1000;
 const TELEGRAM_STARS_ORDER_STATUSES = [
@@ -306,6 +319,42 @@ type ReferralRow = {
   crystals_earned: number;
   created_at: string;
   updated_at?: string;
+};
+
+type ReferralContestStatus = "upcoming" | "active" | "review" | "closed";
+
+type ReferralContestInfoRow = {
+  id: string;
+  name: string;
+  status: ReferralContestStatus;
+  startAt: string;
+  endAt: string;
+  reviewEndsAt: string;
+  remainingSec: number;
+  levelTarget: number;
+  basePoints: number;
+  premiumPoints: number;
+  prizes: {
+    first: number;
+    second: number;
+    third: number;
+  };
+};
+
+type ReferralContestReferralRow = {
+  referrer_wallet: string;
+  referee_wallet: string;
+  created_at: string;
+};
+
+type ReferralContestLeaderboardRow = {
+  rank: number;
+  wallet: string;
+  name: string;
+  points: number;
+  qualifiedReferrals: number;
+  premiumReferrals: number;
+  lastQualifiedAt: string;
 };
 
 type SeasonRow = {
@@ -2748,6 +2797,20 @@ const ensureWorldBossCycle = async (
 
   const existingRow = existing as WorldBossRow;
   if (new Date(existingRow.cycle_end).getTime() > now.getTime()) {
+    if (Math.max(0, asInt(existingRow.prize_pool, 0)) !== WORLD_BOSS_PRIZE_POOL) {
+      const { data: patched } = await supabase
+        .from("world_boss")
+        .update({
+          prize_pool: WORLD_BOSS_PRIZE_POOL,
+          updated_at: now.toISOString(),
+        })
+        .eq("id", 1)
+        .eq("cycle_start", existingRow.cycle_start)
+        .eq("cycle_end", existingRow.cycle_end)
+        .select("id, cycle_start, cycle_end, prize_pool, last_cycle_start, last_cycle_end, last_prize_pool, updated_at")
+        .maybeSingle();
+      if (patched) return patched as WorldBossRow;
+    }
     return existingRow;
   }
 
@@ -3115,6 +3178,239 @@ const getQualifiedReferralCount = async (
     return level >= levelTarget ? sum + 1 : sum;
   }, 0);
   return { ok: true as const, count };
+};
+
+const getReferralContestStatus = (nowMs: number): ReferralContestStatus => {
+  const startMs = Date.parse(REFERRAL_CONTEST_START_AT);
+  const endMs = Date.parse(REFERRAL_CONTEST_END_AT);
+  const reviewEndsMs = endMs + (REFERRAL_CONTEST_REVIEW_DELAY_SECONDS * 1000);
+  if (nowMs < startMs) return "upcoming";
+  if (nowMs <= endMs) return "active";
+  if (nowMs <= reviewEndsMs) return "review";
+  return "closed";
+};
+
+const getReferralContestRemainingSec = (status: ReferralContestStatus, nowMs: number) => {
+  const startMs = Date.parse(REFERRAL_CONTEST_START_AT);
+  const endMs = Date.parse(REFERRAL_CONTEST_END_AT);
+  const reviewEndsMs = endMs + (REFERRAL_CONTEST_REVIEW_DELAY_SECONDS * 1000);
+  if (status === "upcoming") return Math.max(0, Math.ceil((startMs - nowMs) / 1000));
+  if (status === "active") return Math.max(0, Math.ceil((endMs - nowMs) / 1000));
+  if (status === "review") return Math.max(0, Math.ceil((reviewEndsMs - nowMs) / 1000));
+  return 0;
+};
+
+const shortContestWallet = (wallet: string) =>
+  wallet.length > 12 ? wallet.slice(0, 4) + "..." + wallet.slice(-4) : wallet;
+
+const loadProfileStatesByWallet = async (
+  supabase: ReturnType<typeof createClient>,
+  wallets: string[],
+) => {
+  const uniqueWallets = [...new Set(wallets.map((entry) => String(entry ?? "").trim()).filter(Boolean))];
+  const states = new Map<string, ReturnType<typeof normalizeState>>();
+  if (!uniqueWallets.length) return { ok: true as const, states };
+
+  const chunkSize = 250;
+  for (let offset = 0; offset < uniqueWallets.length; offset += chunkSize) {
+    const chunk = uniqueWallets.slice(offset, offset + chunkSize);
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("wallet, state")
+      .in("wallet", chunk);
+
+    if (error) return { ok: false as const, error: "Failed to load referral contest profiles." };
+
+    for (const row of data ?? []) {
+      const wallet = String((row as Record<string, unknown>).wallet ?? "").trim();
+      if (!wallet) continue;
+      const state = normalizeState((row as Record<string, unknown>).state ?? null);
+      states.set(wallet, state);
+    }
+  }
+
+  return { ok: true as const, states };
+};
+
+const loadBlockedWalletSet = async (
+  supabase: ReturnType<typeof createClient>,
+  wallets: string[],
+) => {
+  const uniqueWallets = [...new Set(wallets.map((entry) => String(entry ?? "").trim()).filter(Boolean))];
+  const blocked = new Set<string>();
+  if (!uniqueWallets.length) return { ok: true as const, blocked };
+
+  const chunkSize = 500;
+  for (let offset = 0; offset < uniqueWallets.length; offset += chunkSize) {
+    const chunk = uniqueWallets.slice(offset, offset + chunkSize);
+    const { data, error } = await supabase
+      .from("blocked_wallets")
+      .select("wallet")
+      .in("wallet", chunk);
+
+    if (error) return { ok: false as const, error: "Failed to load blocked wallets for referral contest." };
+
+    for (const row of data ?? []) {
+      const wallet = String((row as Record<string, unknown>).wallet ?? "").trim();
+      if (wallet) blocked.add(wallet);
+    }
+  }
+
+  return { ok: true as const, blocked };
+};
+
+const loadReferralContestRows = async (
+  supabase: ReturnType<typeof createClient>,
+) => {
+  const rows: ReferralContestReferralRow[] = [];
+  const pageSize = 1000;
+  for (let offset = 0; offset < 100000; offset += pageSize) {
+    const { data, error } = await supabase
+      .from("referrals")
+      .select("referrer_wallet, referee_wallet, created_at")
+      .gte("created_at", REFERRAL_CONTEST_START_AT)
+      .lte("created_at", REFERRAL_CONTEST_END_AT)
+      .order("created_at", { ascending: true })
+      .range(offset, offset + pageSize - 1);
+
+    if (error) return { ok: false as const, error: "Failed to load referral contest data." };
+
+    const batch = (data as ReferralContestReferralRow[] | null) ?? [];
+    rows.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+
+  return { ok: true as const, rows };
+};
+
+const buildReferralContestSnapshot = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  nowMs: number,
+  limitRaw: unknown,
+) => {
+  const status = getReferralContestStatus(nowMs);
+  const safeLimit = clampInt(limitRaw, 1, REFERRAL_CONTEST_LEADERBOARD_MAX_LIMIT);
+  const startMs = Date.parse(REFERRAL_CONTEST_START_AT);
+  const endMs = Date.parse(REFERRAL_CONTEST_END_AT);
+  const reviewEndsMs = endMs + (REFERRAL_CONTEST_REVIEW_DELAY_SECONDS * 1000);
+
+  const contest: ReferralContestInfoRow = {
+    id: REFERRAL_CONTEST_ID,
+    name: REFERRAL_CONTEST_NAME,
+    status,
+    startAt: new Date(startMs).toISOString(),
+    endAt: new Date(endMs).toISOString(),
+    reviewEndsAt: new Date(reviewEndsMs).toISOString(),
+    remainingSec: getReferralContestRemainingSec(status, nowMs),
+    levelTarget: REFERRAL_CONTEST_LEVEL_TARGET,
+    basePoints: REFERRAL_CONTEST_BASE_POINTS,
+    premiumPoints: REFERRAL_CONTEST_PREMIUM_POINTS,
+    prizes: {
+      first: REFERRAL_CONTEST_PRIZE_FIRST,
+      second: REFERRAL_CONTEST_PRIZE_SECOND,
+      third: REFERRAL_CONTEST_PRIZE_THIRD,
+    },
+  };
+
+  const referralRowsResult = await loadReferralContestRows(supabase);
+  if (!referralRowsResult.ok) return referralRowsResult;
+
+  const referralRows = referralRowsResult.rows;
+  if (!referralRows.length) {
+    return { ok: true as const, contest, leaderboard: [] as ReferralContestLeaderboardRow[], player: null, totalParticipants: 0 };
+  }
+
+  const allWallets = referralRows.flatMap((row) => [String(row.referrer_wallet ?? ""), String(row.referee_wallet ?? "")]);
+  const blockedResult = await loadBlockedWalletSet(supabase, allWallets);
+  if (!blockedResult.ok) return blockedResult;
+
+  const profileResult = await loadProfileStatesByWallet(supabase, allWallets);
+  if (!profileResult.ok) return profileResult;
+
+  const scoreByReferrer = new Map<string, {
+    wallet: string;
+    name: string;
+    points: number;
+    qualifiedReferrals: number;
+    premiumReferrals: number;
+    lastQualifiedAtMs: number;
+  }>();
+
+  const evaluationMs = status === "active" ? nowMs : Math.min(nowMs, endMs);
+
+  for (const row of referralRows) {
+    const referrerWallet = String(row.referrer_wallet ?? "").trim();
+    const refereeWallet = String(row.referee_wallet ?? "").trim();
+    if (!referrerWallet || !refereeWallet) continue;
+    if (blockedResult.blocked.has(referrerWallet) || blockedResult.blocked.has(refereeWallet)) continue;
+
+    const refereeState = profileResult.states.get(refereeWallet) ?? null;
+    const refereePlayer = refereeState?.player && typeof refereeState.player === "object"
+      ? refereeState.player as Record<string, unknown>
+      : null;
+    const level = Math.max(1, asInt(refereePlayer?.level ?? 1, 1));
+    if (level < REFERRAL_CONTEST_LEVEL_TARGET) continue;
+
+    const premiumEndsAt = Math.max(0, asInt(refereeState?.premiumEndsAt ?? 0, 0));
+    const isPremium = premiumEndsAt > evaluationMs;
+    const points = isPremium ? REFERRAL_CONTEST_PREMIUM_POINTS : REFERRAL_CONTEST_BASE_POINTS;
+
+    const referrerState = profileResult.states.get(referrerWallet) ?? null;
+    const referrerPlayer = referrerState?.player && typeof referrerState.player === "object"
+      ? referrerState.player as Record<string, unknown>
+      : null;
+    const referrerName = sanitizeName(String(referrerPlayer?.name ?? "").trim()) || shortContestWallet(referrerWallet);
+
+    const current = scoreByReferrer.get(referrerWallet) ?? {
+      wallet: referrerWallet,
+      name: referrerName,
+      points: 0,
+      qualifiedReferrals: 0,
+      premiumReferrals: 0,
+      lastQualifiedAtMs: 0,
+    };
+
+    current.points += points;
+    current.qualifiedReferrals += 1;
+    if (isPremium) current.premiumReferrals += 1;
+
+    const qualifiedAtMs = new Date(String(row.created_at ?? "")).getTime();
+    if (Number.isFinite(qualifiedAtMs) && qualifiedAtMs > current.lastQualifiedAtMs) {
+      current.lastQualifiedAtMs = qualifiedAtMs;
+    }
+
+    scoreByReferrer.set(referrerWallet, current);
+  }
+
+  const ranked = [...scoreByReferrer.values()]
+    .sort((a, b) =>
+      (b.points - a.points) ||
+      (b.qualifiedReferrals - a.qualifiedReferrals) ||
+      (b.premiumReferrals - a.premiumReferrals) ||
+      ((a.lastQualifiedAtMs || Number.MAX_SAFE_INTEGER) - (b.lastQualifiedAtMs || Number.MAX_SAFE_INTEGER)) ||
+      a.wallet.localeCompare(b.wallet)
+    )
+    .map((row, index) => ({
+      rank: index + 1,
+      wallet: row.wallet,
+      name: row.name,
+      points: row.points,
+      qualifiedReferrals: row.qualifiedReferrals,
+      premiumReferrals: row.premiumReferrals,
+      lastQualifiedAt: row.lastQualifiedAtMs > 0 ? new Date(row.lastQualifiedAtMs).toISOString() : "",
+    }));
+
+  const leaderboard = ranked.slice(0, safeLimit);
+  const player = ranked.find((entry) => entry.wallet === wallet) ?? null;
+
+  return {
+    ok: true as const,
+    contest,
+    leaderboard,
+    player,
+    totalParticipants: ranked.length,
+  };
 };
 
 const loadCrystalTaskProgress = async (
@@ -4342,6 +4638,8 @@ serve(async (req) => {
   if (action === "referrals_status") {
     const nowIso = now.toISOString();
     const applyReferrer = String(body.applyReferrer ?? "").trim();
+    const includeContest = Boolean(body.includeContest ?? false);
+    const contestLimit = clampInt(body.contestLimit, 1, REFERRAL_CONTEST_LEADERBOARD_MAX_LIMIT);
     let referralApplied = false;
 
     if (
@@ -4385,12 +4683,36 @@ serve(async (req) => {
       return json({ ok: false, error: "Failed to load referrals." });
     }
 
+    if (!includeContest) {
+      return json({
+        ok: true,
+        referralApplied,
+        referralEntries: summary.entries,
+        referralPendingKeys: summary.pendingKeys,
+        referralPendingCrystals: summary.pendingCrystals,
+      });
+    }
+
+    const contest = await buildReferralContestSnapshot(
+      supabase,
+      auth.wallet,
+      now.getTime(),
+      Number.isFinite(contestLimit) ? contestLimit : REFERRAL_CONTEST_LEADERBOARD_DEFAULT_LIMIT,
+    );
+    if (!contest.ok) {
+      return json({ ok: false, error: contest.error });
+    }
+
     return json({
       ok: true,
       referralApplied,
       referralEntries: summary.entries,
       referralPendingKeys: summary.pendingKeys,
       referralPendingCrystals: summary.pendingCrystals,
+      referralContest: contest.contest,
+      referralContestLeaderboard: contest.leaderboard,
+      referralContestPlayer: contest.player,
+      referralContestTotalParticipants: contest.totalParticipants,
     });
   }
 
@@ -6252,3 +6574,5 @@ serve(async (req) => {
 
   return json({ ok: false, error: "Unknown action." });
 });
+
+
