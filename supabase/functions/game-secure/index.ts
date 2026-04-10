@@ -17,6 +17,17 @@ const SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT = 2;
 const REFERRAL_LEVEL_TARGET = 15;
 const REFERRAL_KEY_BONUS = 3;
 const REFERRAL_CRYSTAL_RATE = 0.05;
+const CRYSTAL_TASK_REFERRAL_LEVEL_MIN = 5;
+const CRYSTAL_TASK_AD_COOLDOWN_SECONDS = 60 * 60;
+const CRYSTAL_TASK_CHANNEL_REWARD = 20;
+const CRYSTAL_TASK_X_REWARD = 15;
+const CRYSTAL_TASK_AD_REWARD = 3;
+const CRYSTAL_TASK_REFERRALS5_REWARD = 100;
+const CRYSTAL_TASK_REFERRALS10_REWARD = 150;
+const TELEGRAM_CHANNEL_HANDLE = "doge_mmorpg";
+const TELEGRAM_CHANNEL_URL = "https://t.me/" + TELEGRAM_CHANNEL_HANDLE;
+const TWITTER_FOLLOW_URL = "https://x.com/Doge_mmorpg";
+const ADSGRAM_BLOCK_ID = "27346";
 const PREMIUM_MAX_FUTURE_DAYS = 180;
 const PREMIUM_MAX_EXTENSION_DAYS = 90;
 const STAKE_MIN_AMOUNT = 50;
@@ -207,6 +218,29 @@ type QuestDefinition = {
   target: number;
   rewardGold: number;
   rewardItem?: ConsumableType;
+};
+const CRYSTAL_TASK_IDS = ["join-channel", "follow-x", "watch-ad", "referrals-5", "referrals-10"] as const;
+type CrystalTaskId = (typeof CRYSTAL_TASK_IDS)[number];
+const CRYSTAL_TASK_REPEATABLE_IDS = new Set<CrystalTaskId>(["watch-ad"]);
+type CrystalTaskStateRow = {
+  claimed: boolean;
+  claimCount: number;
+  lastClaimAt: number;
+};
+type CrystalTaskStatusRow = {
+  id: CrystalTaskId;
+  title: string;
+  description: string;
+  rewardCrystals: number;
+  repeatable: boolean;
+  claimed: boolean;
+  claimCount: number;
+  progress: number;
+  target: number;
+  canClaim: boolean;
+  cooldownSec: number;
+  remainingSec: number;
+  actionUrl: string;
 };
 type EquipmentSlot = "weapon" | "armor" | "head" | "legs" | "boots" | "artifact";
 type EquipmentStatKey = "power" | "fortune" | "prosperity";
@@ -1271,6 +1305,7 @@ const createStarterProfileState = (seed: Record<string, unknown>, nowMs: number)
     equipment: Object.fromEntries(EQUIPMENT_SLOT_IDS.map((slot) => [slot, null])) as Record<EquipmentSlot, null>,
     consumables: [],
     questStates: {},
+    crystalTaskState: {},
     monsterKills: 0,
     dungeonRuns: 0,
     starterPackPurchased: false,
@@ -1680,6 +1715,31 @@ const normalizeQuestStates = (value: unknown) => {
   return result;
 };
 
+const normalizeCrystalTaskState = (value: unknown) => {
+  const source = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const result = {} as Record<CrystalTaskId, CrystalTaskStateRow>;
+  for (const taskId of CRYSTAL_TASK_IDS) {
+    const row = source[taskId];
+    if (row && typeof row === "object" && !Array.isArray(row)) {
+      const rowObject = row as Record<string, unknown>;
+      result[taskId] = {
+        claimed: Boolean(rowObject.claimed),
+        claimCount: Math.max(0, asInt(rowObject.claimCount, 0)),
+        lastClaimAt: Math.max(0, asInt(rowObject.lastClaimAt, 0)),
+      };
+    } else {
+      result[taskId] = {
+        claimed: false,
+        claimCount: 0,
+        lastClaimAt: 0,
+      };
+    }
+  }
+  return result;
+};
+
 const normalizeState = (raw: unknown) => {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return null;
@@ -1734,6 +1794,8 @@ const normalizeState = (raw: unknown) => {
   const normalizedConsumables = normalizeConsumables(state.consumables);
   state.consumables = normalizedConsumables.rows;
   state.consumableId = Math.max(asInt(state.consumableId, 0), normalizedConsumables.maxId);
+  state.questStates = normalizeQuestStates(state.questStates);
+  state.crystalTaskState = normalizeCrystalTaskState(state.crystalTaskState);
   const stakeId = Math.max(0, asInt(state.stakeId, 0));
   const stakes = normalizeStakes(state.stake, stakeId || 1);
   const maxStakeId = stakes.reduce((max, entry) => Math.max(max, entry.id), stakeId);
@@ -3063,6 +3125,177 @@ const getReferrerSummary = async (supabase: ReturnType<typeof createClient>, wal
   return { ok: true as const, entries, pendingKeys, pendingCrystals };
 };
 
+
+const getQualifiedReferralCount = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  levelTarget: number,
+) => {
+  const summary = await getReferrerSummary(supabase, wallet);
+  if (!summary.ok) {
+    return { ok: false as const, error: "Failed to load referrals." };
+  }
+  const count = summary.entries.reduce((sum, entry) => {
+    const level = Math.max(1, asInt((entry as Record<string, unknown>).level, 1));
+    return level >= levelTarget ? sum + 1 : sum;
+  }, 0);
+  return { ok: true as const, count };
+};
+
+const getTelegramUserIdFromIdentity = (wallet: string) => {
+  if (!wallet.startsWith("tg:")) return 0;
+  const raw = wallet.slice(3).trim();
+  if (!/^\d+$/.test(raw)) return 0;
+  return Math.max(0, asInt(raw, 0));
+};
+
+const isTelegramChannelMember = async (telegramUserId: number) => {
+  const botToken = String(Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "").trim();
+  if (!botToken) return { ok: false as const, error: "Telegram integration is not configured." };
+  if (telegramUserId <= 0) return { ok: false as const, error: "Telegram user is not linked." };
+
+  const url = "https://api.telegram.org/bot" + botToken + "/getChatMember";
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        chat_id: "@" + TELEGRAM_CHANNEL_HANDLE,
+        user_id: telegramUserId,
+      }),
+    });
+    const payload = await response.json() as {
+      ok?: boolean;
+      result?: { status?: string };
+      description?: string;
+    };
+    if (!response.ok || !payload.ok) {
+      return { ok: false as const, error: payload.description || "Failed to verify Telegram subscription." };
+    }
+    const status = String(payload.result?.status ?? "").toLowerCase();
+    const isMember = status === "creator" || status === "administrator" || status === "member" || status === "restricted";
+    return { ok: true as const, isMember };
+  } catch {
+    return { ok: false as const, error: "Failed to verify Telegram subscription." };
+  }
+};
+
+const getCrystalTaskReward = (taskId: CrystalTaskId) => {
+  switch (taskId) {
+    case "join-channel":
+      return CRYSTAL_TASK_CHANNEL_REWARD;
+    case "follow-x":
+      return CRYSTAL_TASK_X_REWARD;
+    case "watch-ad":
+      return CRYSTAL_TASK_AD_REWARD;
+    case "referrals-5":
+      return CRYSTAL_TASK_REFERRALS5_REWARD;
+    case "referrals-10":
+      return CRYSTAL_TASK_REFERRALS10_REWARD;
+    default:
+      return 0;
+  }
+};
+
+const buildCrystalTaskStatuses = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  state: Record<string, unknown>,
+  nowMs: number,
+) => {
+  const rows = normalizeCrystalTaskState(state.crystalTaskState);
+  const qualifiedReferrals = await getQualifiedReferralCount(supabase, wallet, CRYSTAL_TASK_REFERRAL_LEVEL_MIN);
+  if (!qualifiedReferrals.ok) {
+    return { ok: false as const, error: qualifiedReferrals.error };
+  }
+
+  const referralCount = qualifiedReferrals.count;
+  const adNextAt = rows["watch-ad"].lastClaimAt + (CRYSTAL_TASK_AD_COOLDOWN_SECONDS * 1000);
+  const adRemainingSec = rows["watch-ad"].lastClaimAt > 0
+    ? Math.max(0, Math.ceil((adNextAt - nowMs) / 1000))
+    : 0;
+
+  const tasks: CrystalTaskStatusRow[] = [
+    {
+      id: "join-channel",
+      title: "Join Telegram channel",
+      description: "Subscribe to the official Doge Quest Telegram channel.",
+      rewardCrystals: CRYSTAL_TASK_CHANNEL_REWARD,
+      repeatable: false,
+      claimed: rows["join-channel"].claimed,
+      claimCount: rows["join-channel"].claimCount,
+      progress: rows["join-channel"].claimed ? 1 : 0,
+      target: 1,
+      canClaim: !rows["join-channel"].claimed && getTelegramUserIdFromIdentity(wallet) > 0,
+      cooldownSec: 0,
+      remainingSec: 0,
+      actionUrl: TELEGRAM_CHANNEL_URL,
+    },
+    {
+      id: "follow-x",
+      title: "Follow on X",
+      description: "Follow the official Doge Quest X account.",
+      rewardCrystals: CRYSTAL_TASK_X_REWARD,
+      repeatable: false,
+      claimed: rows["follow-x"].claimed,
+      claimCount: rows["follow-x"].claimCount,
+      progress: rows["follow-x"].claimed ? 1 : 0,
+      target: 1,
+      canClaim: !rows["follow-x"].claimed,
+      cooldownSec: 0,
+      remainingSec: 0,
+      actionUrl: TWITTER_FOLLOW_URL,
+    },
+    {
+      id: "watch-ad",
+      title: "Watch ad",
+      description: "Watch one rewarded ad and claim crystals.",
+      rewardCrystals: CRYSTAL_TASK_AD_REWARD,
+      repeatable: true,
+      claimed: false,
+      claimCount: rows["watch-ad"].claimCount,
+      progress: adRemainingSec > 0 ? 0 : 1,
+      target: 1,
+      canClaim: adRemainingSec <= 0,
+      cooldownSec: CRYSTAL_TASK_AD_COOLDOWN_SECONDS,
+      remainingSec: adRemainingSec,
+      actionUrl: ADSGRAM_BLOCK_ID,
+    },
+    {
+      id: "referrals-5",
+      title: "Invite 5 referrals",
+      description: "Invite 5 friends who reached level 5 or higher.",
+      rewardCrystals: CRYSTAL_TASK_REFERRALS5_REWARD,
+      repeatable: false,
+      claimed: rows["referrals-5"].claimed,
+      claimCount: rows["referrals-5"].claimCount,
+      progress: Math.min(5, referralCount),
+      target: 5,
+      canClaim: !rows["referrals-5"].claimed && referralCount >= 5,
+      cooldownSec: 0,
+      remainingSec: 0,
+      actionUrl: "",
+    },
+    {
+      id: "referrals-10",
+      title: "Invite 10 referrals",
+      description: "Invite 10 friends who reached level 5 or higher.",
+      rewardCrystals: CRYSTAL_TASK_REFERRALS10_REWARD,
+      repeatable: false,
+      claimed: rows["referrals-10"].claimed,
+      claimCount: rows["referrals-10"].claimCount,
+      progress: Math.min(10, referralCount),
+      target: 10,
+      canClaim: !rows["referrals-10"].claimed && referralCount >= 10,
+      cooldownSec: 0,
+      remainingSec: 0,
+      actionUrl: "",
+    },
+  ];
+
+  return { ok: true as const, tasks };
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -3316,6 +3549,8 @@ serve(async (req) => {
       // Village writes are server-authoritative and must never be accepted from client profile_save.
       normalizedState.village = normalizeVillageState(prevState.village, now.getTime());
       normalizedState.payoutWallet = sanitizePayoutWallet(prevState.payoutWallet);
+      normalizedState.questStates = normalizeQuestStates(prevState.questStates);
+      normalizedState.crystalTaskState = normalizeCrystalTaskState(prevState.crystalTaskState);
 
       const prevEnergy = clampInt(prevState.energy, 0, Math.max(1, asInt(prevState.energyMax, ENERGY_MAX)));
       const prevTimer = clampInt(prevState.energyTimer, 1, ENERGY_REGEN_SECONDS);
@@ -5042,6 +5277,119 @@ serve(async (req) => {
       questStates: normalizeQuestStates(updated.state.questStates),
       bossMarkCycleStart: String(updated.state.bossMarkCycleStart ?? ""),
       crystalFlaskRuns: Math.max(0, asInt(updated.state.crystalFlaskRuns, 0)),
+    });
+  }
+
+  if (action === "crystal_tasks_status") {
+    const { data: profileRow, error: profileError } = await supabase
+      .from("profiles")
+      .select("state")
+      .eq("wallet", auth.wallet)
+      .maybeSingle();
+    if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+      return json({ ok: false, error: "Profile not found." });
+    }
+
+    const state = normalizeState(profileRow.state as unknown);
+    if (!state) return json({ ok: false, error: "Invalid profile state." });
+
+    const tasksResult = await buildCrystalTaskStatuses(supabase, auth.wallet, state, now.getTime());
+    if (!tasksResult.ok) return json({ ok: false, error: tasksResult.error });
+
+    return json({
+      ok: true,
+      crystalTasks: tasksResult.tasks,
+      adBlockId: ADSGRAM_BLOCK_ID,
+      crystals: Math.max(0, asInt(state.crystals, 0)),
+      crystalsEarned: Math.max(0, asInt(state.crystalsEarned, 0)),
+    });
+  }
+
+  if (action === "crystal_task_claim") {
+    const taskIdRaw = String(body.taskId ?? "").trim();
+    const taskId = CRYSTAL_TASK_IDS.find((id) => id === taskIdRaw);
+    if (!taskId) return json({ ok: false, error: "Unknown crystal task." });
+
+    if (taskId === "join-channel") {
+      const telegramUserId = getTelegramUserIdFromIdentity(auth.wallet);
+      if (telegramUserId <= 0) {
+        return json({ ok: false, error: "Telegram login is required for this task." });
+      }
+      const membership = await isTelegramChannelMember(telegramUserId);
+      if (!membership.ok) {
+        return json({ ok: false, error: membership.error });
+      }
+      if (!membership.isMember) {
+        return json({ ok: false, error: "Subscribe to the Telegram channel first." });
+      }
+    }
+
+    let qualifiedReferralsCount = 0;
+    if (taskId === "referrals-5" || taskId === "referrals-10") {
+      const qualifiedReferrals = await getQualifiedReferralCount(supabase, auth.wallet, CRYSTAL_TASK_REFERRAL_LEVEL_MIN);
+      if (!qualifiedReferrals.ok) {
+        return json({ ok: false, error: qualifiedReferrals.error });
+      }
+      qualifiedReferralsCount = qualifiedReferrals.count;
+    }
+
+    const rewardCrystals = getCrystalTaskReward(taskId);
+    if (rewardCrystals <= 0) return json({ ok: false, error: "Invalid crystal task reward." });
+
+    const nowMs = now.getTime();
+    const updated = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
+      const taskState = normalizeCrystalTaskState(state.crystalTaskState);
+      const row = taskState[taskId];
+      const isRepeatable = CRYSTAL_TASK_REPEATABLE_IDS.has(taskId);
+
+      if (!isRepeatable && row.claimed) {
+        throw new Error("Task already claimed.");
+      }
+
+      if (taskId === "watch-ad") {
+        const nextAt = row.lastClaimAt + (CRYSTAL_TASK_AD_COOLDOWN_SECONDS * 1000);
+        if (row.lastClaimAt > 0 && nowMs < nextAt) {
+          const remaining = Math.max(1, Math.ceil((nextAt - nowMs) / 1000));
+          throw new Error("Ad task is on cooldown (" + remaining + "s).");
+        }
+      }
+
+      if (taskId === "referrals-5" && qualifiedReferralsCount < 5) {
+        throw new Error("Need 5 referrals with level 5+.");
+      }
+      if (taskId === "referrals-10" && qualifiedReferralsCount < 10) {
+        throw new Error("Need 10 referrals with level 5+.");
+      }
+
+      taskState[taskId] = {
+        claimed: isRepeatable ? false : true,
+        claimCount: Math.max(0, asInt(row.claimCount, 0)) + 1,
+        lastClaimAt: nowMs,
+      };
+      state.crystalTaskState = taskState;
+      state.crystals = Math.max(0, asInt(state.crystals, 0)) + rewardCrystals;
+      state.crystalsEarned = Math.max(0, asInt(state.crystalsEarned, 0)) + rewardCrystals;
+    });
+
+    if (!updated.ok || !updated.state) {
+      return json({ ok: false, error: updated.error || "Failed to claim crystal task." });
+    }
+
+    const tasksResult = await buildCrystalTaskStatuses(supabase, auth.wallet, updated.state, nowMs);
+    if (!tasksResult.ok) return json({ ok: false, error: tasksResult.error });
+
+    await auditEvent(supabase, auth.wallet, "crystal_task_claim", {
+      taskId,
+      rewardCrystals,
+    });
+
+    return json({
+      ok: true,
+      savedAt: typeof updated.updatedAt === "string" ? updated.updatedAt : undefined,
+      crystals: Math.max(0, asInt(updated.state.crystals, 0)),
+      crystalsEarned: Math.max(0, asInt(updated.state.crystalsEarned, 0)),
+      crystalTasks: tasksResult.tasks,
+      adBlockId: ADSGRAM_BLOCK_ID,
     });
   }
 

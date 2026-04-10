@@ -222,6 +222,39 @@ type QuestState = {
   claimed: boolean
 }
 
+type CrystalTaskId = 'join-channel' | 'follow-x' | 'watch-ad' | 'referrals-5' | 'referrals-10'
+
+type CrystalTaskStatus = {
+  id: CrystalTaskId
+  title: string
+  description: string
+  rewardCrystals: number
+  repeatable: boolean
+  claimed: boolean
+  claimCount: number
+  progress: number
+  target: number
+  canClaim: boolean
+  cooldownSec: number
+  remainingSec: number
+  actionUrl: string
+}
+
+type AdsgramShowResult = {
+  state?: string
+  status?: string
+  done?: boolean
+}
+
+type AdsgramUnit = {
+  show: () => Promise<AdsgramShowResult | void>
+}
+
+type AdsgramSdk = {
+  init: (options: { blockId: string; debug?: boolean }) => AdsgramUnit
+}
+
+
 type EquipmentItem = {
   id: number
   name: string
@@ -502,6 +535,8 @@ type GameSecureResponse = {
   premiumClaimDay?: string
   consumables?: Array<{ id?: number; type?: string }>
   questStates?: Record<string, QuestState>
+  crystalTasks?: CrystalTaskStatus[]
+  adBlockId?: string
   stakeId?: number
   stakeEntries?: Array<{ id?: number; amount?: number; endsAt?: number }>
   startedStake?: { id?: number; amount?: number; endsAt?: number }
@@ -2949,6 +2984,36 @@ const getQuestProgress = (state: GameState, quest: QuestDefinition) => {
   }
 }
 
+const normalizeCrystalTasksFromResponse = (value: unknown): CrystalTaskStatus[] => {
+  if (!Array.isArray(value)) return []
+  const rows = value
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null
+      const row = entry as Record<string, unknown>
+      const id = String(row.id ?? '').trim() as CrystalTaskId
+      if (!['join-channel', 'follow-x', 'watch-ad', 'referrals-5', 'referrals-10'].includes(id)) return null
+      return {
+        id,
+        title: String(row.title ?? '').trim(),
+        description: String(row.description ?? '').trim(),
+        rewardCrystals: Math.max(0, Math.floor(Number(row.rewardCrystals ?? 0))),
+        repeatable: Boolean(row.repeatable),
+        claimed: Boolean(row.claimed),
+        claimCount: Math.max(0, Math.floor(Number(row.claimCount ?? 0))),
+        progress: Math.max(0, Math.floor(Number(row.progress ?? 0))),
+        target: Math.max(1, Math.floor(Number(row.target ?? 1))),
+        canClaim: Boolean(row.canClaim),
+        cooldownSec: Math.max(0, Math.floor(Number(row.cooldownSec ?? 0))),
+        remainingSec: Math.max(0, Math.floor(Number(row.remainingSec ?? 0))),
+        actionUrl: String(row.actionUrl ?? '').trim(),
+      } satisfies CrystalTaskStatus
+    })
+    .filter((entry): entry is CrystalTaskStatus => Boolean(entry))
+
+  const order: CrystalTaskId[] = ['join-channel', 'follow-x', 'watch-ad', 'referrals-5', 'referrals-10']
+  return rows.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id))
+}
+
 const updateGame = (state: GameState, dt: number) => {
   const player = state.player
   state.time += dt
@@ -3504,6 +3569,11 @@ function App() {
   const [fortuneSpinResult, setFortuneSpinResult] = useState<FortuneReward | null>(null)
   const [fortuneSpinUsed, setFortuneSpinUsed] = useState<'free' | 'paid' | null>(null)
   const [questClaimLoadingId, setQuestClaimLoadingId] = useState<string | null>(null)
+  const [questPanelTab, setQuestPanelTab] = useState<'achievements' | 'crystals'>('achievements')
+  const [crystalTasks, setCrystalTasks] = useState<CrystalTaskStatus[]>([])
+  const [crystalTasksLoading, setCrystalTasksLoading] = useState(false)
+  const [crystalTasksError, setCrystalTasksError] = useState('')
+  const [crystalTaskClaimLoadingId, setCrystalTaskClaimLoadingId] = useState<CrystalTaskId | null>(null)
   const [hoveredPlayerStat, setHoveredPlayerStat] = useState<'power' | 'fortune' | 'prosperity' | null>(null)
   const [isMobile, setIsMobile] = useState(false)
   const [mobileGameTab, setMobileGameTab] = useState<MobileGameTab>('battle')
@@ -3522,6 +3592,7 @@ function App() {
   const referralProcessedRef = useRef(false)
   const fortuneAutoOpenRef = useRef(false)
   const fortuneSpinTimeoutRef = useRef<number | null>(null)
+  const adsgramLoadPromiseRef = useRef<Promise<AdsgramSdk | null> | null>(null)
   const dungeonRunBusyRef = useRef(false)
   const consumableBusyIdsRef = useRef<Set<number>>(new Set())
   const lastActiveAtRef = useRef<number>(Date.now())
@@ -5507,6 +5578,17 @@ function App() {
   }, [stage, activePanel, accountIdentity, usingTelegramAuth])
 
 
+  useEffect(() => {
+    if (activePanel !== 'quests') {
+      setQuestPanelTab('achievements')
+      setCrystalTasksError('')
+      return
+    }
+    if (!usingTelegramAuth) return
+    void loadCrystalTasks(false)
+  }, [activePanel, usingTelegramAuth, accountIdentity])
+
+
   const syncHud = () => {
     const state = gameStateRef.current
     if (!state) return
@@ -6577,6 +6659,150 @@ function App() {
       syncHud()
     } finally {
       setQuestClaimLoadingId(null)
+    }
+  }
+
+  const getAdsgramSdk = () => {
+    if (typeof window === 'undefined') return null
+    return (window as unknown as { Adsgram?: AdsgramSdk }).Adsgram ?? null
+  }
+
+  const ensureAdsgramSdk = async () => {
+    const existing = getAdsgramSdk()
+    if (existing) return existing
+
+    if (adsgramLoadPromiseRef.current) {
+      return await adsgramLoadPromiseRef.current
+    }
+
+    adsgramLoadPromiseRef.current = new Promise<AdsgramSdk | null>((resolve) => {
+      if (typeof document === 'undefined') {
+        resolve(null)
+        return
+      }
+
+      const onReady = () => resolve(getAdsgramSdk())
+      const existingScript = document.querySelector<HTMLScriptElement>('script[data-adsgram-sdk="1"]')
+      if (existingScript) {
+        if (getAdsgramSdk()) {
+          resolve(getAdsgramSdk())
+          return
+        }
+        existingScript.addEventListener('load', onReady, { once: true })
+        existingScript.addEventListener('error', () => resolve(null), { once: true })
+        return
+      }
+
+      const script = document.createElement('script')
+      script.src = 'https://sad.adsgram.ai/js/sad.min.js'
+      script.async = true
+      script.setAttribute('data-adsgram-sdk', '1')
+      script.addEventListener('load', onReady, { once: true })
+      script.addEventListener('error', () => resolve(null), { once: true })
+      document.head.appendChild(script)
+    })
+
+    const sdk = await adsgramLoadPromiseRef.current
+    if (!sdk) {
+      adsgramLoadPromiseRef.current = null
+    }
+    return sdk
+  }
+
+  const playAdsgramRewardedAd = async (blockId: string) => {
+    const sdk = await ensureAdsgramSdk()
+    if (!sdk) {
+      return { ok: false as const, error: 'Ads service is unavailable right now.' }
+    }
+
+    try {
+      const ad = sdk.init({ blockId })
+      const result = await ad.show()
+      const adState = String(result && typeof result === 'object' ? (result.state ?? result.status ?? '') : '').toLowerCase()
+      if (adState.includes('error') || adState.includes('skip') || adState.includes('cancel')) {
+        return { ok: false as const, error: 'Ad was not completed.' }
+      }
+      return { ok: true as const }
+    } catch (error) {
+      const errorText = error instanceof Error ? error.message : String(error)
+      return { ok: false as const, error: errorText || 'Ad was not completed.' }
+    }
+  }
+
+  const openCrystalTaskLink = (url: string) => {
+    const safeUrl = String(url ?? '').trim()
+    if (!safeUrl) return
+
+    if (usingTelegramAuth && telegramWebApp?.openTelegramLink) {
+      telegramWebApp.openTelegramLink(safeUrl)
+      return
+    }
+
+    window.open(safeUrl, '_blank', 'noopener,noreferrer')
+  }
+
+  const loadCrystalTasks = async (interactive = false) => {
+    if (!usingTelegramAuth) return false
+    setCrystalTasksLoading(true)
+    if (interactive) {
+      setCrystalTasksError('')
+    }
+
+    try {
+      const result = await callGameSecureAuthed('crystal_tasks_status', {}, interactive)
+      if (!result.ok) {
+        if (interactive) {
+          setCrystalTasksError(result.error || 'Failed to load crystal tasks.')
+        }
+        return false
+      }
+
+      setCrystalTasks(normalizeCrystalTasksFromResponse(result.crystalTasks))
+      setCrystalTasksError('')
+      return true
+    } finally {
+      setCrystalTasksLoading(false)
+    }
+  }
+
+  const claimCrystalTask = async (task: CrystalTaskStatus) => {
+    const state = gameStateRef.current
+    if (!state || crystalTaskClaimLoadingId) return
+
+    setCrystalTasksError('')
+    setCrystalTaskClaimLoadingId(task.id)
+    try {
+      if (task.id === 'watch-ad') {
+        const adBlockId = task.actionUrl || '27346'
+        const adResult = await playAdsgramRewardedAd(adBlockId)
+        if (!adResult.ok) {
+          setCrystalTasksError(adResult.error)
+          return
+        }
+      }
+
+      const result = await callGameSecureAuthed('crystal_task_claim', { taskId: task.id }, true)
+      if (!result.ok) {
+        setCrystalTasksError(result.error || 'Failed to claim task reward.')
+        return
+      }
+
+      if (typeof result.crystals === 'number') {
+        state.crystals = Math.max(0, Math.floor(result.crystals))
+      }
+      if (typeof result.crystalsEarned === 'number') {
+        state.crystalsEarned = Math.max(0, Math.floor(result.crystalsEarned))
+      }
+      if (result.crystalTasks) {
+        setCrystalTasks(normalizeCrystalTasksFromResponse(result.crystalTasks))
+      } else {
+        void loadCrystalTasks(false)
+      }
+
+      pushLog(state.eventLog, 'Task reward claimed: +' + String(task.rewardCrystals) + ' crystals.')
+      syncHud()
+    } finally {
+      setCrystalTaskClaimLoadingId(null)
     }
   }
 
@@ -9294,38 +9520,123 @@ function App() {
                 Close
               </button>
             </div>
-            <div className="quest-list">
-              {questEntries.map(({ quest, progress, claimed, completed, pct }) => {
-                return (
-                  <div key={quest.id} className={`quest-card ${completed ? 'ready' : ''} ${claimed ? 'claimed' : ''}`}>
-                    <div className="quest-title">{quest.title}</div>
-                    <div className="quest-desc">{quest.description}</div>
-                    <div className="quest-progress">
-                      {progress}/{quest.target}
-                    </div>
-                    <div className="quest-bar">
-                      <div className="quest-bar-fill" style={{ width: `${pct}%` }} />
-                    </div>
-                    <div className="quest-reward">
-                      <span className="reward-label">Reward</span>
-                      <span className="reward-chip gold">
-                        <img className="icon-img small" src={iconGold} alt="" />
-                        {quest.rewardGold}
-                      </span>
-                      {quest.rewardItem && (
-                        <span className="reward-chip item">
-                          <img className="icon-img small" src={CONSUMABLE_DEFS[quest.rewardItem].icon} alt="" />
-                          {questRewardItemName(quest.rewardItem)}
+            {usingTelegramAuth && (
+              <div className="quest-panel-tabs">
+                <button
+                  type="button"
+                  className={questPanelTab === 'achievements' ? 'active' : ''}
+                  onClick={() => setQuestPanelTab('achievements')}
+                >
+                  Ачивки
+                </button>
+                <button
+                  type="button"
+                  className={questPanelTab === 'crystals' ? 'active' : ''}
+                  onClick={() => {
+                    setQuestPanelTab('crystals')
+                    if (!crystalTasks.length) {
+                      void loadCrystalTasks(true)
+                    }
+                  }}
+                >
+                  Кристаллы
+                </button>
+              </div>
+            )}
+
+            {(!usingTelegramAuth || questPanelTab === 'achievements') && (
+              <div className="quest-list">
+                {questEntries.map(({ quest, progress, claimed, completed, pct }) => {
+                  return (
+                    <div key={quest.id} className={`quest-card ${completed ? 'ready' : ''} ${claimed ? 'claimed' : ''}`}>
+                      <div className="quest-title">{quest.title}</div>
+                      <div className="quest-desc">{quest.description}</div>
+                      <div className="quest-progress">
+                        {progress}/{quest.target}
+                      </div>
+                      <div className="quest-bar">
+                        <div className="quest-bar-fill" style={{ width: pct + '%' }} />
+                      </div>
+                      <div className="quest-reward">
+                        <span className="reward-label">Reward</span>
+                        <span className="reward-chip gold">
+                          <img className="icon-img small" src={iconGold} alt="" />
+                          {quest.rewardGold}
                         </span>
-                      )}
+                        {quest.rewardItem && (
+                          <span className="reward-chip item">
+                            <img className="icon-img small" src={CONSUMABLE_DEFS[quest.rewardItem].icon} alt="" />
+                            {questRewardItemName(quest.rewardItem)}
+                          </span>
+                        )}
+                      </div>
+                      <button type="button" disabled={!completed || claimed || questClaimLoadingId === quest.id} onClick={() => void claimQuest(quest)}>
+                        {claimed ? 'Claimed' : questClaimLoadingId === quest.id ? 'Claiming...' : completed ? 'Claim' : 'Incomplete'}
+                      </button>
                     </div>
-                    <button type="button" disabled={!completed || claimed || questClaimLoadingId === quest.id} onClick={() => void claimQuest(quest)}>
-                      {claimed ? 'Claimed' : questClaimLoadingId === quest.id ? 'Claiming...' : completed ? 'Claim' : 'Incomplete'}
-                    </button>
-                  </div>
-                )
-              })}
-            </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {usingTelegramAuth && questPanelTab === 'crystals' && (
+              <div className="quest-list crystal-task-list">
+                {crystalTasksError && <div className="quest-task-error">{crystalTasksError}</div>}
+                {crystalTasksLoading && <div className="quest-task-loading">Loading tasks...</div>}
+                {!crystalTasksLoading && crystalTasks.length === 0 && <div className="quest-task-loading">No tasks yet.</div>}
+                {crystalTasks.map((task) => {
+                  const taskReady = task.canClaim && task.remainingSec <= 0
+                  const isClaimedOneTime = !task.repeatable && task.claimed
+                  const isBusy = crystalTaskClaimLoadingId === task.id
+                  const claimDisabled = isBusy || isClaimedOneTime || !taskReady
+                  const claimLabel = isClaimedOneTime
+                    ? 'Claimed'
+                    : isBusy
+                      ? 'Claiming...'
+                      : task.id === 'watch-ad' && task.remainingSec > 0
+                        ? 'Ready in ' + formatLongTimer(task.remainingSec)
+                        : task.id === 'watch-ad'
+                          ? 'Watch & Claim'
+                          : taskReady
+                            ? 'Claim'
+                            : 'Incomplete'
+
+                  return (
+                    <div key={task.id} className={`quest-card ${taskReady ? 'ready' : ''} ${isClaimedOneTime ? 'claimed' : ''}`}>
+                      <div className="quest-title">{task.title}</div>
+                      <div className="quest-desc">{task.description}</div>
+                      <div className="quest-progress">
+                        {Math.min(task.progress, task.target)}/{task.target}
+                      </div>
+                      <div className="quest-bar">
+                        <div
+                          className="quest-bar-fill"
+                          style={{ width: Math.min(100, Math.round((Math.min(task.progress, task.target) / Math.max(1, task.target)) * 100)) + '%' }}
+                        />
+                      </div>
+                      <div className="quest-reward">
+                        <span className="reward-label">Reward</span>
+                        <span className="reward-chip item">
+                          <img className="icon-img small" src={iconCrystals} alt="" />
+                          +{task.rewardCrystals}
+                        </span>
+                        {task.repeatable && <span className="reward-chip repeat">Repeatable</span>}
+                      </div>
+                      <div className="quest-task-actions">
+                        {task.actionUrl && task.id !== 'watch-ad' && (
+                          <button type="button" className="secondary" onClick={() => openCrystalTaskLink(task.actionUrl)}>
+                            Open
+                          </button>
+                        )}
+                        <button type="button" disabled={claimDisabled} onClick={() => void claimCrystalTask(task)}>
+                          {claimLabel}
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}

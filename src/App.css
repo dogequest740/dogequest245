@@ -4249,6 +4249,29 @@ button.ghost {
   box-shadow: none;
 }
 
+.quest-panel-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.quest-panel-tabs button {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: rgba(11, 17, 25, 0.85);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.quest-panel-tabs button.active {
+  color: #0a1116;
+  background: linear-gradient(140deg, #7fd2ff, #7bd88f);
+  border-color: rgba(123, 216, 143, 0.65);
+}
+
 .quest-list {
   display: grid;
   gap: 10px;
@@ -4345,6 +4368,44 @@ button.ghost {
 .icon-img.tiny {
   width: 14px;
   height: 14px;
+}
+
+.quest-task-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.quest-task-actions button.secondary {
+  background: rgba(12, 22, 32, 0.82);
+  color: #9fe7ff;
+  border: 1px solid rgba(127, 210, 255, 0.35);
+}
+
+.quest-task-loading {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.quest-task-error {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 130, 130, 0.35);
+  background: rgba(70, 15, 20, 0.45);
+  color: #ffc7c7;
+  font-size: 12px;
+}
+
+.reward-chip.repeat {
+  color: #9fe7ff;
+  border-color: rgba(127, 210, 255, 0.35);
+}
+
+.crystal-task-list .quest-card {
+  gap: 8px;
 }
 
 .quest-card button {
