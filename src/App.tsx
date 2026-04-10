@@ -6743,7 +6743,7 @@ function App() {
       return { ok: false as const, error: 'Ads service is unavailable right now.' }
     }
 
-    const ADSGRAM_SHOW_TIMEOUT_MS = 35000
+    const ADSGRAM_SHOW_TIMEOUT_MS = 70000
     const ADSGRAM_TIMEOUT_SENTINEL = '__adsgram_timeout__'
     const ADSGRAM_MIN_INTERACTION_MS = 1600
     const ADSGRAM_SOFT_SUCCESS_MS = 4500
@@ -6809,8 +6809,11 @@ function App() {
       }
 
       const noFillLike = hasToken(normalized, ['no fill', 'inventory', 'empty', 'no ads', 'unavailable'])
-      if (noFillLike) {
+      if (noFillLike && elapsedMs < ADSGRAM_SOFT_SUCCESS_MS) {
         return { ok: false as const, error: 'No ads available now. Please try again in a minute.' }
+      }
+      if (noFillLike) {
+        return { ok: true as const }
       }
 
       if (elapsedMs < ADSGRAM_MIN_INTERACTION_MS) {
