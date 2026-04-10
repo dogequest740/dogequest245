@@ -3197,6 +3197,32 @@ const getCrystalTaskReward = (taskId: CrystalTaskId) => {
   }
 };
 
+const loadCrystalTaskOpenHistory = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+) => {
+  const { data, error } = await supabase
+    .from("security_events")
+    .select("details")
+    .eq("wallet", wallet)
+    .eq("kind", "crystal_task_open")
+    .order("created_at", { ascending: false })
+    .limit(2000);
+
+  if (error) return { ok: false as const, error: "Failed to load task activity." };
+
+  const opened = new Set<CrystalTaskId>();
+  for (const row of data ?? []) {
+    const details = row.details && typeof row.details === "object" && !Array.isArray(row.details)
+      ? row.details as Record<string, unknown>
+      : {};
+    const taskId = String(details.taskId ?? "").trim() as CrystalTaskId;
+    if (CRYSTAL_TASK_IDS.includes(taskId)) opened.add(taskId);
+  }
+
+  return { ok: true as const, opened };
+};
+
 const buildCrystalTaskStatuses = async (
   supabase: ReturnType<typeof createClient>,
   wallet: string,
@@ -3208,8 +3234,23 @@ const buildCrystalTaskStatuses = async (
   const referralsResult = await getQualifiedReferralCount(supabase, wallet, CRYSTAL_TASK_REFERRAL_LEVEL_MIN);
   if (!referralsResult.ok) return referralsResult;
 
+  const openHistoryResult = await loadCrystalTaskOpenHistory(supabase, wallet);
+  if (!openHistoryResult.ok) return openHistoryResult;
+
   const progress = progressResult.progress;
   const referralCount = referralsResult.count;
+  const opened = openHistoryResult.opened;
+  const openedX = opened.has("follow-x");
+  const telegramUserId = Math.max(0, asInt(getTelegramUserIdFromIdentity(wallet), 0));
+
+  let isTelegramSubscribed = false;
+  if (telegramUserId > 0) {
+    const membership = await isTelegramChannelMember(telegramUserId);
+    if (membership.ok) {
+      isTelegramSubscribed = membership.isMember;
+    }
+  }
+
   const adRemainingSec = progress["watch-ad"].lastClaimAt > 0
     ? Math.max(0, Math.ceil(((progress["watch-ad"].lastClaimAt + (CRYSTAL_TASK_AD_COOLDOWN_SECONDS * 1000)) - nowMs) / 1000))
     : 0;
@@ -3223,9 +3264,9 @@ const buildCrystalTaskStatuses = async (
       repeatable: false,
       claimed: progress["join-channel"].claimCount > 0,
       claimCount: progress["join-channel"].claimCount,
-      progress: progress["join-channel"].claimCount > 0 ? 1 : 0,
+      progress: progress["join-channel"].claimCount > 0 ? 1 : (isTelegramSubscribed ? 1 : 0),
       target: 1,
-      canClaim: progress["join-channel"].claimCount <= 0 && Math.max(0, asInt(getTelegramUserIdFromIdentity(wallet), 0)) > 0,
+      canClaim: progress["join-channel"].claimCount <= 0 && isTelegramSubscribed,
       cooldownSec: 0,
       remainingSec: 0,
       actionUrl: TELEGRAM_CHANNEL_URL,
@@ -3233,14 +3274,14 @@ const buildCrystalTaskStatuses = async (
     {
       id: "follow-x",
       title: "Follow on X",
-      description: "Follow the official Doge Quest X account.",
+      description: "Open the official Doge Quest X page, then claim your reward.",
       rewardCrystals: CRYSTAL_TASK_X_REWARD,
       repeatable: false,
       claimed: progress["follow-x"].claimCount > 0,
       claimCount: progress["follow-x"].claimCount,
-      progress: progress["follow-x"].claimCount > 0 ? 1 : 0,
+      progress: progress["follow-x"].claimCount > 0 ? 1 : (openedX ? 1 : 0),
       target: 1,
-      canClaim: progress["follow-x"].claimCount <= 0,
+      canClaim: progress["follow-x"].claimCount <= 0 && openedX,
       cooldownSec: 0,
       remainingSec: 0,
       actionUrl: TWITTER_FOLLOW_URL,
@@ -5302,6 +5343,27 @@ serve(async (req) => {
     });
   }
 
+  if (action === "crystal_task_open") {
+    const taskIdRaw = String(body.taskId ?? "").trim();
+    const taskId = CRYSTAL_TASK_IDS.find((id) => id === taskIdRaw);
+    if (!taskId || (taskId !== "follow-x" && taskId !== "join-channel")) {
+      return json({ ok: false, error: "Unsupported task activity." });
+    }
+
+    await supabase
+      .from("security_events")
+      .insert({
+        wallet: auth.wallet,
+        kind: "crystal_task_open",
+        details: {
+          taskId,
+          openedAt: now.toISOString(),
+        },
+      });
+
+    return json({ ok: true });
+  }
+
   if (action === "crystal_task_claim") {
     const taskIdRaw = String(body.taskId ?? "").trim();
     const taskId = CRYSTAL_TASK_IDS.find((id) => id === taskIdRaw);
@@ -6185,6 +6247,8 @@ serve(async (req) => {
 
   return json({ ok: false, error: "Unknown action." });
 });
+
+
 
 
 

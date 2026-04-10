@@ -50,6 +50,8 @@ import iconLegs from './assets/icons/armory-legs.png'
 import iconBoots from './assets/icons/armory-boots.png'
 import iconArtifact from './assets/icons/armory-artifact.png'
 import iconQuests from './assets/icons/quests.png'
+import iconTelegramBrand from './assets/icons/telegram.svg'
+import iconXBrand from './assets/icons/x.svg'
 import goldSmallImage from './assets/shop/gold-small.png'
 import goldMiddleImage from './assets/shop/gold-middle.png'
 import goldLargeImage from './assets/shop/gold-large.png'
@@ -238,6 +240,14 @@ type CrystalTaskStatus = {
   cooldownSec: number
   remainingSec: number
   actionUrl: string
+}
+
+const CRYSTAL_TASK_ICON_BY_ID: Record<CrystalTaskId, string> = {
+  'join-channel': iconTelegramBrand,
+  'follow-x': iconXBrand,
+  'watch-ad': iconFortuneWheel,
+  'referrals-5': iconReferrals,
+  'referrals-10': iconReferrals,
 }
 
 type AdsgramShowResult = {
@@ -6729,9 +6739,17 @@ function App() {
     }
   }
 
-  const openCrystalTaskLink = (url: string) => {
-    const safeUrl = String(url ?? '').trim()
+  const openCrystalTaskLink = async (task: CrystalTaskStatus) => {
+    const safeUrl = String(task.actionUrl ?? '').trim()
     if (!safeUrl) return
+
+    if (task.id === 'follow-x' || task.id === 'join-channel') {
+      void callGameSecureAuthed('crystal_task_open', { taskId: task.id }, false).then((result) => {
+        if (result.ok) {
+          void loadCrystalTasks(false)
+        }
+      })
+    }
 
     if (usingTelegramAuth && telegramWebApp?.openTelegramLink) {
       telegramWebApp.openTelegramLink(safeUrl)
@@ -9603,7 +9621,10 @@ function App() {
 
                   return (
                     <div key={task.id} className={`quest-card ${taskReady ? 'ready' : ''} ${isClaimedOneTime ? 'claimed' : ''}`}>
-                      <div className="quest-title">{task.title}</div>
+                      <div className="quest-title with-icon">
+                        <img className="icon-img small quest-task-icon" src={CRYSTAL_TASK_ICON_BY_ID[task.id]} alt="" />
+                        <span>{task.title}</span>
+                      </div>
                       <div className="quest-desc">{task.description}</div>
                       <div className="quest-progress">
                         {Math.min(task.progress, task.target)}/{task.target}
@@ -9624,7 +9645,7 @@ function App() {
                       </div>
                       <div className="quest-task-actions">
                         {task.actionUrl && task.id !== 'watch-ad' && (
-                          <button type="button" className="secondary" onClick={() => openCrystalTaskLink(task.actionUrl)}>
+                          <button type="button" className="secondary" onClick={() => void openCrystalTaskLink(task)}>
                             Open
                           </button>
                         )}
@@ -9962,5 +9983,9 @@ function App() {
   )
 }
 export default App
+
+
+
+
 
 
