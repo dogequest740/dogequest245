@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { clusterApiUrl, Connection, PublicKey } from "https://esm.sh/@solana/web3.js@1.98.4";
-import { Address, beginCell } from "https://esm.sh/@ton/core@0.62.0";
+import { Address, beginCell, Cell } from "https://esm.sh/@ton/core@0.62.0";
 
 const MAX_LEVEL = 255;
 const MAX_TICKETS = 30;
@@ -1006,6 +1006,14 @@ const uint8ToBase64 = (bytes: Uint8Array) => {
     binary += String.fromCharCode(byte);
   }
   return btoa(binary);
+};
+
+const uint8ToHex = (bytes: Uint8Array) => {
+  let output = "";
+  for (const byte of bytes) {
+    output += byte.toString(16).padStart(2, "0");
+  }
+  return output;
 };
 
 const createTonCommentPayload = (comment: string) => {
@@ -5022,8 +5030,20 @@ serve(async (req) => {
       return json({ ok: false, error: "Missing TON order id." });
     }
 
-    const txHashHex = normalizeTxHashHex(body.txHashHex ?? "");
-    const txHashBase64 = normalizeTxHashBase64(body.txHashBase64 ?? "");
+    const txBoc = String(body.txBoc ?? "").trim();
+    let txHashHex = normalizeTxHashHex(body.txHashHex ?? "");
+    let txHashBase64 = normalizeTxHashBase64(body.txHashBase64 ?? "");
+
+    if ((!txHashHex && !txHashBase64) && txBoc) {
+      try {
+        const hashBytes = Cell.fromBase64(txBoc).hash();
+        txHashHex = normalizeTxHashHex(uint8ToHex(hashBytes));
+        txHashBase64 = normalizeTxHashBase64(uint8ToBase64(hashBytes));
+      } catch {
+        // keep empty and return standard error below
+      }
+    }
+
     if (!txHashHex && !txHashBase64) {
       return json({ ok: false, error: "Missing TON transaction hash." });
     }
@@ -7474,6 +7494,7 @@ serve(async (req) => {
 
   return json({ ok: false, error: "Unknown action." });
 });
+
 
 
 

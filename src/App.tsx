@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { WalletModalButton } from '@solana/wallet-adapter-react-ui'
 import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
-import { Address, Cell } from '@ton/core'
 import { useTonAddress, useTonConnectUI, useTonWallet } from '@tonconnect/ui-react'
 import knightSprite from './assets/knight.png'
 import mageSprite from './assets/mage.png'
@@ -38,6 +37,8 @@ import iconWorldBoss from './assets/icons/world-boss.png'
 import iconBattle from './assets/icons/battle.png'
 import iconAutoBattle from './assets/icons/autobattle.png'
 import iconSolana from './assets/icons/solana.png'
+import iconTon from './assets/currencies/ton.svg'
+import iconUsdt from './assets/currencies/usdt.svg'
 import iconStacking from './assets/icons/stacking.png'
 import iconBuyGold from './assets/icons/buy-gold.png'
 import iconStarterPack from './assets/icons/starter-pack.png'
@@ -2223,14 +2224,6 @@ const bytesToBase64 = (bytes: Uint8Array) => {
   }
   return btoa(binary)
 }
-const bytesToHex = (bytes: Uint8Array) => {
-  let output = ''
-  for (const value of bytes) {
-    output += value.toString(16).padStart(2, '0')
-  }
-  return output
-}
-
 const formatPaymentAmount = (value: number) => (Number.isInteger(value) ? String(value) : value.toString())
 const isValidWalletAddress = (value: string) => {
   try {
@@ -3653,7 +3646,6 @@ function App() {
   const [tonConnectUI] = useTonConnectUI()
   const tonWallet = useTonWallet()
   const tonAddressFriendly = useTonAddress()
-  const tonAddressRaw = useTonAddress(false)
   const [telegramPaymentRail, setTelegramPaymentRail] = useState<TelegramPaymentRail>('stars')
   const [stage, setStage] = useState<'auth' | 'select' | 'game'>('auth')
   const [selectedId, setSelectedId] = useState(CHARACTER_CLASSES[0].id)
@@ -3865,15 +3857,7 @@ function App() {
     }
   }, [telegramUser, telegramInitData])
   const usingTelegramAuth = telegramInitData.length > 0
-  const telegramTonAddress = useMemo(() => {
-    const raw = String(tonAddressRaw || tonAddressFriendly || '').trim()
-    if (!raw) return ''
-    try {
-      return Address.parse(raw).toString({ bounceable: false, testOnly: false, urlSafe: true })
-    } catch {
-      return ''
-    }
-  }, [tonAddressRaw, tonAddressFriendly])
+  const telegramTonAddress = useMemo(() => String(tonAddressFriendly || '').trim(), [tonAddressFriendly])
   const telegramTonWalletConnected = Boolean(tonWallet && telegramTonAddress)
   const activeTelegramPaymentRail: TelegramPaymentRail = usingTelegramAuth ? telegramPaymentRail : 'stars'
 
@@ -4470,6 +4454,7 @@ function App() {
     orderId: string,
     txHashHex: string,
     txHashBase64: string,
+    txBoc: string,
     attempts = 16,
     baseDelayMs = 1100,
   ): Promise<GameSecureResponse> => {
@@ -4477,7 +4462,7 @@ function App() {
     let lastResult: GameSecureResponse = { ok: false, error: 'TON payment claim failed.' }
 
     for (let attempt = 0; attempt < attempts; attempt += 1) {
-      const result = await callGameSecureAuthed('tg_ton_claim', { orderId, txHashHex, txHashBase64 }, false)
+      const result = await callGameSecureAuthed('tg_ton_claim', { orderId, txHashHex, txHashBase64, txBoc }, false)
       if (result.ok) return result
       lastResult = result
 
@@ -4560,19 +4545,8 @@ function App() {
       return null
     }
 
-    let txHashHex = ''
-    let txHashBase64 = ''
-    try {
-      const txHashBytes = Cell.fromBase64(txBoc).hash()
-      txHashHex = bytesToHex(txHashBytes)
-      txHashBase64 = bytesToBase64(txHashBytes)
-    } catch {
-      setError('Unable to read TON transaction hash.')
-      return null
-    }
-
     setError(finalizeLabel)
-    const claimResult = await claimTelegramTonOrder(order.id, txHashHex, txHashBase64)
+    const claimResult = await claimTelegramTonOrder(order.id, '', '', txBoc)
     if (!claimResult.ok) {
       setError(claimResult.error || 'Payment received, but credit is pending. Retry in a few seconds.')
       return null
@@ -4614,6 +4588,7 @@ function App() {
             className={activeTelegramPaymentRail === 'ton' ? 'active' : ''}
             onClick={() => selectTelegramPaymentRail('ton', setError)}
           >
+            <img className="tg-currency-icon" src={iconTon} alt="TON" />
             TON
           </button>
           <button
@@ -4621,6 +4596,7 @@ function App() {
             className={activeTelegramPaymentRail === 'usdt' ? 'active' : ''}
             onClick={() => selectTelegramPaymentRail('usdt', setError)}
           >
+            <img className="tg-currency-icon" src={iconUsdt} alt="USDT" />
             USDT
           </button>
         </div>
@@ -8967,6 +8943,9 @@ function App() {
                     <div className="shop-desc">Instant delivery</div>
                     <div className="shop-meta">
                       {!usingTelegramAuth && <img className="icon-img small" src={iconSolana} alt="" />}
+                      {usingTelegramAuth && activeTelegramPaymentRail === 'stars' && <span className="tg-stars-inline">⭐</span>}
+                      {usingTelegramAuth && activeTelegramPaymentRail === 'ton' && <img className="icon-img small tg-currency-icon" src={iconTon} alt="TON" />}
+                      {usingTelegramAuth && activeTelegramPaymentRail === 'usdt' && <img className="icon-img small tg-currency-icon" src={iconUsdt} alt="USDT" />}
                       {usingTelegramAuth
                         ? `Price: ${formatPaymentAmount(getTelegramGoldPriceByRail(pack.id, activeTelegramPaymentRail))} ${getTelegramRailCurrencyLabel(activeTelegramPaymentRail)}`
                         : `Price: ${pack.sol} SOL`}
@@ -9016,6 +8995,9 @@ function App() {
                   <div className="starterpack-title">Starter Pack</div>
                   <div className="starterpack-price">
                     {!usingTelegramAuth && <img className="icon-img small" src={iconSolana} alt="" />}
+                    {usingTelegramAuth && activeTelegramPaymentRail === 'stars' && <span className="tg-stars-inline">⭐</span>}
+                    {usingTelegramAuth && activeTelegramPaymentRail === 'ton' && <img className="icon-img small tg-currency-icon" src={iconTon} alt="TON" />}
+                    {usingTelegramAuth && activeTelegramPaymentRail === 'usdt' && <img className="icon-img small tg-currency-icon" src={iconUsdt} alt="USDT" />}
                     {usingTelegramAuth
                       ? `${formatPaymentAmount(getTelegramStarterPackPriceByRail(activeTelegramPaymentRail))} ${getTelegramRailCurrencyLabel(activeTelegramPaymentRail)}`
                       : `${STARTER_PACK_PRICE} SOL`}
@@ -9125,7 +9107,12 @@ function App() {
                     )}
                     <div className="shop-meta premium-price-new">
                       {usingTelegramAuth ? (
-                        <>Price: {formatPaymentAmount(getTelegramPremiumPriceByRail(plan.id, activeTelegramPaymentRail))} {getTelegramRailCurrencyLabel(activeTelegramPaymentRail)}</>
+                        <>
+                          {activeTelegramPaymentRail === 'stars' && <span className="tg-stars-inline">⭐</span>}
+                          {activeTelegramPaymentRail === 'ton' && <img className="icon-img small tg-currency-icon" src={iconTon} alt="TON" />}
+                          {activeTelegramPaymentRail === 'usdt' && <img className="icon-img small tg-currency-icon" src={iconUsdt} alt="USDT" />}
+                          Price: {formatPaymentAmount(getTelegramPremiumPriceByRail(plan.id, activeTelegramPaymentRail))} {getTelegramRailCurrencyLabel(activeTelegramPaymentRail)}
+                        </>
                       ) : (
                         <>
                           <img className="icon-img small" src={iconSolana} alt="" />
@@ -9558,7 +9545,12 @@ function App() {
                         </span>
                         <span className="fortune-buy-price">
                           {usingTelegramAuth ? (
-                            <>Price: {formatPaymentAmount(getTelegramFortunePriceByRail(spins as FortunePackId, activeTelegramPaymentRail))} {getTelegramRailCurrencyLabel(activeTelegramPaymentRail)}</>
+                            <>
+                              {activeTelegramPaymentRail === 'stars' && <span className="tg-stars-inline">⭐</span>}
+                              {activeTelegramPaymentRail === 'ton' && <img className="icon-img tiny tg-currency-icon" src={iconTon} alt="TON" />}
+                              {activeTelegramPaymentRail === 'usdt' && <img className="icon-img tiny tg-currency-icon" src={iconUsdt} alt="USDT" />}
+                              Price: {formatPaymentAmount(getTelegramFortunePriceByRail(spins as FortunePackId, activeTelegramPaymentRail))} {getTelegramRailCurrencyLabel(activeTelegramPaymentRail)}
+                            </>
                           ) : (
                             <>
                               <img className="icon-img tiny" src={iconSolana} alt="" />
@@ -10785,6 +10777,11 @@ function App() {
   )
 }
 export default App
+
+
+
+
+
 
 
 
