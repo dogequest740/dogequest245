@@ -6747,50 +6747,36 @@ function App() {
       })
       const result = (await Promise.race([ad.show(), timeoutPromise])) as AdsgramShowResult | void
 
-      // Some AdsGram flows can resolve without a payload on success.
+      // AdsGram can resolve with different payload formats; successful resolve usually means ad flow finished.
       if (!result || typeof result !== 'object') {
         return { ok: true as const }
       }
 
       const adState = String(result.state ?? '').toLowerCase()
       const adStatus = String(result.status ?? '').toLowerCase()
-      const adDescription = String(result.description ?? '').toLowerCase()
       const hasErrorFlag = result.error === true
 
-      const isNoFill =
-        adState.includes('no_fill') ||
-        adStatus.includes('no_fill') ||
-        adDescription.includes('no fill') ||
-        adDescription.includes('inventory')
-
-      if (isNoFill) {
-        return { ok: false as const, error: 'No ads available now. Please try again in a minute.' }
-      }
-
-      const failed =
-        hasErrorFlag ||
-        adState.includes('error') ||
-        adStatus.includes('error') ||
-        adDescription.includes('error') ||
-        adState.includes('skip') ||
-        adStatus.includes('skip') ||
+      const canceled =
         adState.includes('cancel') ||
         adStatus.includes('cancel') ||
-        adDescription.includes('cancel') ||
-        adDescription.includes('failed')
+        adState.includes('skip') ||
+        adStatus.includes('skip')
 
-      if (failed) {
+      if (canceled) {
         return { ok: false as const, error: 'Ad was not completed.' }
+      }
+
+      // Do not over-interpret payload text; it caused false negatives after real ad views.
+      if (hasErrorFlag && adState.includes('error') && adStatus.includes('error')) {
+        return { ok: false as const, error: 'No ads available now. Please try again in a minute.' }
       }
 
       return { ok: true as const }
     } catch (error) {
       const errorText = error instanceof Error ? error.message : String(error)
       const normalized = errorText.toLowerCase()
-      if (normalized.includes(ADSGRAM_TIMEOUT_SENTINEL)) {
-        return { ok: false as const, error: 'No ads available now. Please try again in a minute.' }
-      }
       if (
+        normalized.includes(ADSGRAM_TIMEOUT_SENTINEL) ||
         normalized.includes('no fill') ||
         normalized.includes('inventory') ||
         normalized.includes('empty') ||
@@ -6868,17 +6854,18 @@ function App() {
         return
       }
 
-      if (typeof result.crystals === 'number') {
-        state.crystals = Math.max(0, Math.floor(result.crystals))
+      const nextCrystals = Number(result.crystals)
+      if (Number.isFinite(nextCrystals)) {
+        state.crystals = Math.max(0, Math.floor(nextCrystals))
       }
-      if (typeof result.crystalsEarned === 'number') {
-        state.crystalsEarned = Math.max(0, Math.floor(result.crystalsEarned))
+      const nextCrystalsEarned = Number(result.crystalsEarned)
+      if (Number.isFinite(nextCrystalsEarned)) {
+        state.crystalsEarned = Math.max(0, Math.floor(nextCrystalsEarned))
       }
       if (result.crystalTasks) {
         setCrystalTasks(normalizeCrystalTasksFromResponse(result.crystalTasks))
-      } else {
-        void loadCrystalTasks(false)
       }
+      void loadCrystalTasks(false)
 
       pushLog(state.eventLog, 'Task reward claimed: +' + String(task.rewardCrystals) + ' crystals.')
       syncHud()
