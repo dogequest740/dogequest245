@@ -148,7 +148,7 @@ const EDGE_BASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?
 const EDGE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() || ''
 const TELEGRAM_BOT_USERNAME = String(import.meta.env.VITE_TELEGRAM_BOT_USERNAME ?? 'dogemmorpgbot').trim().replace(/^@+/, '')
 const SEASON_SNAPSHOT_MIN_CRYSTALS = 700
-const DEV_REFERRAL_CONTEST_FALLBACK: ReferralContestInfo = {
+const REFERRAL_CONTEST_FALLBACK: ReferralContestInfo = {
   id: 'referral-rush-2026-04-10',
   name: 'Referral Rush',
   status: 'active',
@@ -7220,14 +7220,14 @@ function App() {
   const premiumClaimReady = Boolean(hud && premiumActive && hud.premiumClaimDay !== currentDayKey)
   const seasonRemainingSec = seasonInfo ? Math.max(0, Math.floor((new Date(seasonInfo.endAt).getTime() - Date.now()) / 1000)) : 0
   const referralContestNowMs = Date.now()
-  const useDevReferralContestFallback = import.meta.env.DEV && (() => {
+  const useReferralContestFallback = (() => {
     if (!referralContestInfo) return true
     const reviewEndsMs = new Date(referralContestInfo.reviewEndsAt).getTime()
     if (Number.isFinite(reviewEndsMs) && referralContestNowMs > reviewEndsMs) return true
     const endMs = new Date(referralContestInfo.endAt).getTime()
     return !Number.isFinite(reviewEndsMs) && Number.isFinite(endMs) && referralContestNowMs > endMs
   })()
-  const referralContestDisplayInfo = useDevReferralContestFallback ? DEV_REFERRAL_CONTEST_FALLBACK : referralContestInfo
+  const referralContestDisplayInfo = useReferralContestFallback ? REFERRAL_CONTEST_FALLBACK : referralContestInfo
   const referralContestStatusNow: ReferralContestStatus | null = referralContestDisplayInfo
     ? (() => {
         const startMs = new Date(referralContestDisplayInfo.startAt).getTime()
@@ -10429,6 +10429,7 @@ function App() {
   )
 }
 export default App
+
 
 
 
