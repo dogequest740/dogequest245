@@ -9545,6 +9545,7 @@ function App() {
                   className={questPanelTab === 'achievements' ? 'active' : ''}
                   onClick={() => setQuestPanelTab('achievements')}
                 >
+                  <img className="icon-img tiny quest-tab-icon" src={iconQuests} alt="" />
                   Achievements
                 </button>
                 <button
@@ -9557,6 +9558,7 @@ function App() {
                     }
                   }}
                 >
+                  <img className="icon-img tiny quest-tab-icon" src={iconCrystals} alt="" />
                   Tasks
                 </button>
               </div>
@@ -9606,6 +9608,7 @@ function App() {
                   const taskReady = task.canClaim && task.remainingSec <= 0
                   const isClaimedOneTime = !task.repeatable && task.claimed
                   const isBusy = crystalTaskClaimLoadingId === task.id
+                  const isBrandIcon = task.id === 'join-channel' || task.id === 'follow-x'
                   const claimDisabled = isBusy || isClaimedOneTime || !taskReady
                   const claimLabel = isClaimedOneTime
                     ? 'Claimed'
@@ -9622,7 +9625,13 @@ function App() {
                   return (
                     <div key={task.id} className={`quest-card ${taskReady ? 'ready' : ''} ${isClaimedOneTime ? 'claimed' : ''}`}>
                       <div className="quest-title with-icon">
-                        <img className="icon-img small quest-task-icon" src={CRYSTAL_TASK_ICON_BY_ID[task.id]} alt="" />
+                        <span className={`quest-task-icon-wrap task-${task.id}`}>
+                          <img
+                            className={`icon-img small quest-task-icon ${isBrandIcon ? 'brand' : ''}`}
+                            src={CRYSTAL_TASK_ICON_BY_ID[task.id]}
+                            alt=""
+                          />
+                        </span>
                         <span>{task.title}</span>
                       </div>
                       <div className="quest-desc">{task.description}</div>
@@ -9983,6 +9992,7 @@ function App() {
   )
 }
 export default App
+
 
 
 
