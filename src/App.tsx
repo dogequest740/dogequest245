@@ -9527,7 +9527,7 @@ function App() {
                   className={questPanelTab === 'achievements' ? 'active' : ''}
                   onClick={() => setQuestPanelTab('achievements')}
                 >
-                  Ачивки
+                  Achievements
                 </button>
                 <button
                   type="button"
@@ -9539,7 +9539,7 @@ function App() {
                     }
                   }}
                 >
-                  Кристаллы
+                  Tasks
                 </button>
               </div>
             )}
@@ -9962,4 +9962,5 @@ function App() {
   )
 }
 export default App
+
 
