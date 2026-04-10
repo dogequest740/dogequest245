@@ -6743,47 +6743,55 @@ function App() {
       return { ok: false as const, error: 'Ads service is unavailable right now.' }
     }
 
-    const ADSGRAM_SHOW_TIMEOUT_MS = 30000
+    const ADSGRAM_SHOW_TIMEOUT_MS = 35000
     const ADSGRAM_TIMEOUT_SENTINEL = '__adsgram_timeout__'
-    const ADSGRAM_SOFT_SUCCESS_MS = 4000
+    const ADSGRAM_MIN_INTERACTION_MS = 1600
+    const ADSGRAM_SOFT_SUCCESS_MS = 4500
     const startedAt = Date.now()
 
+    const hasToken = (value: string, tokens: string[]) => tokens.some((token) => value.includes(token))
+
     try {
-      const ad = sdk.init({ blockId })
+      const ad = sdk.init({ blockId: String(blockId).trim() })
       const timeoutPromise = new Promise<never>((_, reject) => {
         window.setTimeout(() => reject(new Error(ADSGRAM_TIMEOUT_SENTINEL)), ADSGRAM_SHOW_TIMEOUT_MS)
       })
       const result = (await Promise.race([ad.show(), timeoutPromise])) as AdsgramShowResult | void
       const elapsedMs = Date.now() - startedAt
 
-      // AdsGram can resolve with different payload formats; successful resolve usually means ad flow finished.
       if (!result || typeof result !== 'object') {
+        if (elapsedMs < ADSGRAM_MIN_INTERACTION_MS) {
+          return { ok: false as const, error: 'Ad did not start. Please try again.' }
+        }
         return { ok: true as const }
       }
 
       const adState = String(result.state ?? '').toLowerCase()
       const adStatus = String(result.status ?? '').toLowerCase()
+      const adDescription = String(result.description ?? '').toLowerCase()
+      const payloadText = [adState, adStatus, adDescription].join(' ')
       const hasErrorFlag = result.error === true
 
-      const canceled =
-        adState.includes('cancel') ||
-        adStatus.includes('cancel') ||
-        adState.includes('skip') ||
-        adStatus.includes('skip') ||
-        adState.includes('close') ||
-        adStatus.includes('close') ||
-        adState.includes('abort') ||
-        adStatus.includes('abort')
-
+      const canceled = hasToken(payloadText, ['cancel', 'skip', 'abort'])
       if (canceled) {
         return { ok: false as const, error: 'Ad was not completed.' }
       }
 
-      if (hasErrorFlag && (adState.includes('error') || adStatus.includes('error'))) {
-        if (elapsedMs < ADSGRAM_SOFT_SUCCESS_MS) {
-          return { ok: false as const, error: 'No ads available now. Please try again in a minute.' }
-        }
-        return { ok: true as const }
+      const noFillLike = hasToken(payloadText, ['no fill', 'inventory', 'empty', 'no ads', 'unavailable'])
+      if (noFillLike && elapsedMs < ADSGRAM_SOFT_SUCCESS_MS) {
+        return { ok: false as const, error: 'No ads available now. Please try again in a minute.' }
+      }
+
+      const rewardLikeFromPayload =
+        hasToken(payloadText, ['reward', 'complete', 'completed', 'finish', 'finished', 'success', 'close', 'closed'])
+      const rewardLike = Boolean(result.done === true) || rewardLikeFromPayload
+
+      if (hasErrorFlag && noFillLike && elapsedMs < ADSGRAM_SOFT_SUCCESS_MS) {
+        return { ok: false as const, error: 'No ads available now. Please try again in a minute.' }
+      }
+
+      if (!rewardLike && elapsedMs < ADSGRAM_MIN_INTERACTION_MS) {
+        return { ok: false as const, error: 'Ad did not start. Please try again.' }
       }
 
       return { ok: true as const }
@@ -6792,12 +6800,7 @@ function App() {
       const normalized = errorText.toLowerCase()
       const elapsedMs = Date.now() - startedAt
 
-      const canceled =
-        normalized.includes('cancel') ||
-        normalized.includes('skip') ||
-        normalized.includes('close') ||
-        normalized.includes('abort')
-      if (canceled) {
+      if (hasToken(normalized, ['cancel', 'skip', 'abort'])) {
         return { ok: false as const, error: 'Ad was not completed.' }
       }
 
@@ -6805,16 +6808,17 @@ function App() {
         return { ok: false as const, error: 'No ads available now. Please try again in a minute.' }
       }
 
-      const noFillLike =
-        normalized.includes('no fill') ||
-        normalized.includes('inventory') ||
-        normalized.includes('empty')
-      if (noFillLike && elapsedMs < ADSGRAM_SOFT_SUCCESS_MS) {
+      const noFillLike = hasToken(normalized, ['no fill', 'inventory', 'empty', 'no ads', 'unavailable'])
+      if (noFillLike) {
         return { ok: false as const, error: 'No ads available now. Please try again in a minute.' }
       }
 
-      // Soft fallback: if ad flow lived for several seconds and then SDK errored,
-      // we still allow claim to avoid false negatives on completed views.
+      if (elapsedMs < ADSGRAM_MIN_INTERACTION_MS) {
+        return { ok: false as const, error: 'Ad did not start. Please try again.' }
+      }
+
+      // If ad flow lived for some time and then SDK errored, allow claim
+      // to avoid false negatives after completed views.
       return { ok: true as const }
     }
   }
@@ -6863,6 +6867,33 @@ function App() {
     }
   }
 
+  const isCrystalTaskClaimRetryableError = (errorText: string) => {
+    const normalized = errorText.toLowerCase()
+    return (
+      normalized.includes('secure service unavailable') ||
+      normalized.includes('empty secure service response') ||
+      normalized.includes('network') ||
+      normalized.includes('fetch') ||
+      normalized.includes('timeout') ||
+      normalized.includes('retry')
+    )
+  }
+
+  const claimCrystalTaskWithRetry = async (taskId: CrystalTaskId, attempts = 3): Promise<GameSecureResponse> => {
+    let lastResult: GameSecureResponse = { ok: false, error: 'Failed to claim task reward.' }
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const result = await callGameSecureAuthed('crystal_task_claim', { taskId }, true)
+      if (result.ok) return result
+      lastResult = result
+      const errorText = String(result.error ?? '')
+      if (attempt >= attempts - 1 || !isCrystalTaskClaimRetryableError(errorText)) {
+        return result
+      }
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 700 + (attempt * 500)))
+    }
+    return lastResult
+  }
+
   const claimCrystalTask = async (task: CrystalTaskStatus) => {
     const state = gameStateRef.current
     if (!state || crystalTaskClaimLoadingId) return
@@ -6879,8 +6910,12 @@ function App() {
         }
       }
 
-      const result = await callGameSecureAuthed('crystal_task_claim', { taskId: task.id }, true)
+      const result = await claimCrystalTaskWithRetry(task.id, task.id === 'watch-ad' ? 4 : 3)
       if (!result.ok) {
+        if (task.id === 'watch-ad') {
+          // Refresh tasks to avoid stale UI if claim succeeded server-side but response was dropped.
+          void loadCrystalTasks(false)
+        }
         setCrystalTasksError(result.error || 'Failed to claim task reward.')
         return
       }
