@@ -3606,6 +3606,7 @@ function App() {
   const serverLoadedRef = useRef(false)
   const dungeonSessionRef = useRef<{ token: string; expiresAt: number } | null>(null)
   const dungeonSessionRequestRef = useRef<Promise<string | null> | null>(null)
+  const walletSignMessageRef = useRef<((message: Uint8Array) => Promise<Uint8Array>) | null>(null)
   const secureSessionInitRef = useRef(false)
   const isNewProfileRef = useRef(false)
   const referralProcessedRef = useRef(false)
@@ -3700,14 +3701,17 @@ function App() {
   const usingTelegramAuth = telegramInitData.length > 0
 
   useEffect(() => {
+    walletSignMessageRef.current = signMessage ?? null
+  }, [signMessage])
+
+  useEffect(() => {
     if (!crystalTasksError) return
     const timer = window.setTimeout(() => setCrystalTasksError(''), 5000)
     return () => window.clearTimeout(timer)
   }, [crystalTasksError])
 
   const walletAddress = publicKey?.toBase58() ?? ''
-  const walletAuthReady = Boolean(walletAddress && signMessage)
-  const usingWalletAuth = walletAuthReady && !usingTelegramAuth
+  const usingWalletAuth = Boolean(walletAddress) && !usingTelegramAuth
   const accountIdentity = useMemo(() => {
     if (usingTelegramAuth) return telegramUserId > 0 ? `tg:${telegramUserId}` : ''
     return usingWalletAuth ? walletAddress : ''
@@ -3879,6 +3883,18 @@ function App() {
       message.includes('Invalid profile version')
   }
 
+  const waitForWalletSignMessage = async (timeoutMs: number) => {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      const signer = walletSignMessageRef.current
+      if (signer) return signer
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 120)
+      })
+    }
+    return null
+  }
+
   const ensureDungeonSession = async (interactive = true) => {
     const wallet = usingWalletAuth ? walletAddress : ''
     const hasTelegramSessionInput = usingTelegramAuth && telegramInitData.length > 0
@@ -3893,7 +3909,7 @@ function App() {
       return dungeonSessionRequestRef.current
     }
 
-    if (usingWalletAuth && (!interactive || !signMessage)) {
+    if (usingWalletAuth && !interactive && !walletSignMessageRef.current) {
       setWalletSessionVerified(false)
       return null
     }
@@ -3925,9 +3941,21 @@ function App() {
         return null
       }
 
+      let signer = walletSignMessageRef.current
+      if (!signer) {
+        signer = await waitForWalletSignMessage(interactive ? 3200 : 900)
+      }
+      if (!signer) {
+        setWalletSessionVerified(false)
+        if (interactive) {
+          setSecurityAuthError('Wallet bridge is still initializing. Please try login again.')
+        }
+        return null
+      }
+
       let signature: Uint8Array
       try {
-        signature = await signMessage!(new TextEncoder().encode(challenge.message))
+        signature = await signer(new TextEncoder().encode(challenge.message))
       } catch {
         setWalletSessionVerified(false)
         dungeonSessionRef.current = null
@@ -4501,7 +4529,6 @@ function App() {
   const syncDungeonStateFromServer = async () => {
     const state = gameStateRef.current
     if (!state || !accountIdentity) return
-    if (usingWalletAuth && !signMessage) return
 
     const result = await callDungeonSecureAuthed('status', {}, false)
     if (!result.ok) {
@@ -5315,11 +5342,6 @@ function App() {
     dungeonSessionRequestRef.current = null
     secureSessionInitRef.current = false
     setWalletSessionVerified(false)
-    if (usingWalletAuth && !signMessage) {
-      return () => {
-        active = false
-      }
-    }
     if (!usingWalletAuth && !usingTelegramAuth) {
       return () => {
         active = false
@@ -5363,7 +5385,6 @@ function App() {
   useEffect(() => {
     if (stage !== 'game') return
     if (!accountIdentity) return
-    if (usingWalletAuth && !signMessage) return
     if (secureSessionInitRef.current) return
     secureSessionInitRef.current = true
     void (async () => {
@@ -7158,9 +7179,16 @@ function App() {
       </button>
     </div>
   )
+  const appClassName = [
+    'app',
+    stage === 'auth' ? 'auth-mode' : '',
+    isMobile ? 'mobile' : '',
+    isMobile && usingTelegramAuth ? 'mobile-telegram' : '',
+    isMobile && !usingTelegramAuth ? 'mobile-browser' : '',
+  ].filter(Boolean).join(' ')
 
   return (
-    <div className={`app ${stage === 'auth' ? 'auth-mode' : ''} ${isMobile ? 'mobile' : ''}`}>
+    <div className={appClassName}>
       <audio ref={audioRef} src={bgMusic} preload="auto" playsInline />
       {stage !== 'auth' && (
         <header className={topbarClass}>
@@ -7836,7 +7864,7 @@ function App() {
                   Auto Battle: {hud?.autoBattle ? 'ON' : 'OFF'}
                 </button>
               </div>
-              {isMobile && hud && (
+              {isMobile && hud && (usingTelegramAuth || !activePanel) && (
                 <>
                   <nav className="mobile-game-tabs" aria-label="Game sections">
                     <button type="button" className={mobileGameTab === 'battle' ? 'active' : ''} onClick={() => openMobileGameTab('battle')}>
@@ -10070,5 +10098,4 @@ function App() {
   )
 }
 export default App
-
 
