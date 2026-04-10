@@ -54,7 +54,7 @@ const PREMIUM_DAILY_SMALL_POTIONS = 5;
 const PREMIUM_DAILY_BIG_POTIONS = 3;
 const SOL_LAMPORTS = 1_000_000_000;
 const STARTER_PACK_GOLD = 300000;
-const STARTER_PACK_PRICE_LAMPORTS = Math.round(0.25 * SOL_LAMPORTS);
+const STARTER_PACK_PRICE_LAMPORTS = Math.round(0.13 * SOL_LAMPORTS);
 const STARTER_PACK_ITEMS: Array<{ type: ConsumableType; qty: number }> = [
   { type: "energy-small", qty: 20 },
   { type: "energy-full", qty: 5 },
@@ -69,21 +69,21 @@ const PAYMENT_TX_LOOKUP_BASE_DELAY_MS = 1200;
 const PROFILE_UPDATE_RETRY_ATTEMPTS = 10;
 const BLOCKED_ERROR_MESSAGE = "You have been banned for cheating.";
 const GOLD_PACKS_SOL = [
-  { id: "gold-50k", gold: 50000, lamports: Math.round(0.05 * SOL_LAMPORTS) },
-  { id: "gold-100k", gold: 100000, lamports: Math.round(0.1 * SOL_LAMPORTS) },
-  { id: "gold-500k", gold: 500000, lamports: Math.round(0.4 * SOL_LAMPORTS) },
-  { id: "gold-1200k", gold: 1200000, lamports: Math.round(0.63 * SOL_LAMPORTS) },
+  { id: "gold-50k", gold: 50000, lamports: Math.round(0.04 * SOL_LAMPORTS) },
+  { id: "gold-100k", gold: 100000, lamports: Math.round(0.07 * SOL_LAMPORTS) },
+  { id: "gold-500k", gold: 500000, lamports: Math.round(0.28 * SOL_LAMPORTS) },
+  { id: "gold-1200k", gold: 1200000, lamports: Math.round(0.5 * SOL_LAMPORTS) },
 ] as const;
 const FORTUNE_SPIN_PACKS_SOL = [1, 10] as const;
 const FORTUNE_SPIN_PRICES_LAMPORTS: Record<(typeof FORTUNE_SPIN_PACKS_SOL)[number], number> = {
-  1: Math.round(0.007 * SOL_LAMPORTS),
-  10: Math.round(0.06 * SOL_LAMPORTS),
+  1: Math.round(0.005 * SOL_LAMPORTS),
+  10: Math.round(0.04 * SOL_LAMPORTS),
 };
 const MIN_SEASON_SNAPSHOT_CRYSTALS = 1000;
 const ENERGY_REGEN_SECONDS = 420;
 const PREMIUM_PLANS = [
-  { id: "premium-30", days: 30, lamports: Math.round(0.3 * SOL_LAMPORTS) },
-  { id: "premium-90", days: 90, lamports: Math.round(0.7 * SOL_LAMPORTS) },
+  { id: "premium-30", days: 30, lamports: Math.round(0.2 * SOL_LAMPORTS) },
+  { id: "premium-90", days: 90, lamports: Math.round(0.48 * SOL_LAMPORTS) },
 ] as const;
 const TELEGRAM_STARS_STARTER_PACK = 500;
 const TELEGRAM_STARS_GOLD_PACKS: Record<(typeof GOLD_PACKS_SOL)[number]["id"], number> = {
@@ -6574,5 +6574,6 @@ serve(async (req) => {
 
   return json({ ok: false, error: "Unknown action." });
 });
+
 
 
