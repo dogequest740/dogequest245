@@ -8307,7 +8307,7 @@ function App() {
                 Close
               </button>
             </div>
-            <div className="shop-grid">
+            <div className="shop-grid merchant-shop-grid">
               <div className="shop-card">
                 <div className="shop-title">Energy Tonic</div>
                 <div className="shop-desc">Restore 10 energy.</div>
@@ -10067,4 +10067,5 @@ function App() {
   )
 }
 export default App
+
 

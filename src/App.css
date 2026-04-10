@@ -1363,6 +1363,41 @@
   font-size: 12px;
 }
 
+
+.app.mobile .merchant-shop-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.app.mobile .merchant-shop-grid .shop-card {
+  padding: 10px 8px;
+  gap: 7px;
+}
+
+.app.mobile .merchant-shop-grid .shop-title {
+  font-size: 12px;
+  line-height: 1.12;
+}
+
+.app.mobile .merchant-shop-grid .shop-desc {
+  font-size: 11px;
+  line-height: 1.24;
+}
+
+.app.mobile .merchant-shop-grid .shop-meta {
+  font-size: 11px;
+}
+
+.app.mobile .merchant-shop-grid .shop-icon {
+  width: 36px;
+  height: 36px;
+}
+
+.app.mobile .merchant-shop-grid .shop-card button {
+  min-height: 36px;
+  padding: 7px 8px;
+  font-size: 11px;
+}
 .app.mobile .buygold-card button {
   min-height: 38px;
   font-size: 11px;
@@ -6908,6 +6943,7 @@ button.ghost {
     transform: rotate(360deg);
   }
 }
+
 
 
 
