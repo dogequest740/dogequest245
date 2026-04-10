@@ -4772,6 +4772,365 @@ button.ghost {
   }
 }
 
+.referral-panel-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.referral-panel-tabs button {
+  border: 1px solid rgba(214, 178, 95, 0.35);
+  border-radius: 10px;
+  background: rgba(10, 18, 28, 0.72);
+  color: rgba(233, 239, 255, 0.88);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+}
+
+.referral-panel-tabs button.active {
+  border-color: rgba(109, 192, 255, 0.68);
+  color: #ecf7ff;
+  background: linear-gradient(165deg, rgba(38, 84, 122, 0.88), rgba(22, 37, 66, 0.86));
+  box-shadow: 0 10px 20px rgba(10, 26, 48, 0.4), inset 0 0 0 1px rgba(160, 217, 255, 0.35);
+}
+
+.referral-tab-icon {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
+.referral-contest-card {
+  display: grid;
+  gap: 10px;
+}
+
+.referral-contest-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.referral-contest-head strong {
+  display: block;
+  font-size: 15px;
+}
+
+.referral-contest-head span {
+  display: block;
+  margin-top: 3px;
+  color: rgba(231, 240, 245, 0.78);
+  font-size: 12px;
+}
+
+.referral-contest-status {
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 10px;
+  letter-spacing: 0.7px;
+  font-weight: 800;
+  border: 1px solid rgba(255, 255, 255, 0.26);
+}
+
+.referral-contest-status.upcoming {
+  color: #d6ecff;
+  border-color: rgba(130, 190, 255, 0.56);
+  background: rgba(38, 76, 120, 0.45);
+}
+
+.referral-contest-status.active {
+  color: #f6ffde;
+  border-color: rgba(171, 224, 123, 0.56);
+  background: rgba(50, 87, 30, 0.48);
+}
+
+.referral-contest-status.review {
+  color: #ffe9cb;
+  border-color: rgba(240, 176, 99, 0.6);
+  background: rgba(102, 56, 15, 0.48);
+}
+
+.referral-contest-status.closed {
+  color: rgba(220, 230, 238, 0.86);
+  border-color: rgba(170, 182, 194, 0.42);
+  background: rgba(70, 82, 95, 0.45);
+}
+
+.referral-contest-rules {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.referral-contest-prizes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.referral-contest-prizes > div {
+  border-radius: 10px;
+  border: 1px solid rgba(214, 178, 95, 0.26);
+  background: rgba(15, 20, 34, 0.72);
+  padding: 7px 8px;
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+}
+
+.referral-contest-prizes span {
+  font-size: 11px;
+  color: rgba(231, 240, 245, 0.78);
+}
+
+.referral-contest-prizes strong {
+  color: #8fd4ff;
+  font-size: 13px;
+}
+
+.referral-contest-player {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+}
+
+.referral-contest-list {
+  max-height: 280px;
+}
+
+.referral-contest-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(10, 18, 28, 0.76);
+  border: 1px solid rgba(112, 158, 255, 0.2);
+}
+
+.referral-contest-rank {
+  font-size: 12px;
+  color: rgba(255, 227, 145, 0.95);
+  min-width: 34px;
+}
+
+.referral-contest-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #eef4ff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.referral-contest-points {
+  font-size: 12px;
+  color: #7fd2ff;
+  font-weight: 700;
+}
+
+
+.referral-contest-shell {
+  display: grid;
+  gap: 12px;
+}
+
+.referral-contest-hero {
+  border-color: rgba(120, 188, 255, 0.24);
+  background:
+    radial-gradient(circle at top right, rgba(120, 188, 255, 0.18), transparent 36%),
+    linear-gradient(160deg, rgba(18, 24, 38, 0.96), rgba(11, 16, 26, 0.94));
+  box-shadow: inset 0 0 24px rgba(120, 188, 255, 0.08);
+}
+
+.referral-contest-hero .season-hero-header {
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.referral-contest-hero .season-hero-copy h4 {
+  font-size: 30px;
+  line-height: 1.02;
+}
+
+.referral-contest-hero .season-hero-copy p {
+  max-width: none;
+  font-family: 'Manrope', system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  letter-spacing: 0;
+  text-transform: none;
+  color: rgba(228, 238, 248, 0.86);
+}
+
+.referral-contest-kicker {
+  border-color: rgba(120, 188, 255, 0.3);
+  background: rgba(120, 188, 255, 0.11);
+  color: #cce9ff;
+}
+
+.season-status-card.referral-contest-status-card {
+  border-color: rgba(120, 188, 255, 0.3);
+  text-align: left;
+  justify-items: start;
+  padding: 11px 13px;
+}
+
+.season-status-card.referral-contest-status-card strong {
+  font-size: 20px;
+  letter-spacing: 0.2px;
+}
+
+.season-status-card.referral-contest-status-card span:last-child {
+  font-size: 11px;
+  color: rgba(215, 229, 240, 0.68);
+}
+
+.referral-contest-summary-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.referral-contest-summary-grid .season-summary-card {
+  min-height: 64px;
+  padding: 10px 11px;
+}
+
+.referral-contest-summary-grid .season-summary-card strong {
+  font-size: 18px;
+}
+
+.referral-contest-prizes-card {
+  grid-column: 1 / -1;
+  gap: 8px;
+}
+
+.referral-contest-prize-list {
+  display: grid;
+  gap: 7px;
+}
+
+.referral-contest-prize-item {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 214, 122, 0.2);
+  background: rgba(14, 20, 30, 0.56);
+}
+
+.referral-contest-prize-item > span {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 214, 122, 0.32);
+  background: rgba(255, 214, 122, 0.08);
+  font-size: 10px;
+  letter-spacing: 0.45px;
+  text-transform: uppercase;
+  color: rgba(255, 228, 166, 0.95);
+}
+
+.referral-contest-prize-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #dcf6ff;
+  min-width: 0;
+}
+
+.referral-contest-prize-value .icon-img.tiny {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+
+.referral-contest-prize-value strong {
+  font-size: 20px;
+  line-height: 1;
+  color: #f8f6ef;
+}
+
+.referral-contest-prize-value span {
+  font-size: 12px;
+  letter-spacing: 0.25px;
+  color: rgba(221, 236, 249, 0.82);
+}
+
+.referral-contest-leaderboard {
+  border-color: rgba(120, 188, 255, 0.24);
+}
+
+.referral-contest-row-meta {
+  margin-top: 3px;
+  font-size: 12px;
+  color: rgba(206, 221, 236, 0.74);
+}
+
+.referral-contest-points {
+  color: #d8f2ff;
+}
+
+.referral-contest-points strong {
+  font-size: 14px;
+}
+
+.referral-contest-empty {
+  text-align: center;
+}
+
+.referral-contest-empty p {
+  margin: 0;
+}
+
+@media (max-width: 720px) {
+  .referral-contest-hero .season-hero-copy h4 {
+    font-size: 24px;
+  }
+
+  .season-status-card.referral-contest-status-card strong {
+    font-size: 17px;
+  }
+
+  .referral-contest-summary-grid .season-summary-card {
+    min-height: 0;
+  }
+
+  .referral-contest-summary-grid .season-summary-card strong {
+    font-size: 16px;
+  }
+
+  .referral-contest-prize-item {
+    grid-template-columns: 40px minmax(0, 1fr);
+    padding: 7px 8px;
+  }
+
+  .referral-contest-prize-value strong {
+    font-size: 18px;
+  }
+
+  .referral-contest-prize-value span {
+    font-size: 11px;
+  }
+
+  .referral-contest-row-meta {
+    font-size: 11px;
+  }
+}
+
 .premium-body {
   gap: 12px;
 }
@@ -6943,6 +7302,8 @@ button.ghost {
     transform: rotate(360deg);
   }
 }
+
+
 
 
 

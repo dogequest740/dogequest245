@@ -148,6 +148,24 @@ const EDGE_BASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?
 const EDGE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() || ''
 const TELEGRAM_BOT_USERNAME = String(import.meta.env.VITE_TELEGRAM_BOT_USERNAME ?? 'dogemmorpgbot').trim().replace(/^@+/, '')
 const SEASON_SNAPSHOT_MIN_CRYSTALS = 700
+const DEV_REFERRAL_CONTEST_FALLBACK: ReferralContestInfo = {
+  id: 'referral-rush-2026-04-10',
+  name: 'Referral Rush',
+  status: 'active',
+  startAt: '2026-04-09T21:00:00.000Z',
+  endAt: '2026-05-05T20:59:59.999Z',
+  reviewEndsAt: '2026-05-06T08:59:59.999Z',
+  remainingSec: 0,
+  levelTarget: 10,
+  basePoints: 5,
+  premiumPoints: 100,
+  prizes: {
+    first: 3000,
+    second: 2000,
+    third: 1000,
+  },
+}
+
 
 type CharacterClass = {
   id: string
@@ -561,6 +579,10 @@ type GameSecureResponse = {
   referralEntries?: ReferralEntry[]
   referralPendingKeys?: number
   referralPendingCrystals?: number
+  referralContest?: ReferralContestInfo | null
+  referralContestLeaderboard?: ReferralContestEntry[]
+  referralContestPlayer?: ReferralContestEntry | null
+  referralContestTotalParticipants?: number
   fortuneFreeSpinAvailable?: boolean
   fortunePaidSpins?: number
   fortuneReward?: FortuneReward
@@ -613,6 +635,36 @@ type ReferralEntry = {
   crystalsFromRef: number
   pendingCrystals: number
   pendingKeys: number
+}
+
+type ReferralContestStatus = 'upcoming' | 'active' | 'review' | 'closed'
+
+type ReferralContestInfo = {
+  id: string
+  name: string
+  status: ReferralContestStatus
+  startAt: string
+  endAt: string
+  reviewEndsAt: string
+  remainingSec: number
+  levelTarget: number
+  basePoints: number
+  premiumPoints: number
+  prizes: {
+    first: number
+    second: number
+    third: number
+  }
+}
+
+type ReferralContestEntry = {
+  rank: number
+  wallet: string
+  name: string
+  points: number
+  qualifiedReferrals: number
+  premiumReferrals: number
+  lastQualifiedAt: string
 }
 
 type FortuneRewardKind = 'consumable' | 'gold' | 'crystals' | 'keys'
@@ -3573,9 +3625,14 @@ function App() {
   const [referralLoading, setReferralLoading] = useState(false)
   const [referralClaimLoading, setReferralClaimLoading] = useState(false)
   const [referralError, setReferralError] = useState('')
+  const [referralPanelTab, setReferralPanelTab] = useState<'referrals' | 'contest'>('referrals')
   const [referralEntries, setReferralEntries] = useState<ReferralEntry[]>([])
   const [referralPendingKeys, setReferralPendingKeys] = useState(0)
   const [referralPendingCrystals, setReferralPendingCrystals] = useState(0)
+  const [referralContestInfo, setReferralContestInfo] = useState<ReferralContestInfo | null>(null)
+  const [referralContestLeaderboard, setReferralContestLeaderboard] = useState<ReferralContestEntry[]>([])
+  const [referralContestPlayer, setReferralContestPlayer] = useState<ReferralContestEntry | null>(null)
+  const [referralContestTotalParticipants, setReferralContestTotalParticipants] = useState(0)
   const [villageNameDraft, setVillageNameDraft] = useState('')
   const [villageError, setVillageError] = useState('')
   const [villageSelectedBuilding, setVillageSelectedBuilding] = useState<VillageBuildingId | null>(null)
@@ -4637,13 +4694,73 @@ function App() {
     setReferralEntries(entries)
     setReferralPendingKeys(Math.max(0, Math.floor(Number(result.referralPendingKeys ?? 0))))
     setReferralPendingCrystals(Math.max(0, Math.floor(Number(result.referralPendingCrystals ?? 0))))
+
+    const hasContestPayload =
+      Object.prototype.hasOwnProperty.call(result, 'referralContest') ||
+      Object.prototype.hasOwnProperty.call(result, 'referralContestLeaderboard') ||
+      Object.prototype.hasOwnProperty.call(result, 'referralContestPlayer') ||
+      Object.prototype.hasOwnProperty.call(result, 'referralContestTotalParticipants')
+
+    if (!hasContestPayload) return
+
+    const contest = result.referralContest
+    if (contest) {
+      setReferralContestInfo({
+        id: String(contest.id ?? ''),
+        name: String(contest.name ?? 'Referral Contest'),
+        status: (String(contest.status ?? 'upcoming') as ReferralContestStatus),
+        startAt: String(contest.startAt ?? ''),
+        endAt: String(contest.endAt ?? ''),
+        reviewEndsAt: String(contest.reviewEndsAt ?? ''),
+        remainingSec: Math.max(0, Math.floor(Number(contest.remainingSec ?? 0))),
+        levelTarget: Math.max(1, Math.floor(Number(contest.levelTarget ?? 10))),
+        basePoints: Math.max(0, Math.floor(Number(contest.basePoints ?? 0))),
+        premiumPoints: Math.max(0, Math.floor(Number(contest.premiumPoints ?? 0))),
+        prizes: {
+          first: Math.max(0, Math.floor(Number(contest.prizes?.first ?? 0))),
+          second: Math.max(0, Math.floor(Number(contest.prizes?.second ?? 0))),
+          third: Math.max(0, Math.floor(Number(contest.prizes?.third ?? 0))),
+        },
+      })
+    } else {
+      setReferralContestInfo(null)
+    }
+
+    const leaderboard = (result.referralContestLeaderboard ?? [])
+      .map((entry) => ({
+        rank: Math.max(1, Math.floor(Number(entry.rank ?? 0))),
+        wallet: String(entry.wallet ?? ''),
+        name: String(entry.name ?? ''),
+        points: Math.max(0, Math.floor(Number(entry.points ?? 0))),
+        qualifiedReferrals: Math.max(0, Math.floor(Number(entry.qualifiedReferrals ?? 0))),
+        premiumReferrals: Math.max(0, Math.floor(Number(entry.premiumReferrals ?? 0))),
+        lastQualifiedAt: String(entry.lastQualifiedAt ?? ''),
+      }))
+      .filter((entry) => entry.wallet)
+
+    setReferralContestLeaderboard(leaderboard)
+
+    const playerRow = result.referralContestPlayer
+      ? {
+          rank: Math.max(1, Math.floor(Number(result.referralContestPlayer.rank ?? 0))),
+          wallet: String(result.referralContestPlayer.wallet ?? ''),
+          name: String(result.referralContestPlayer.name ?? ''),
+          points: Math.max(0, Math.floor(Number(result.referralContestPlayer.points ?? 0))),
+          qualifiedReferrals: Math.max(0, Math.floor(Number(result.referralContestPlayer.qualifiedReferrals ?? 0))),
+          premiumReferrals: Math.max(0, Math.floor(Number(result.referralContestPlayer.premiumReferrals ?? 0))),
+          lastQualifiedAt: String(result.referralContestPlayer.lastQualifiedAt ?? ''),
+        }
+      : null
+
+    setReferralContestPlayer(playerRow && playerRow.wallet ? playerRow : null)
+    setReferralContestTotalParticipants(Math.max(0, Math.floor(Number(result.referralContestTotalParticipants ?? 0))))
   }
 
   const loadReferralEntries = async (_wallet: string, silent = false) => {
     if (!silent) setReferralLoading(true)
     setReferralError('')
 
-    const result = await callGameSecureAuthed('referrals_status', {}, true)
+    const result = await callGameSecureAuthed('referrals_status', { includeContest: true, contestLimit: 20 }, true)
     if (!result.ok) {
       setReferralError('Failed to load referrals.')
       setReferralEntries([])
@@ -4669,7 +4786,7 @@ function App() {
         ? referralIdentityFromLaunch
         : ''
 
-    const result = await callGameSecureAuthed('referrals_status', { applyReferrer }, false)
+    const result = await callGameSecureAuthed('referrals_status', { applyReferrer, includeContest: false }, false)
     if (!result.ok) return
 
     if (applyReferrer) {
@@ -5571,6 +5688,12 @@ function App() {
     if (stage !== 'game') return
     void syncReferralState()
   }, [stage, accountIdentity])
+
+  useEffect(() => {
+    if (activePanel !== 'referrals') return
+    if (!accountIdentity) return
+    void loadReferralEntries(accountIdentity, true)
+  }, [activePanel, accountIdentity])
 
   useEffect(() => {
     if (stage !== 'game') return
@@ -7096,6 +7219,45 @@ function App() {
   const premiumDaysLeft = hud ? getPremiumDaysLeft(hud.premiumEndsAt) : 0
   const premiumClaimReady = Boolean(hud && premiumActive && hud.premiumClaimDay !== currentDayKey)
   const seasonRemainingSec = seasonInfo ? Math.max(0, Math.floor((new Date(seasonInfo.endAt).getTime() - Date.now()) / 1000)) : 0
+  const referralContestNowMs = Date.now()
+  const useDevReferralContestFallback = import.meta.env.DEV && (() => {
+    if (!referralContestInfo) return true
+    const reviewEndsMs = new Date(referralContestInfo.reviewEndsAt).getTime()
+    if (Number.isFinite(reviewEndsMs) && referralContestNowMs > reviewEndsMs) return true
+    const endMs = new Date(referralContestInfo.endAt).getTime()
+    return !Number.isFinite(reviewEndsMs) && Number.isFinite(endMs) && referralContestNowMs > endMs
+  })()
+  const referralContestDisplayInfo = useDevReferralContestFallback ? DEV_REFERRAL_CONTEST_FALLBACK : referralContestInfo
+  const referralContestStatusNow: ReferralContestStatus | null = referralContestDisplayInfo
+    ? (() => {
+        const startMs = new Date(referralContestDisplayInfo.startAt).getTime()
+        const endMs = new Date(referralContestDisplayInfo.endAt).getTime()
+        const reviewEndsMs = new Date(referralContestDisplayInfo.reviewEndsAt).getTime()
+        if (Number.isFinite(startMs) && referralContestNowMs < startMs) return 'upcoming'
+        if (Number.isFinite(endMs) && referralContestNowMs <= endMs) return 'active'
+        if (Number.isFinite(reviewEndsMs) && referralContestNowMs <= reviewEndsMs) return 'review'
+        return 'closed'
+      })()
+    : null
+  const referralContestTargetIso = referralContestDisplayInfo
+    ? referralContestStatusNow === 'upcoming'
+      ? referralContestDisplayInfo.startAt
+      : referralContestStatusNow === 'active'
+        ? referralContestDisplayInfo.endAt
+        : referralContestStatusNow === 'review'
+          ? referralContestDisplayInfo.reviewEndsAt
+          : ''
+    : ''
+  const referralContestRemainingSec = referralContestTargetIso
+    ? Math.max(0, Math.floor((new Date(referralContestTargetIso).getTime() - referralContestNowMs) / 1000))
+    : Math.max(0, Math.floor(Number(referralContestDisplayInfo?.remainingSec ?? 0)))
+  const referralContestStatusLabel = referralContestStatusNow === 'upcoming'
+    ? 'Starts in'
+    : referralContestStatusNow === 'active'
+      ? 'Ends in'
+      : referralContestStatusNow === 'review'
+        ? 'Review ends in'
+        : 'Contest closed'
   const xpProgressPercent = hud ? Math.max(0, Math.min(100, Math.round((hud.xp / Math.max(1, hud.xpNext)) * 100))) : 0
   const seasonPlayerCrystals = seasonPlayer?.crystals ?? hud?.crystals ?? 0
   const fortuneCanSpin = fortuneFreeSpinAvailable || fortunePaidSpins > 0
@@ -8700,11 +8862,24 @@ function App() {
       )}
 
       {activePanel === 'referrals' && hud && (
-        <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
+        <div
+          className="modal-backdrop"
+          onClick={() => {
+            setActivePanel(null)
+            setReferralPanelTab('referrals')
+          }}
+        >
           <div className="modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <h3>Referrals</h3>
-              <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => {
+                  setActivePanel(null)
+                  setReferralPanelTab('referrals')
+                }}
+              >
                 Close
               </button>
             </div>
@@ -8716,60 +8891,202 @@ function App() {
                   <div className="withdraw-note">Share your link and receive referral rewards.</div>
                 </div>
               </div>
-              <label className="withdraw-label">
-                Your referral link
-                <input type="text" value={referralLink} readOnly placeholder={usingTelegramAuth ? 'Telegram referral link will appear here.' : ''} />
-              </label>
-              <div className="referral-actions">
-                <button type="button" className="withdraw-submit" onClick={copyReferralLink} disabled={!referralLink}>
-                  {referralCopied ? 'Copied' : 'Copy link'}
+
+              <div className="referral-panel-tabs">
+                <button
+                  type="button"
+                  className={referralPanelTab === 'referrals' ? 'active' : ''}
+                  onClick={() => setReferralPanelTab('referrals')}
+                >
+                  <img className="referral-tab-icon" src={iconTablerUsersPlus} alt="" />
+                  Referrals
                 </button>
-                {usingTelegramAuth && (
-                  <button type="button" className="withdraw-submit" onClick={shareReferralLink} disabled={!referralLink}>
-                    Send to friend
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className={referralPanelTab === 'contest' ? 'active' : ''}
+                  onClick={() => setReferralPanelTab('contest')}
+                >
+                  <img className="referral-tab-icon" src={iconTablerTrophy} alt="" />
+                  Contest
+                </button>
               </div>
-              <div className="withdraw-info referral-conditions">
-                <strong>Conditions</strong>
-                <div className="referral-bonus keys">
-                  <img className="icon-img small" src={iconKey} alt="" />
-                  +{REFERRAL_KEY_BONUS} keys
-                  <span>for each friend who reaches level {REFERRAL_LEVEL_TARGET}</span>
-                </div>
-                <div className="referral-bonus crystals">
-                  <img className="icon-img small" src={iconCrystals} alt="" />
-                  {Math.round(REFERRAL_CRYSTAL_RATE * 100)}% of crystals
-                  <span>earned by each referred friend</span>
-                </div>
-              </div>
-              <div className="withdraw-info referral-summary">
-                <span>
-                  Friends: <strong>{referralEntries.length}</strong>
-                </span>
-                <span>
-                  Pending: <strong>+{formatNumber(referralPendingKeys)}</strong> keys, <strong>+{formatNumber(referralPendingCrystals)}</strong>{' '}
-                  crystals
-                </span>
-                <span>
-                  Crystals from referrals:{' '}
-                  <strong>{formatNumber(referralEntries.reduce((sum, entry) => sum + entry.crystalsFromRef, 0))}</strong>
-                </span>
-              </div>
-              <button type="button" className="withdraw-submit" disabled={referralClaimLoading} onClick={claimReferralRewards}>
-                {referralClaimLoading ? 'Claiming...' : 'Claim rewards'}
-              </button>
-              <div className="referral-list">
-                {referralLoading && <div className="muted">Loading referrals...</div>}
-                {!referralLoading && referralEntries.length === 0 && <div className="muted">No referrals yet.</div>}
-                {referralEntries.map((entry) => (
-                  <div key={entry.wallet} className="referral-row">
-                    <span className="wallet-chip">{formatShortWallet(entry.wallet)}</span>
-                    <span>Lvl {formatNumber(entry.level)}</span>
-                    <span>{formatNumber(entry.crystalsFromRef)} claimed crystals</span>
+
+              {referralPanelTab === 'referrals' ? (
+                <>
+                  <label className="withdraw-label">
+                    Your referral link
+                    <input type="text" value={referralLink} readOnly placeholder={usingTelegramAuth ? 'Telegram referral link will appear here.' : ''} />
+                  </label>
+                  <div className="referral-actions">
+                    <button type="button" className="withdraw-submit" onClick={copyReferralLink} disabled={!referralLink}>
+                      {referralCopied ? 'Copied' : 'Copy link'}
+                    </button>
+                    {usingTelegramAuth && (
+                      <button type="button" className="withdraw-submit" onClick={shareReferralLink} disabled={!referralLink}>
+                        Send to friend
+                      </button>
+                    )}
                   </div>
-                ))}
-              </div>
+                  <div className="withdraw-info referral-conditions">
+                    <strong>Conditions</strong>
+                    <div className="referral-bonus keys">
+                      <img className="icon-img small" src={iconKey} alt="" />
+                      +{REFERRAL_KEY_BONUS} keys
+                      <span>for each friend who reaches level {REFERRAL_LEVEL_TARGET}</span>
+                    </div>
+                    <div className="referral-bonus crystals">
+                      <img className="icon-img small" src={iconCrystals} alt="" />
+                      {Math.round(REFERRAL_CRYSTAL_RATE * 100)}% of crystals
+                      <span>earned by each referred friend</span>
+                    </div>
+                  </div>
+                  <div className="withdraw-info referral-summary">
+                    <span>
+                      Friends: <strong>{referralEntries.length}</strong>
+                    </span>
+                    <span>
+                      Pending: <strong>+{formatNumber(referralPendingKeys)}</strong> keys, <strong>+{formatNumber(referralPendingCrystals)}</strong>{' '}
+                      crystals
+                    </span>
+                    <span>
+                      Crystals from referrals:{' '}
+                      <strong>{formatNumber(referralEntries.reduce((sum, entry) => sum + entry.crystalsFromRef, 0))}</strong>
+                    </span>
+                  </div>
+                  <button type="button" className="withdraw-submit" disabled={referralClaimLoading} onClick={claimReferralRewards}>
+                    {referralClaimLoading ? 'Claiming...' : 'Claim rewards'}
+                  </button>
+                  <div className="referral-list">
+                    {referralLoading && <div className="muted">Loading referrals...</div>}
+                    {!referralLoading && referralEntries.length === 0 && <div className="muted">No referrals yet.</div>}
+                    {referralEntries.map((entry) => (
+                      <div key={entry.wallet} className="referral-row">
+                        <span className="wallet-chip">{formatShortWallet(entry.wallet)}</span>
+                        <span>Lvl {formatNumber(entry.level)}</span>
+                        <span>{formatNumber(entry.crystalsFromRef)} claimed crystals</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <>
+                  {referralContestDisplayInfo ? (
+                    <div className="referral-contest-shell">
+                      <div className="season-hero referral-contest-hero">
+                        <div className="season-hero-header">
+                          <div className="season-hero-copy">
+                            <span className="season-kicker referral-contest-kicker">
+                              <img className="icon-img tiny" src={iconTablerTrophy} alt="" />
+                              Contest
+                            </span>
+                            <h4>{referralContestDisplayInfo.name}</h4>
+                            <p>
+                              Score points with referrals who reach level {formatNumber(referralContestDisplayInfo.levelTarget)}+.
+                              +{formatNumber(referralContestDisplayInfo.basePoints)} points per referral {formatNumber(referralContestDisplayInfo.levelTarget)}lvl+ and +{formatNumber(referralContestDisplayInfo.premiumPoints)} points per premium referral.
+                            </p>
+                          </div>
+                          <div className="season-status-card referral-contest-status-card">
+                            <span className="season-status-label">{referralContestStatusLabel}</span>
+                            <strong>{referralContestStatusNow !== 'closed' ? formatSeasonCountdown(referralContestRemainingSec) : 'Closed'}</strong>
+                            <span>{new Date(referralContestDisplayInfo.endAt).toLocaleString('en-US')}</span>
+                          </div>
+                        </div>
+                        <div className="season-summary-grid referral-contest-summary-grid">
+                          <div className="season-summary-card">
+                            <span className="season-summary-label">Your Rank</span>
+                            <strong>{referralContestPlayer ? `#${formatNumber(referralContestPlayer.rank)}` : '—'}</strong>
+                          </div>
+                          <div className="season-summary-card">
+                            <span className="season-summary-label">Your Points</span>
+                            <strong>{formatNumber(referralContestPlayer?.points ?? 0)}</strong>
+                          </div>
+                          <div className="season-summary-card">
+                            <span className="season-summary-label">Participants</span>
+                            <strong>{formatNumber(referralContestTotalParticipants)}</strong>
+                          </div>
+                          <div className="season-summary-card season-summary-pool referral-contest-prizes-card">
+                            <span className="season-summary-label">Top Rewards</span>
+                            <div className="referral-contest-prize-list">
+                              <div className="referral-contest-prize-item">
+                                <span>1st</span>
+                                <div className="referral-contest-prize-value">
+                                  <img className="icon-img tiny" src={iconCrystals} alt="" />
+                                  <strong>{formatNumber(referralContestDisplayInfo.prizes.first)}</strong><span>Crystals</span>
+                                </div>
+                              </div>
+                              <div className="referral-contest-prize-item">
+                                <span>2nd</span>
+                                <div className="referral-contest-prize-value">
+                                  <img className="icon-img tiny" src={iconCrystals} alt="" />
+                                  <strong>{formatNumber(referralContestDisplayInfo.prizes.second)}</strong><span>Crystals</span>
+                                </div>
+                              </div>
+                              <div className="referral-contest-prize-item">
+                                <span>3rd</span>
+                                <div className="referral-contest-prize-value">
+                                  <img className="icon-img tiny" src={iconCrystals} alt="" />
+                                  <strong>{formatNumber(referralContestDisplayInfo.prizes.third)}</strong><span>Crystals</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="season-leaderboard referral-contest-leaderboard">
+                        <div className="season-leaderboard-header">
+                          <div>
+                            <h4>Top 20 Referrers</h4>
+                            <p>
+                              Points: +{formatNumber(referralContestDisplayInfo.basePoints)} referral {formatNumber(referralContestDisplayInfo.levelTarget)}lvl+ · +{formatNumber(referralContestDisplayInfo.premiumPoints)} premium referral.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="season-leaderboard-list">
+                          {referralLoading && <div className="muted">Loading contest leaderboard...</div>}
+                          {!referralLoading && referralContestLeaderboard.length === 0 && (
+                            <div className="season-empty-state referral-contest-empty">
+                              <p>No contest entries yet.</p>
+                            </div>
+                          )}
+                          {referralContestLeaderboard.map((entry) => {
+                            const isCurrentPlayer = entry.wallet === accountIdentity
+                            const rankTone = entry.rank <= 3 ? `top-${entry.rank}` : 'standard'
+                            const hasMedal = entry.rank <= 3
+                            return (
+                              <div
+                                key={entry.wallet + '-' + String(entry.rank)}
+                                className={`season-leaderboard-row referral-contest-row ${rankTone} ${isCurrentPlayer ? 'current-player' : ''}`}
+                              >
+                                <div className="season-rank-pill">
+                                  {hasMedal ? <span className={`season-medal top-${entry.rank}`}>{entry.rank}</span> : `#${entry.rank}`}
+                                </div>
+                                <div className="season-player-block">
+                                  <div className="season-player-name-row">
+                                    <strong>{entry.name || formatShortWallet(entry.wallet)}</strong>
+                                    {isCurrentPlayer && <span className="season-you-badge">You</span>}
+                                  </div>
+                                  <div className="referral-contest-row-meta">
+                                    {formatNumber(entry.qualifiedReferrals)} qualified · {formatNumber(entry.premiumReferrals)} premium
+                                  </div>
+                                </div>
+                                <div className="season-player-score referral-contest-points">
+                                  <img src={iconTablerTrophy} alt="" className="icon-img season-score-icon" />
+                                  <strong>{formatNumber(entry.points)}</strong>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="season-empty-state referral-contest-empty">
+                      <p>Contest data is unavailable right now.</p>
+                    </div>
+                  )}
+                </>
+              )}
+
               {referralError && <div className="withdraw-error">{referralError}</div>}
             </div>
           </div>
@@ -10112,5 +10429,10 @@ function App() {
   )
 }
 export default App
+
+
+
+
+
 
 
