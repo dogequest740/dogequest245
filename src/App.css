@@ -32,16 +32,15 @@
   min-height: 100vh;
   overflow: auto;
   overflow-x: hidden;
+  overscroll-behavior-y: contain;
 }
 
 .app.mobile.mobile-telegram {
   --tg-top-offset: 42px;
-  overscroll-behavior-y: auto;
 }
 
 .app.mobile.mobile-browser {
   --mobile-viewport-height: 100svh;
-  overscroll-behavior-y: contain;
 }
 
 .app.mobile .topbar {
@@ -6955,5 +6954,4 @@ button.ghost {
     transform: rotate(360deg);
   }
 }
-
 
