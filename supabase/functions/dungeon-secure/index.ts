@@ -12,6 +12,7 @@ const CHALLENGE_REUSE_WINDOW_SECONDS = 10;
 const TELEGRAM_AUTH_MAX_AGE_SECONDS = 24 * 60 * 60;
 const ITEM_TIER_SCORE_MULTIPLIER = 0.5;
 const PREMIUM_DUNGEON_CRYSTAL_MULTIPLIER = 1.5;
+const DUNGEON_CRYSTAL_REWARD_MULTIPLIER = 3;
 const BLOCKED_ERROR_MESSAGE = "You have been banned for cheating.";
 
 const DUNGEON_BASE_REQUIREMENTS = [
@@ -21,7 +22,7 @@ const DUNGEON_BASE_REQUIREMENTS = [
 const DUNGEON_REQUIREMENTS = DUNGEON_BASE_REQUIREMENTS.map((value) => Math.round(value * 2.5));
 
 const DUNGEON_REWARDS = DUNGEON_REQUIREMENTS.map((_, index) =>
-  Math.max(1, Math.round((6 + (index + 1) * 4 + Math.pow(index + 1, 1.1)) / 4))
+  Math.max(1, Math.round(((6 + (index + 1) * 4 + Math.pow(index + 1, 1.1)) / 4) * DUNGEON_CRYSTAL_REWARD_MULTIPLIER))
 );
 
 const corsHeaders = {
@@ -981,5 +982,4 @@ serve(async (req) => {
 
   return json({ ok: false, error: "Unknown action." });
 });
-
 

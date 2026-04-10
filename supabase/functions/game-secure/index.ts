@@ -66,7 +66,7 @@ const FORTUNE_SPIN_PRICES_LAMPORTS: Record<(typeof FORTUNE_SPIN_PACKS_SOL)[numbe
   1: Math.round(0.007 * SOL_LAMPORTS),
   10: Math.round(0.06 * SOL_LAMPORTS),
 };
-const MIN_SEASON_SNAPSHOT_CRYSTALS = 500;
+const MIN_SEASON_SNAPSHOT_CRYSTALS = 700;
 const ENERGY_REGEN_SECONDS = 420;
 const PREMIUM_PLANS = [
   { id: "premium-30", days: 30, lamports: Math.round(0.3 * SOL_LAMPORTS) },
@@ -1960,7 +1960,7 @@ const validateStateTransition = (
 
   // Crystals must primarily come from dungeon runs and matured staking claims.
   // World boss/referral/fortune/premium writes are server-side and should not be minted via profile_save.
-  const maxCrystalPerDungeonRun = 50;
+  const maxCrystalPerDungeonRun = 180;
   const stakeAllowance = Math.floor(stakeDecrease * (1 + STAKE_BONUS_RATE));
   const maxCrystalGain = dungeonDelta * maxCrystalPerDungeonRun + stakeAllowance;
   if (crystalGain > maxCrystalGain) return "Suspicious crystal gain detected.";
@@ -6247,11 +6247,4 @@ serve(async (req) => {
 
   return json({ ok: false, error: "Unknown action." });
 });
-
-
-
-
-
-
-
 

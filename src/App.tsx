@@ -147,7 +147,7 @@ const LANDING_BANNERS = [
 const EDGE_BASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || ''
 const EDGE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() || ''
 const TELEGRAM_BOT_USERNAME = String(import.meta.env.VITE_TELEGRAM_BOT_USERNAME ?? 'dogemmorpgbot').trim().replace(/^@+/, '')
-const SEASON_SNAPSHOT_MIN_CRYSTALS = 500
+const SEASON_SNAPSHOT_MIN_CRYSTALS = 700
 
 type CharacterClass = {
   id: string
@@ -1121,11 +1121,14 @@ const DUNGEON_BASE_REQUIREMENTS = [
 ]
 const DUNGEON_REQUIREMENTS = DUNGEON_BASE_REQUIREMENTS.map((value) => Math.round(value * 2.5))
 
+const DUNGEON_CRYSTAL_REWARD_MULTIPLIER = 3
+
+
 const DUNGEONS = DUNGEON_REQUIREMENTS.map((tierScore, index) => ({
   id: `crypt-${index + 1}`,
   name: `Crypt ${index + 1}`,
   tierScore,
-  reward: Math.max(1, Math.round((6 + (index + 1) * 4 + Math.pow(index + 1, 1.1)) / 4)),
+  reward: Math.max(1, Math.round(((6 + (index + 1) * 4 + Math.pow(index + 1, 1.1)) / 4) * DUNGEON_CRYSTAL_REWARD_MULTIPLIER)),
 }))
 
 const WORLD_BOSS_DURATION = 12 * 60 * 60
