@@ -4932,31 +4932,31 @@ button.ghost {
 
 .fortune-wheel-segment-content {
   position: absolute;
-  width: 54px;
+  width: 48px;
   display: grid;
   justify-items: center;
-  gap: 2px;
-  transform: translate(calc(-50% + 4px), -50%);
+  gap: 1px;
+  transform: translate(-50%, -50%);
   z-index: 2;
   pointer-events: none;
 }
 
 .fortune-segment-icon {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   object-fit: contain;
   filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.55));
 }
 
 .fortune-segment-qty {
-  font-size: 8px;
+  font-size: 7px;
   font-weight: 900;
   line-height: 1;
   color: #fff5d2;
   background: rgba(12, 10, 8, 0.45);
   border: 1px solid rgba(255, 226, 153, 0.28);
   border-radius: 8px;
-  padding: 1px 4px;
+  padding: 1px 3px;
   text-shadow:
     0 0 8px rgba(0, 0, 0, 0.65),
     0 1px 0 rgba(0, 0, 0, 0.7);
@@ -5579,17 +5579,17 @@ button.ghost {
 }
 
 .app.mobile .fortune-wheel-segment-content {
-  width: 44px;
+  width: 38px;
 }
 
 .app.mobile .fortune-segment-icon {
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
 }
 
 .app.mobile .fortune-segment-qty {
-  font-size: 7px;
-  padding: 1px 3px;
+  font-size: 6px;
+  padding: 1px 2px;
 }
 
 .app.mobile .fortune-wheel-center {
