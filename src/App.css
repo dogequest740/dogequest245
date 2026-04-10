@@ -4898,8 +4898,8 @@ button.ghost {
   height: 0;
   border-left: 14px solid transparent;
   border-right: 14px solid transparent;
-  border-top: 0;
-  border-bottom: 20px solid #ffe4a2;
+  border-top: 20px solid #ffe4a2;
+  border-bottom: 0;
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.45));
   z-index: 4;
 }
@@ -4936,7 +4936,7 @@ button.ghost {
   display: grid;
   justify-items: center;
   gap: 2px;
-  transform: translate(-50%, -50%);
+  transform: translate(calc(-50% + 4px), -50%);
   z-index: 2;
   pointer-events: none;
 }
