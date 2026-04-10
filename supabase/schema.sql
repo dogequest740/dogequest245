@@ -258,6 +258,45 @@ on public.telegram_stars_orders
 for select
 using (false);
 
+create table if not exists public.telegram_ton_orders (
+  id uuid primary key default gen_random_uuid(),
+  wallet text not null,
+  tg_user_id text not null,
+  payer_address text not null,
+  rail text not null,
+  kind text not null,
+  product_ref text not null default '',
+  asset text not null,
+  amount_units bigint not null,
+  amount_display text not null default '',
+  tx_hash_hex text unique,
+  tx_hash_base64 text,
+  status text not null default 'pending',
+  claim_error text not null default '',
+  reward jsonb not null default '{}'::jsonb,
+  claimed_at timestamptz,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  check (rail in ('ton', 'usdt')),
+  check (kind in ('buy_gold', 'starter_pack_buy', 'premium_buy', 'fortune_buy')),
+  check (asset in ('TON', 'USDT')),
+  check (amount_units > 0),
+  check (status in ('pending', 'claiming', 'claimed', 'failed', 'expired'))
+);
+
+create index if not exists telegram_ton_orders_wallet_created_idx on public.telegram_ton_orders(wallet, created_at desc);
+create index if not exists telegram_ton_orders_status_created_idx on public.telegram_ton_orders(status, created_at desc);
+create index if not exists telegram_ton_orders_wallet_status_idx on public.telegram_ton_orders(wallet, status);
+
+alter table public.telegram_ton_orders enable row level security;
+
+drop policy if exists "telegram ton no client read" on public.telegram_ton_orders;
+
+create policy "telegram ton no client read"
+on public.telegram_ton_orders
+for select
+using (false);
+
 create table if not exists public.telegram_notification_state (
   wallet text primary key,
   tg_user_id text not null,

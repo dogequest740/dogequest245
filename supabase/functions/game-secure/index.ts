@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { clusterApiUrl, Connection, PublicKey } from "https://esm.sh/@solana/web3.js@1.98.4";
+import { Address, beginCell } from "https://esm.sh/@ton/core@0.62.0";
 
 const MAX_LEVEL = 255;
 const MAX_TICKETS = 30;
@@ -99,6 +100,47 @@ const TELEGRAM_STARS_PREMIUM_PLANS: Record<(typeof PREMIUM_PLANS)[number]["id"],
 const TELEGRAM_STARS_FORTUNE_PACKS: Record<(typeof FORTUNE_SPIN_PACKS_SOL)[number], number> = {
   1: 20,
   10: 150,
+};
+
+const TELEGRAM_TON_TREASURY_WALLET = String(Deno.env.get("TON_TREASURY_WALLET") ?? "UQBquMaMtbGIbDKL5W0bwl0nDCVdg5joq5mbp7jLSaM3hp0i").trim();
+const TELEGRAM_TON_USDT_MASTER = String(Deno.env.get("TON_USDT_MASTER_ADDRESS") ?? "0:b113a994b5024a16719f69139328eb759596c38a25f59028b146fecdc3621dfe").trim();
+const TELEGRAM_TON_API_BASE = String(Deno.env.get("TONCENTER_API_BASE") ?? "https://toncenter.com/api/v3").trim().replace(/\/+$/, "");
+const TELEGRAM_TON_API_KEY = String(Deno.env.get("TONCENTER_API_KEY") ?? "").trim();
+const TELEGRAM_TON_ORDER_STATUSES = ["pending", "claiming", "claimed", "failed", "expired"] as const;
+const TELEGRAM_TON_ORDER_SELECT = "id, wallet, tg_user_id, payer_address, rail, kind, product_ref, asset, amount_units, amount_display, tx_hash_hex, tx_hash_base64, status, claim_error, reward, claimed_at, created_at, updated_at";
+const TELEGRAM_TON_USDT_DECIMALS = 6;
+const TELEGRAM_TON_USDT_GAS_NANOTON = 60_000_000n;
+const TELEGRAM_TON_TRANSFER_LOOKUP_WINDOW_SECONDS = 3 * 60 * 60;
+const TELEGRAM_TON_TX_VALID_SECONDS = 15 * 60;
+const TELEGRAM_TON_STARTER_PACK = 8.5;
+const TELEGRAM_USDT_STARTER_PACK = 11;
+const TELEGRAM_TON_GOLD_PACKS: Record<(typeof GOLD_PACKS_SOL)[number]["id"], number> = {
+  "gold-50k": 2.6,
+  "gold-100k": 4.5,
+  "gold-500k": 18,
+  "gold-1200k": 32,
+};
+const TELEGRAM_USDT_GOLD_PACKS: Record<(typeof GOLD_PACKS_SOL)[number]["id"], number> = {
+  "gold-50k": 3.4,
+  "gold-100k": 5.8,
+  "gold-500k": 23,
+  "gold-1200k": 41,
+};
+const TELEGRAM_TON_PREMIUM_PLANS: Record<(typeof PREMIUM_PLANS)[number]["id"], number> = {
+  "premium-30": 13,
+  "premium-90": 31,
+};
+const TELEGRAM_USDT_PREMIUM_PLANS: Record<(typeof PREMIUM_PLANS)[number]["id"], number> = {
+  "premium-30": 16,
+  "premium-90": 40,
+};
+const TELEGRAM_TON_FORTUNE_PACKS: Record<(typeof FORTUNE_SPIN_PACKS_SOL)[number], number> = {
+  1: 0.32,
+  10: 2.6,
+};
+const TELEGRAM_USDT_FORTUNE_PACKS: Record<(typeof FORTUNE_SPIN_PACKS_SOL)[number], number> = {
+  1: 0.4,
+  10: 3.4,
 };
 const TELEGRAM_STARS_PENDING_REUSE_MS = 20 * 60 * 1000;
 const TELEGRAM_STARS_ORDER_STATUSES = [
@@ -434,6 +476,67 @@ type TelegramStarsOrderPublic = {
   invoiceLink: string;
   createdAt: string;
   paidAt: string | null;
+  claimedAt: string | null;
+};
+
+type TelegramTonRail = "ton" | "usdt";
+type TelegramTonAsset = "TON" | "USDT";
+type TelegramTonOrderStatus = (typeof TELEGRAM_TON_ORDER_STATUSES)[number];
+type TelegramTonOrderKind = TelegramStarsOrderKind;
+
+type TelegramTonOrderRow = {
+  id: string;
+  wallet: string;
+  tg_user_id: string;
+  payer_address: string;
+  rail: string;
+  kind: string;
+  product_ref: string;
+  asset: string;
+  amount_units: number | string;
+  amount_display: string;
+  tx_hash_hex: string | null;
+  tx_hash_base64: string | null;
+  status: string;
+  claim_error: string;
+  reward: Record<string, unknown>;
+  claimed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type TelegramTonPreparedPurchase = {
+  kind: TelegramTonOrderKind;
+  productRef: string;
+  rail: TelegramTonRail;
+  asset: TelegramTonAsset;
+  amountUnits: bigint;
+  amountDisplay: string;
+  title: string;
+  reward: Record<string, unknown>;
+};
+
+type TelegramTonTxMessage = {
+  address: string;
+  amount: string;
+  payload?: string;
+};
+
+type TelegramTonOrderPublic = {
+  id: string;
+  kind: TelegramTonOrderKind;
+  productRef: string;
+  rail: TelegramTonRail;
+  asset: TelegramTonAsset;
+  amountUnits: number;
+  amountDisplay: string;
+  payerAddress: string;
+  status: TelegramTonOrderStatus;
+  txRequest: {
+    validUntil: number;
+    messages: TelegramTonTxMessage[];
+  };
+  createdAt: string;
   claimedAt: string | null;
 };
 type VillageBuildingId = "castle" | "mine" | "lab" | "storage";
@@ -855,6 +958,303 @@ const prepareTelegramStarsPurchase = (
   };
 };
 
+const isTelegramTonRail = (value: string): value is TelegramTonRail =>
+  value === "ton" || value === "usdt";
+
+const isTelegramTonOrderStatus = (value: string): value is TelegramTonOrderStatus =>
+  (TELEGRAM_TON_ORDER_STATUSES as readonly string[]).includes(value);
+
+const normalizeTonAddress = (value: unknown) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  try {
+    return Address.parse(raw).toString({ bounceable: false, testOnly: false, urlSafe: true });
+  } catch {
+    return "";
+  }
+};
+
+const paymentAmountToDisplay = (value: number) => {
+  if (!Number.isFinite(value) || value <= 0) return "0";
+  return Number.isInteger(value) ? String(Math.floor(value)) : value.toString();
+};
+
+const decimalToUnits = (value: number, decimals: number) => {
+  if (!Number.isFinite(value) || value <= 0) return 0n;
+  const factor = Math.pow(10, decimals);
+  return BigInt(Math.round(value * factor));
+};
+
+const normalizeTxHashHex = (value: unknown) => {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return "";
+  const trimmed = raw.startsWith("0x") ? raw.slice(2) : raw;
+  return /^[0-9a-f]{64}$/.test(trimmed) ? trimmed : "";
+};
+
+const normalizeTxHashBase64 = (value: unknown) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const normalized = raw.replace(/-/g, "+").replace(/_/g, "/");
+  const padLength = normalized.length % 4 === 0 ? 0 : 4 - (normalized.length % 4);
+  return `${normalized}${"=".repeat(padLength)}`;
+};
+
+const uint8ToBase64 = (bytes: Uint8Array) => {
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary);
+};
+
+const createTonCommentPayload = (comment: string) => {
+  const text = String(comment ?? "").trim();
+  if (!text) return "";
+  const cell = beginCell().storeUint(0, 32).storeStringTail(text).endCell();
+  return uint8ToBase64(cell.toBoc());
+};
+
+const tonCenterGet = async (path: string, params: Record<string, string | number | boolean | undefined>) => {
+  const url = new URL(`${TELEGRAM_TON_API_BASE}${path}`);
+  for (const [key, rawValue] of Object.entries(params)) {
+    if (rawValue === undefined || rawValue === null) continue;
+    url.searchParams.set(key, String(rawValue));
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const headers: Record<string, string> = {};
+    if (TELEGRAM_TON_API_KEY) headers["X-API-Key"] = TELEGRAM_TON_API_KEY;
+
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers,
+      signal: controller.signal,
+    });
+
+    const rawText = await response.text();
+    if (!response.ok) {
+      return { ok: false as const, error: `TON API ${response.status}: ${rawText || response.statusText}` };
+    }
+
+    let data: Record<string, unknown> | null = null;
+    try {
+      data = rawText ? JSON.parse(rawText) as Record<string, unknown> : null;
+    } catch {
+      data = null;
+    }
+    return { ok: true as const, data };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false as const, error: `TON API request failed: ${message}` };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+const parseApiTransactions = (data: Record<string, unknown> | null) => {
+  if (!data) return [] as Array<Record<string, unknown>>;
+  const rows = data.transactions;
+  if (!Array.isArray(rows)) return [];
+  return rows.filter((entry) => entry && typeof entry === "object") as Array<Record<string, unknown>>;
+};
+
+const parseApiJettonTransfers = (data: Record<string, unknown> | null) => {
+  if (!data) return [] as Array<Record<string, unknown>>;
+  const rows = data.jetton_transfers;
+  if (!Array.isArray(rows)) return [];
+  return rows.filter((entry) => entry && typeof entry === "object") as Array<Record<string, unknown>>;
+};
+
+const parseApiJettonWallets = (data: Record<string, unknown> | null) => {
+  if (!data) return [] as Array<Record<string, unknown>>;
+  const rows = data.jetton_wallets;
+  if (!Array.isArray(rows)) return [];
+  return rows.filter((entry) => entry && typeof entry === "object") as Array<Record<string, unknown>>;
+};
+
+const getTelegramTonPrice = (kind: TelegramTonOrderKind, productRef: string, rail: TelegramTonRail) => {
+  if (kind === "buy_gold") {
+    const pack = getGoldPackSol(productRef);
+    if (!pack) return null;
+    const value = rail === "ton" ? TELEGRAM_TON_GOLD_PACKS[pack.id] : TELEGRAM_USDT_GOLD_PACKS[pack.id];
+    if (!Number.isFinite(value) || value <= 0) return null;
+    return {
+      numeric: value,
+      units: rail === "ton" ? decimalToUnits(value, 9) : decimalToUnits(value, TELEGRAM_TON_USDT_DECIMALS),
+    };
+  }
+
+  if (kind === "starter_pack_buy") {
+    const value = rail === "ton" ? TELEGRAM_TON_STARTER_PACK : TELEGRAM_USDT_STARTER_PACK;
+    return {
+      numeric: value,
+      units: rail === "ton" ? decimalToUnits(value, 9) : decimalToUnits(value, TELEGRAM_TON_USDT_DECIMALS),
+    };
+  }
+
+  if (kind === "premium_buy") {
+    const plan = getPremiumPlan(productRef, 0);
+    if (!plan) return null;
+    const value = rail === "ton" ? TELEGRAM_TON_PREMIUM_PLANS[plan.id] : TELEGRAM_USDT_PREMIUM_PLANS[plan.id];
+    if (!Number.isFinite(value) || value <= 0) return null;
+    return {
+      numeric: value,
+      units: rail === "ton" ? decimalToUnits(value, 9) : decimalToUnits(value, TELEGRAM_TON_USDT_DECIMALS),
+    };
+  }
+
+  const spins = asInt(productRef, 0);
+  if (!(FORTUNE_SPIN_PACKS_SOL as readonly number[]).includes(spins)) return null;
+  const value = rail === "ton"
+    ? TELEGRAM_TON_FORTUNE_PACKS[spins as (typeof FORTUNE_SPIN_PACKS_SOL)[number]]
+    : TELEGRAM_USDT_FORTUNE_PACKS[spins as (typeof FORTUNE_SPIN_PACKS_SOL)[number]];
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return {
+    numeric: value,
+    units: rail === "ton" ? decimalToUnits(value, 9) : decimalToUnits(value, TELEGRAM_TON_USDT_DECIMALS),
+  };
+};
+
+const prepareTelegramTonPurchase = (
+  body: Record<string, unknown>,
+): { ok: true; purchase: TelegramTonPreparedPurchase } | { ok: false; error: string } => {
+  const kindRaw = String(body.kind ?? "").trim();
+  if (!isTelegramStarsOrderKind(kindRaw)) {
+    return { ok: false, error: "Invalid payment kind." };
+  }
+
+  const railRaw = String(body.rail ?? "").trim().toLowerCase();
+  if (!isTelegramTonRail(railRaw)) {
+    return { ok: false, error: "Invalid payment rail." };
+  }
+
+  const kind = kindRaw as TelegramTonOrderKind;
+  const rail = railRaw as TelegramTonRail;
+
+  if (kind === "buy_gold") {
+    const pack = getGoldPackSol(body.packId);
+    if (!pack) return { ok: false, error: "Invalid gold package." };
+    const price = getTelegramTonPrice(kind, pack.id, rail);
+    if (!price) return { ok: false, error: "Payment pricing is not configured." };
+    return {
+      ok: true,
+      purchase: {
+        kind,
+        rail,
+        asset: rail === "ton" ? "TON" : "USDT",
+        productRef: pack.id,
+        amountUnits: price.units,
+        amountDisplay: paymentAmountToDisplay(price.numeric),
+        title: `${pack.gold} Gold`,
+        reward: { packId: pack.id, gold: pack.gold },
+      },
+    };
+  }
+
+  if (kind === "starter_pack_buy") {
+    const price = getTelegramTonPrice(kind, "starter-pack-v1", rail);
+    if (!price) return { ok: false, error: "Payment pricing is not configured." };
+    return {
+      ok: true,
+      purchase: {
+        kind,
+        rail,
+        asset: rail === "ton" ? "TON" : "USDT",
+        productRef: "starter-pack-v1",
+        amountUnits: price.units,
+        amountDisplay: paymentAmountToDisplay(price.numeric),
+        title: "Starter Pack",
+        reward: {
+          gold: STARTER_PACK_GOLD,
+          items: STARTER_PACK_ITEMS,
+          worldBossTickets: WORLD_BOSS_STARTER_TICKETS,
+        },
+      },
+    };
+  }
+
+  if (kind === "premium_buy") {
+    const plan = getPremiumPlan(body.planId, body.days);
+    if (!plan) return { ok: false, error: "Invalid Premium plan." };
+    const price = getTelegramTonPrice(kind, plan.id, rail);
+    if (!price) return { ok: false, error: "Payment pricing is not configured." };
+    return {
+      ok: true,
+      purchase: {
+        kind,
+        rail,
+        asset: rail === "ton" ? "TON" : "USDT",
+        productRef: plan.id,
+        amountUnits: price.units,
+        amountDisplay: paymentAmountToDisplay(price.numeric),
+        title: `Premium ${plan.days}d`,
+        reward: { planId: plan.id, days: plan.days },
+      },
+    };
+  }
+
+  const spins = asInt(body.spins, 0);
+  if (!(FORTUNE_SPIN_PACKS_SOL as readonly number[]).includes(spins)) {
+    return { ok: false, error: "Invalid fortune spin pack." };
+  }
+  const price = getTelegramTonPrice(kind, String(spins), rail);
+  if (!price) return { ok: false, error: "Payment pricing is not configured." };
+  return {
+    ok: true,
+    purchase: {
+      kind,
+      rail,
+      asset: rail === "ton" ? "TON" : "USDT",
+      productRef: String(spins),
+      amountUnits: price.units,
+      amountDisplay: paymentAmountToDisplay(price.numeric),
+      title: `${spins} Fortune Spin${spins === 1 ? "" : "s"}`,
+      reward: { spins },
+    },
+  };
+};
+
+const normalizeTelegramTonOrder = (
+  rowRaw: unknown,
+  txRequest?: { validUntil: number; messages: TelegramTonTxMessage[] } | null,
+): TelegramTonOrderPublic | null => {
+  if (!rowRaw || typeof rowRaw !== "object" || Array.isArray(rowRaw)) return null;
+  const row = rowRaw as Record<string, unknown>;
+  const kind = String(row.kind ?? "").trim();
+  const rail = String(row.rail ?? "").trim();
+  const asset = String(row.asset ?? "").trim();
+  const statusRaw = String(row.status ?? "").trim();
+  if (!isTelegramStarsOrderKind(kind)) return null;
+  if (!isTelegramTonRail(rail)) return null;
+  if (asset !== "TON" && asset !== "USDT") return null;
+  if (!isTelegramTonOrderStatus(statusRaw)) return null;
+
+  return {
+    id: String(row.id ?? ""),
+    kind,
+    productRef: String(row.product_ref ?? ""),
+    rail,
+    asset: asset as TelegramTonAsset,
+    amountUnits: Math.max(0, asInt(row.amount_units, 0)),
+    amountDisplay: String(row.amount_display ?? ""),
+    payerAddress: String(row.payer_address ?? ""),
+    status: statusRaw,
+    txRequest: txRequest ?? { validUntil: 0, messages: [] },
+    createdAt: String(row.created_at ?? ""),
+    claimedAt: row.claimed_at ? String(row.claimed_at) : null,
+  };
+};
+
+const isMatchingTxHash = (value: unknown, targetHex: string, targetBase64: string) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return false;
+  if (targetHex && normalizeTxHashHex(raw) === targetHex) return true;
+  if (targetBase64 && normalizeTxHashBase64(raw) === targetBase64) return true;
+  return false;
+};
 const createTelegramStarsInvoiceLink = async (
   botToken: string,
   payload: {
@@ -4465,7 +4865,507 @@ serve(async (req) => {
       ...payload,
     });
   }
-  if (action === "fortune_buy") {
+
+  if (action === "tg_ton_create") {
+    if (!isTelegramIdentity(auth.wallet)) {
+      return json({ ok: false, error: "TON payments are available only in Telegram Mini App." });
+    }
+
+    const telegramUserId = getTelegramUserIdFromIdentity(auth.wallet);
+    if (!telegramUserId) {
+      return json({ ok: false, error: "Invalid Telegram identity." });
+    }
+
+    const treasuryWallet = normalizeTonAddress(TELEGRAM_TON_TREASURY_WALLET);
+    if (!treasuryWallet) {
+      return json({ ok: false, error: "TON treasury wallet is not configured." });
+    }
+
+    const usdtMaster = normalizeTonAddress(TELEGRAM_TON_USDT_MASTER);
+    if (!usdtMaster) {
+      return json({ ok: false, error: "TON USDT master address is not configured." });
+    }
+
+    const payerAddress = normalizeTonAddress(body.payerAddress ?? "");
+    if (!payerAddress) {
+      return json({ ok: false, error: "Connect Telegram Wallet first." });
+    }
+
+    const prepared = prepareTelegramTonPurchase(body);
+    if (!prepared.ok) {
+      return json({ ok: false, error: prepared.error });
+    }
+
+    if (prepared.purchase.kind === "starter_pack_buy") {
+      const { data: profileRow, error: profileError } = await supabase
+        .from("profiles")
+        .select("state")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+      if (profileError) {
+        return json({ ok: false, error: "Failed to load profile." });
+      }
+      const state = normalizeState(profileRow?.state ?? null);
+      if (!state) {
+        return json({ ok: false, error: "Profile not found." });
+      }
+      if (Boolean(state.starterPackPurchased)) {
+        return json({ ok: false, error: "Starter pack already purchased." });
+      }
+    }
+
+    const orderId = crypto.randomUUID();
+    const createdAtIso = now.toISOString();
+    let txMessages: TelegramTonTxMessage[] = [];
+
+    if (prepared.purchase.rail === "ton") {
+      txMessages = [{
+        address: treasuryWallet,
+        amount: prepared.purchase.amountUnits.toString(),
+        payload: createTonCommentPayload(`dgq-ton:${orderId}`),
+      }];
+    } else {
+      const jettonWalletResult = await tonCenterGet("/jetton/wallets", {
+        owner_address: payerAddress,
+        jetton_address: usdtMaster,
+        limit: 1,
+        offset: 0,
+      });
+      if (!jettonWalletResult.ok) {
+        return json({ ok: false, error: jettonWalletResult.error || "Failed to prepare USDT transfer wallet." });
+      }
+      const jettonWalletRows = parseApiJettonWallets(jettonWalletResult.data);
+      const senderJettonWallet = normalizeTonAddress(jettonWalletRows[0]?.address ?? "");
+      if (!senderJettonWallet) {
+        return json({ ok: false, error: "USDT wallet not found for connected TG wallet." });
+      }
+
+      const commentPayload = beginCell().storeUint(0, 32).storeStringTail(`dgq-usdt:${orderId}`).endCell();
+      const payloadCell = beginCell()
+        .storeUint(0x0f8a7ea5, 32)
+        .storeUint(BigInt(Date.now()), 64)
+        .storeCoins(prepared.purchase.amountUnits)
+        .storeAddress(Address.parse(treasuryWallet))
+        .storeAddress(Address.parse(payerAddress))
+        .storeBit(false)
+        .storeCoins(1n)
+        .storeBit(true)
+        .storeRef(commentPayload)
+        .endCell();
+
+      txMessages = [{
+        address: senderJettonWallet,
+        amount: TELEGRAM_TON_USDT_GAS_NANOTON.toString(),
+        payload: uint8ToBase64(payloadCell.toBoc()),
+      }];
+    }
+
+    if (!txMessages.length) {
+      return json({ ok: false, error: "Failed to build TON payment request." });
+    }
+
+    const { data: createdRow, error: createError } = await supabase
+      .from("telegram_ton_orders")
+      .insert({
+        id: orderId,
+        wallet: auth.wallet,
+        tg_user_id: telegramUserId,
+        payer_address: payerAddress,
+        rail: prepared.purchase.rail,
+        kind: prepared.purchase.kind,
+        product_ref: prepared.purchase.productRef,
+        asset: prepared.purchase.asset,
+        amount_units: prepared.purchase.amountUnits.toString(),
+        amount_display: prepared.purchase.amountDisplay,
+        status: "pending",
+        claim_error: "",
+        reward: prepared.purchase.reward,
+        created_at: createdAtIso,
+        updated_at: createdAtIso,
+      })
+      .select(TELEGRAM_TON_ORDER_SELECT)
+      .maybeSingle();
+
+    if (createError || !createdRow) {
+      return json({ ok: false, error: "Failed to create TON payment order." });
+    }
+
+    const txRequest = {
+      validUntil: Math.floor(Date.now() / 1000) + TELEGRAM_TON_TX_VALID_SECONDS,
+      messages: txMessages,
+    };
+    const normalizedOrder = normalizeTelegramTonOrder(createdRow, txRequest);
+    if (!normalizedOrder) {
+      return json({ ok: false, error: "Failed to encode TON order." });
+    }
+
+    await auditEvent(supabase, auth.wallet, "tg_ton_create", {
+      orderId,
+      kind: prepared.purchase.kind,
+      productRef: prepared.purchase.productRef,
+      rail: prepared.purchase.rail,
+      asset: prepared.purchase.asset,
+      amountUnits: prepared.purchase.amountUnits.toString(),
+      payerAddress,
+    });
+
+    return json({ ok: true, tgTonOrder: normalizedOrder, tgTonReused: false });
+  }
+
+  if (action === "tg_ton_claim") {
+    if (!isTelegramIdentity(auth.wallet)) {
+      return json({ ok: false, error: "TON payments are available only in Telegram Mini App." });
+    }
+
+    const orderId = String(body.orderId ?? "").trim().slice(0, 80);
+    if (!orderId) {
+      return json({ ok: false, error: "Missing TON order id." });
+    }
+
+    const txHashHex = normalizeTxHashHex(body.txHashHex ?? "");
+    const txHashBase64 = normalizeTxHashBase64(body.txHashBase64 ?? "");
+    if (!txHashHex && !txHashBase64) {
+      return json({ ok: false, error: "Missing TON transaction hash." });
+    }
+
+    const lockTs = now.toISOString();
+    const { data: lockedRow, error: lockError } = await supabase
+      .from("telegram_ton_orders")
+      .update({ status: "claiming", updated_at: lockTs, claim_error: "" })
+      .eq("id", orderId)
+      .eq("wallet", auth.wallet)
+      .eq("status", "pending")
+      .select(TELEGRAM_TON_ORDER_SELECT)
+      .maybeSingle();
+
+    if (lockError) {
+      return json({ ok: false, error: "Failed to lock TON payment order." });
+    }
+
+    let orderRow = lockedRow as TelegramTonOrderRow | null;
+    if (!orderRow) {
+      const { data: existingRow, error: existingError } = await supabase
+        .from("telegram_ton_orders")
+        .select(TELEGRAM_TON_ORDER_SELECT)
+        .eq("id", orderId)
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+      if (existingError || !existingRow) {
+        return json({ ok: false, error: "TON order not found." });
+      }
+      orderRow = existingRow as TelegramTonOrderRow;
+      const normalized = normalizeTelegramTonOrder(orderRow, null);
+      const status = String(orderRow.status ?? "");
+      if (status === "claimed") {
+        return json({ ok: true, tgTonAlreadyClaimed: true, tgTonOrder: normalized });
+      }
+      if (status === "pending") {
+        return json({ ok: false, error: "Payment transaction not found yet.", tgTonOrder: normalized });
+      }
+      if (status === "claiming") {
+        return json({ ok: false, error: "Purchase is being finalized. Retry in a few seconds.", tgTonOrder: normalized });
+      }
+      return json({ ok: false, error: `Purchase status: ${status || "unknown"}.`, tgTonOrder: normalized });
+    }
+
+    const orderKind = String(orderRow.kind ?? "").trim();
+    const orderRail = String(orderRow.rail ?? "").trim();
+    const orderPayer = normalizeTonAddress(orderRow.payer_address ?? "");
+    const amountUnits = BigInt(Math.max(0, asInt(orderRow.amount_units, 0)));
+    if (!isTelegramStarsOrderKind(orderKind) || !isTelegramTonRail(orderRail) || !orderPayer || amountUnits <= 0n) {
+      await supabase
+        .from("telegram_ton_orders")
+        .update({ status: "pending", updated_at: new Date().toISOString(), claim_error: "Invalid order payload." })
+        .eq("id", orderId)
+        .eq("wallet", auth.wallet)
+        .eq("status", "claiming");
+      return json({ ok: false, error: "Invalid TON order payload." });
+    }
+
+    const treasuryWallet = normalizeTonAddress(TELEGRAM_TON_TREASURY_WALLET);
+    const usdtMaster = normalizeTonAddress(TELEGRAM_TON_USDT_MASTER);
+    if (!treasuryWallet || !usdtMaster) {
+      await supabase
+        .from("telegram_ton_orders")
+        .update({ status: "pending", updated_at: new Date().toISOString(), claim_error: "TON rails are not configured." })
+        .eq("id", orderId)
+        .eq("wallet", auth.wallet)
+        .eq("status", "claiming");
+      return json({ ok: false, error: "TON rails are not configured." });
+    }
+
+    const createdAtMs = new Date(String(orderRow.created_at ?? now.toISOString())).getTime();
+    const startUtime = Math.max(0, Math.floor((Number.isFinite(createdAtMs) ? createdAtMs : Date.now()) / 1000) - TELEGRAM_TON_TRANSFER_LOOKUP_WINDOW_SECONDS);
+    const endUtime = Math.floor(Date.now() / 1000) + 120;
+
+    let paymentVerified = false;
+    if (orderRail === "ton") {
+      const txResult = await tonCenterGet("/transactions", {
+        account: orderPayer,
+        start_utime: startUtime,
+        end_utime: endUtime,
+        limit: 80,
+        sort: "desc",
+      });
+      if (!txResult.ok) {
+        await supabase
+          .from("telegram_ton_orders")
+          .update({ status: "pending", updated_at: new Date().toISOString(), claim_error: txResult.error || "TON API error." })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: txResult.error || "Failed to verify TON transaction." });
+      }
+
+      const txRows = parseApiTransactions(txResult.data);
+      for (const tx of txRows) {
+        const txHashRaw = tx.hash ?? tx.hash_norm;
+        if (!isMatchingTxHash(txHashRaw, txHashHex, txHashBase64)) continue;
+        const outMsgs = Array.isArray(tx.out_msgs) ? tx.out_msgs as Array<Record<string, unknown>> : [];
+        const hasTransfer = outMsgs.some((msg) => {
+          const destination = normalizeTonAddress(msg.destination ?? "");
+          if (destination !== treasuryWallet) return false;
+          const value = BigInt(String(msg.value ?? "0").trim() || "0");
+          return value >= amountUnits;
+        });
+        if (hasTransfer) {
+          paymentVerified = true;
+          break;
+        }
+      }
+    } else {
+      const transferResult = await tonCenterGet("/jetton/transfers", {
+        owner_address: orderPayer,
+        jetton_master: usdtMaster,
+        direction: "out",
+        start_utime: startUtime,
+        end_utime: endUtime,
+        limit: 120,
+        sort: "desc",
+      });
+      if (!transferResult.ok) {
+        await supabase
+          .from("telegram_ton_orders")
+          .update({ status: "pending", updated_at: new Date().toISOString(), claim_error: transferResult.error || "TON API error." })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: transferResult.error || "Failed to verify USDT transfer." });
+      }
+
+      const transferRows = parseApiJettonTransfers(transferResult.data);
+      for (const transfer of transferRows) {
+        if (!isMatchingTxHash(transfer.transaction_hash, txHashHex, txHashBase64)) continue;
+        const destination = normalizeTonAddress(transfer.destination ?? "");
+        const master = normalizeTonAddress(transfer.jetton_master ?? "");
+        if (destination !== treasuryWallet || master !== usdtMaster) continue;
+        const amount = BigInt(String(transfer.amount ?? "0").trim() || "0");
+        if (amount >= amountUnits && !Boolean(transfer.transaction_aborted)) {
+          paymentVerified = true;
+          break;
+        }
+      }
+    }
+
+    if (!paymentVerified) {
+      await supabase
+        .from("telegram_ton_orders")
+        .update({ status: "pending", updated_at: new Date().toISOString(), claim_error: "Payment transaction not found yet." })
+        .eq("id", orderId)
+        .eq("wallet", auth.wallet)
+        .eq("status", "claiming");
+      return json({ ok: false, error: "Payment transaction not found yet." });
+    }
+
+    let payload: Record<string, unknown> = {};
+
+    if (orderKind === "buy_gold") {
+      const pack = getGoldPackSol(orderRow.product_ref);
+      if (!pack) {
+        await supabase
+          .from("telegram_ton_orders")
+          .update({ status: "pending", updated_at: new Date().toISOString(), claim_error: "Invalid gold package." })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: "Invalid gold package in TON order." });
+      }
+
+      const creditResult = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
+        state.gold = Math.max(0, asInt(state.gold, 0)) + pack.gold;
+      });
+      if (!creditResult.ok || !creditResult.state) {
+        await supabase
+          .from("telegram_ton_orders")
+          .update({ status: "pending", updated_at: new Date().toISOString(), claim_error: creditResult.error || "Gold credit failed." })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: creditResult.error || "Failed to credit gold package." });
+      }
+
+      payload = {
+        gold: Math.max(0, asInt(creditResult.state.gold, 0)),
+        savedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
+      };
+    } else if (orderKind === "starter_pack_buy") {
+      const creditResult = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
+        if (Boolean(state.starterPackPurchased)) {
+          throw new Error("Starter pack is already activated on this account.");
+        }
+        state.gold = Math.max(0, asInt(state.gold, 0)) + STARTER_PACK_GOLD;
+        for (const entry of STARTER_PACK_ITEMS) {
+          for (let i = 0; i < entry.qty; i += 1) addConsumableToState(state, entry.type);
+        }
+        state.starterPackPurchased = true;
+      });
+
+      if (!creditResult.ok || !creditResult.state) {
+        await supabase
+          .from("telegram_ton_orders")
+          .update({ status: "pending", updated_at: new Date().toISOString(), claim_error: creditResult.error || "Starter pack credit failed." })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: creditResult.error || "Failed to activate starter pack." });
+      }
+
+      payload = {
+        starterPackPurchased: true,
+        gold: Math.max(0, asInt(creditResult.state.gold, 0)),
+        consumables: normalizeConsumables(creditResult.state.consumables).rows,
+        savedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
+      };
+    } else if (orderKind === "premium_buy") {
+      const plan = getPremiumPlan(orderRow.product_ref, 0);
+      if (!plan) {
+        await supabase
+          .from("telegram_ton_orders")
+          .update({ status: "pending", updated_at: new Date().toISOString(), claim_error: "Invalid premium plan." })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: "Invalid premium plan in TON order." });
+      }
+
+      const creditResult = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
+        const nowMs = Date.now();
+        const currentPremiumEndsAt = Math.max(0, asInt(state.premiumEndsAt, 0));
+        const base = Math.max(nowMs, currentPremiumEndsAt);
+        state.premiumEndsAt = base + plan.days * 24 * 60 * 60 * 1000;
+      });
+
+      if (!creditResult.ok || !creditResult.state) {
+        await supabase
+          .from("telegram_ton_orders")
+          .update({ status: "pending", updated_at: new Date().toISOString(), claim_error: creditResult.error || "Premium credit failed." })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: creditResult.error || "Failed to activate premium." });
+      }
+
+      payload = {
+        premiumEndsAt: Math.max(0, asInt(creditResult.state.premiumEndsAt, 0)),
+        premiumDaysAdded: plan.days,
+        savedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
+      };
+    } else {
+      const spins = asInt(orderRow.product_ref, 0);
+      if (!(FORTUNE_SPIN_PACKS_SOL as readonly number[]).includes(spins)) {
+        await supabase
+          .from("telegram_ton_orders")
+          .update({ status: "pending", updated_at: new Date().toISOString(), claim_error: "Invalid fortune pack." })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: "Invalid fortune pack in TON order." });
+      }
+
+      const dayKey = todayKeyUtc(now);
+      let fortuneUpdated: FortuneStateRow | null = null;
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        const fortuneState = await ensureFortuneState(supabase, auth.wallet, now);
+        if (!fortuneState.ok) {
+          await supabase
+            .from("telegram_ton_orders")
+            .update({ status: "pending", updated_at: new Date().toISOString(), claim_error: fortuneState.error || "Fortune status failed." })
+            .eq("id", orderId)
+            .eq("wallet", auth.wallet)
+            .eq("status", "claiming");
+          return json({ ok: false, error: fortuneState.error });
+        }
+
+        const nextPaidSpins = Math.max(0, asInt(fortuneState.state.paid_spins, 0)) + spins;
+        const updated = await updateFortuneState(supabase, fortuneState.state, { paid_spins: nextPaidSpins });
+        if (updated.ok) {
+          fortuneUpdated = updated.state;
+          break;
+        }
+      }
+
+      if (!fortuneUpdated) {
+        await supabase
+          .from("telegram_ton_orders")
+          .update({ status: "pending", updated_at: new Date().toISOString(), claim_error: "Failed to register fortune spin purchase, retry." })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: "Failed to register fortune spin purchase, retry." });
+      }
+
+      payload = {
+        fortuneFreeSpinAvailable: fortuneUpdated.free_spin_day !== dayKey,
+        fortunePaidSpins: Math.max(0, asInt(fortuneUpdated.paid_spins, 0)),
+      };
+    }
+
+    const claimedAtIso = new Date().toISOString();
+    const { data: claimedRow, error: claimError } = await supabase
+      .from("telegram_ton_orders")
+      .update({
+        status: "claimed",
+        tx_hash_hex: txHashHex || null,
+        tx_hash_base64: txHashBase64 || null,
+        claim_error: "",
+        claimed_at: claimedAtIso,
+        updated_at: claimedAtIso,
+      })
+      .eq("id", orderId)
+      .eq("wallet", auth.wallet)
+      .eq("status", "claiming")
+      .select(TELEGRAM_TON_ORDER_SELECT)
+      .maybeSingle();
+
+    if (claimError || !claimedRow) {
+      await supabase
+        .from("telegram_ton_orders")
+        .update({ status: "pending", updated_at: new Date().toISOString(), claim_error: "Failed to finalize TON purchase claim." })
+        .eq("id", orderId)
+        .eq("wallet", auth.wallet)
+        .eq("status", "claiming");
+      return json({ ok: false, error: "Failed to finalize TON purchase claim." });
+    }
+
+    const normalizedOrder = normalizeTelegramTonOrder(claimedRow, null);
+
+    await auditEvent(supabase, auth.wallet, "tg_ton_claim", {
+      orderId,
+      kind: orderKind,
+      rail: orderRail,
+      productRef: String(orderRow.product_ref ?? ""),
+      amountUnits: amountUnits.toString(),
+      txHashHex,
+      txHashBase64,
+    });
+
+    return json({
+      ok: true,
+      tgTonClaimed: true,
+      tgTonOrder: normalizedOrder,
+      ...payload,
+    });
+  }  if (action === "fortune_buy") {
     const spins = asInt(body.spins, 0);
     if (!(FORTUNE_SPIN_PACKS_SOL as readonly number[]).includes(spins)) {
       return json({ ok: false, error: "Invalid fortune spin pack." });
@@ -6574,6 +7474,11 @@ serve(async (req) => {
 
   return json({ ok: false, error: "Unknown action." });
 });
+
+
+
+
+
 
 
 

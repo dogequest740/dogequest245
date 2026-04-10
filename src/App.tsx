@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { WalletModalButton } from '@solana/wallet-adapter-react-ui'
 import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
+import { Address, Cell } from '@ton/core'
+import { useTonAddress, useTonConnectUI, useTonWallet } from '@tonconnect/ui-react'
 import knightSprite from './assets/knight.png'
 import mageSprite from './assets/mage.png'
 import archerSprite from './assets/archer.png'
@@ -91,6 +93,8 @@ type TelegramWebAppUser = {
 
 type TelegramInvoiceStatus = 'paid' | 'cancelled' | 'failed' | 'pending'
 
+type TelegramPaymentRail = 'stars' | 'ton' | 'usdt'
+
 type TelegramWebApp = {
   initData?: string
   initDataUnsafe?: {
@@ -146,6 +150,7 @@ const LANDING_BANNERS = [
 ] as const
 const EDGE_BASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || ''
 const EDGE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() || ''
+const TELEGRAM_TON_TX_VALID_SECONDS = 900
 const TELEGRAM_BOT_USERNAME = String(import.meta.env.VITE_TELEGRAM_BOT_USERNAME ?? 'dogemmorpgbot').trim().replace(/^@+/, '')
 const SEASON_SNAPSHOT_MIN_CRYSTALS = 1000
 const REFERRAL_CONTEST_FALLBACK: ReferralContestInfo = {
@@ -535,6 +540,30 @@ type TelegramStarsOrder = {
   claimedAt: string | null
 }
 
+type TelegramTonTxMessage = {
+  address: string
+  amount: string
+  payload?: string
+}
+
+type TelegramTonOrder = {
+  id: string
+  kind: 'buy_gold' | 'starter_pack_buy' | 'premium_buy' | 'fortune_buy'
+  productRef: string
+  rail: 'ton' | 'usdt'
+  asset: 'TON' | 'USDT'
+  amountUnits: number
+  amountDisplay: string
+  payerAddress: string
+  status: 'pending' | 'claiming' | 'claimed' | 'failed' | 'expired'
+  txRequest: {
+    validUntil: number
+    messages: TelegramTonTxMessage[]
+  }
+  createdAt: string
+  claimedAt: string | null
+}
+
 type GameSecureResponse = {
   ok: boolean
   error?: string
@@ -544,6 +573,10 @@ type GameSecureResponse = {
   tgStarsReused?: boolean
   tgStarsClaimed?: boolean
   tgStarsAlreadyClaimed?: boolean
+  tgTonOrder?: TelegramTonOrder | null
+  tgTonClaimed?: boolean
+  tgTonAlreadyClaimed?: boolean
+  tgTonReused?: boolean
   buyGoldAlreadyProcessed?: boolean
   starterPackAlreadyProcessed?: boolean
   starterPackPurchased?: boolean
@@ -1201,7 +1234,21 @@ const GOLD_PACKAGES_STARS: Record<(typeof GOLD_PACKAGES_SOL)[number]['id'], numb
   'gold-500k': 1050,
   'gold-1200k': 1650,
 }
+const GOLD_PACKAGES_TON: Record<(typeof GOLD_PACKAGES_SOL)[number]['id'], number> = {
+  'gold-50k': 2.6,
+  'gold-100k': 4.5,
+  'gold-500k': 18,
+  'gold-1200k': 32,
+}
+const GOLD_PACKAGES_USDT: Record<(typeof GOLD_PACKAGES_SOL)[number]['id'], number> = {
+  'gold-50k': 3.4,
+  'gold-100k': 5.8,
+  'gold-500k': 23,
+  'gold-1200k': 41,
+}
 const STARTER_PACK_PRICE_STARS = 500
+const STARTER_PACK_PRICE_TON = 8.5
+const STARTER_PACK_PRICE_USDT = 11
 const STARTER_PACK_PRICE = 0.13
 const STARTER_PACK_GOLD = 300000
 const STARTER_PACK_WORLD_BOSS_TICKETS = 5
@@ -1223,6 +1270,14 @@ const PREMIUM_PLAN_PRICES_STARS: Record<PremiumPlanId, number> = {
   'premium-30': 749,
   'premium-90': 1700,
 }
+const PREMIUM_PLAN_PRICES_TON: Record<PremiumPlanId, number> = {
+  'premium-30': 13,
+  'premium-90': 31,
+}
+const PREMIUM_PLAN_PRICES_USDT: Record<PremiumPlanId, number> = {
+  'premium-30': 16,
+  'premium-90': 40,
+}
 const PREMIUM_DAILY_KEYS = 5
 const PREMIUM_DAILY_GOLD = 50000
 const PREMIUM_DAILY_SMALL_POTIONS = 5
@@ -1241,6 +1296,14 @@ type FortunePackId = keyof typeof FORTUNE_SPIN_PRICES
 const FORTUNE_SPIN_PRICES_STARS: Record<FortunePackId, number> = {
   1: 20,
   10: 150,
+}
+const FORTUNE_SPIN_PRICES_TON: Record<FortunePackId, number> = {
+  1: 0.32,
+  10: 2.6,
+}
+const FORTUNE_SPIN_PRICES_USDT: Record<FortunePackId, number> = {
+  1: 0.4,
+  10: 3.4,
 }
 const FORTUNE_REWARDS: FortuneReward[] = [
   { id: 'energy_tonic', label: 'Energy Tonic', kind: 'consumable', consumableType: 'energy-small', amount: 1, chance: 22 },
@@ -2160,6 +2223,15 @@ const bytesToBase64 = (bytes: Uint8Array) => {
   }
   return btoa(binary)
 }
+const bytesToHex = (bytes: Uint8Array) => {
+  let output = ''
+  for (const value of bytes) {
+    output += value.toString(16).padStart(2, '0')
+  }
+  return output
+}
+
+const formatPaymentAmount = (value: number) => (Number.isInteger(value) ? String(value) : value.toString())
 const isValidWalletAddress = (value: string) => {
   try {
     new PublicKey(value)
@@ -2265,6 +2337,36 @@ const getPremiumPlanPrice = (plan: (typeof PREMIUM_PLANS)[number], nowMs = Date.
     baseSol: plan.sol,
   }
 }
+const getTelegramRailCurrencyLabel = (rail: TelegramPaymentRail) => {
+  if (rail === 'stars') return 'Stars'
+  if (rail === 'ton') return 'TON'
+  return 'USDT'
+}
+
+const getTelegramGoldPriceByRail = (packId: (typeof GOLD_PACKAGES_SOL)[number]['id'], rail: TelegramPaymentRail) => {
+  if (rail === 'stars') return GOLD_PACKAGES_STARS[packId]
+  if (rail === 'ton') return GOLD_PACKAGES_TON[packId]
+  return GOLD_PACKAGES_USDT[packId]
+}
+
+const getTelegramStarterPackPriceByRail = (rail: TelegramPaymentRail) => {
+  if (rail === 'stars') return STARTER_PACK_PRICE_STARS
+  if (rail === 'ton') return STARTER_PACK_PRICE_TON
+  return STARTER_PACK_PRICE_USDT
+}
+
+const getTelegramPremiumPriceByRail = (planId: PremiumPlanId, rail: TelegramPaymentRail) => {
+  if (rail === 'stars') return PREMIUM_PLAN_PRICES_STARS[planId]
+  if (rail === 'ton') return PREMIUM_PLAN_PRICES_TON[planId]
+  return PREMIUM_PLAN_PRICES_USDT[planId]
+}
+
+const getTelegramFortunePriceByRail = (spins: FortunePackId, rail: TelegramPaymentRail) => {
+  if (rail === 'stars') return FORTUNE_SPIN_PRICES_STARS[spins]
+  if (rail === 'ton') return FORTUNE_SPIN_PRICES_TON[spins]
+  return FORTUNE_SPIN_PRICES_USDT[spins]
+}
+
 const getFortuneRewardById = (id: string) => FORTUNE_REWARDS.find((reward) => reward.id === id) ?? null
 const getFortuneRewardIcon = (reward: FortuneReward) => {
   if (reward.kind === 'gold') return iconGold
@@ -3548,6 +3650,11 @@ const drawGame = (
 function App() {
   const { publicKey, sendTransaction, signMessage, disconnect } = useWallet()
   const { connection } = useConnection()
+  const [tonConnectUI] = useTonConnectUI()
+  const tonWallet = useTonWallet()
+  const tonAddressFriendly = useTonAddress()
+  const tonAddressRaw = useTonAddress(false)
+  const [telegramPaymentRail, setTelegramPaymentRail] = useState<TelegramPaymentRail>('stars')
   const [stage, setStage] = useState<'auth' | 'select' | 'game'>('auth')
   const [selectedId, setSelectedId] = useState(CHARACTER_CLASSES[0].id)
   const [playerName, setPlayerName] = useState('')
@@ -3758,6 +3865,17 @@ function App() {
     }
   }, [telegramUser, telegramInitData])
   const usingTelegramAuth = telegramInitData.length > 0
+  const telegramTonAddress = useMemo(() => {
+    const raw = String(tonAddressRaw || tonAddressFriendly || '').trim()
+    if (!raw) return ''
+    try {
+      return Address.parse(raw).toString({ bounceable: false, testOnly: false, urlSafe: true })
+    } catch {
+      return ''
+    }
+  }, [tonAddressRaw, tonAddressFriendly])
+  const telegramTonWalletConnected = Boolean(tonWallet && telegramTonAddress)
+  const activeTelegramPaymentRail: TelegramPaymentRail = usingTelegramAuth ? telegramPaymentRail : 'stars'
 
   useEffect(() => {
     if (!crystalTasksError) return
@@ -4340,6 +4458,193 @@ function App() {
     return claimResult
   }
 
+
+  const isTelegramTonPendingError = (errorText: string) => {
+    const normalized = errorText.toLowerCase()
+    return normalized.includes('not found yet') ||
+      normalized.includes('being finalized') ||
+      normalized.includes('retry in a few seconds')
+  }
+
+  const claimTelegramTonOrder = async (
+    orderId: string,
+    txHashHex: string,
+    txHashBase64: string,
+    attempts = 16,
+    baseDelayMs = 1100,
+  ): Promise<GameSecureResponse> => {
+    let delayMs = Math.max(500, Math.floor(baseDelayMs))
+    let lastResult: GameSecureResponse = { ok: false, error: 'TON payment claim failed.' }
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const result = await callGameSecureAuthed('tg_ton_claim', { orderId, txHashHex, txHashBase64 }, false)
+      if (result.ok) return result
+      lastResult = result
+
+      const errorText = String(result.error ?? '')
+      if (attempt >= attempts - 1 || !isTelegramTonPendingError(errorText)) {
+        return result
+      }
+
+      await new Promise<void>((resolve) => window.setTimeout(resolve, delayMs))
+      delayMs = Math.min(4500, Math.round(delayMs * 1.45))
+    }
+
+    return lastResult
+  }
+
+  const createAndClaimTelegramTonOrder = async (
+    payload: Record<string, unknown>,
+    setError: (value: string) => void,
+    finalizeLabel: string,
+  ) => {
+    if (!telegramTonWalletConnected || !telegramTonAddress) {
+      setError('Connect TG Wallet first.')
+      return null
+    }
+
+    if (activeTelegramPaymentRail !== 'ton' && activeTelegramPaymentRail !== 'usdt') {
+      setError('Select TON or USDT rail.')
+      return null
+    }
+
+    const createResult = await callGameSecureAuthed(
+      'tg_ton_create',
+      {
+        ...payload,
+        rail: activeTelegramPaymentRail,
+        payerAddress: telegramTonAddress,
+      },
+      true,
+    )
+
+    if (!createResult.ok || !createResult.tgTonOrder) {
+      setError(createResult.error || 'Failed to create TON payment order.')
+      return null
+    }
+
+    const order = createResult.tgTonOrder
+    const messages = order.txRequest?.messages ?? []
+    if (!messages.length) {
+      setError('TON payment request is empty. Try again.')
+      return null
+    }
+
+    const validUntil = Number(order.txRequest?.validUntil ?? 0)
+
+    let txBoc = ''
+    try {
+      const txResult = await tonConnectUI.sendTransaction({
+        validUntil: Number.isFinite(validUntil) && validUntil > 0
+          ? validUntil
+          : Math.floor(Date.now() / 1000) + TELEGRAM_TON_TX_VALID_SECONDS,
+        messages: messages.map((message) => ({
+          address: String(message.address),
+          amount: String(message.amount),
+          payload: typeof message.payload === 'string' && message.payload.trim() ? String(message.payload).trim() : undefined,
+        })),
+      })
+      txBoc = String((txResult as { boc?: unknown })?.boc ?? '').trim()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (message.toLowerCase().includes('reject') || message.toLowerCase().includes('cancel')) {
+        setError('Payment cancelled.')
+      } else {
+        setError(`Failed to send TON transaction: ${message}`)
+      }
+      return null
+    }
+
+    if (!txBoc) {
+      setError('TON wallet did not return transaction proof.')
+      return null
+    }
+
+    let txHashHex = ''
+    let txHashBase64 = ''
+    try {
+      const txHashBytes = Cell.fromBase64(txBoc).hash()
+      txHashHex = bytesToHex(txHashBytes)
+      txHashBase64 = bytesToBase64(txHashBytes)
+    } catch {
+      setError('Unable to read TON transaction hash.')
+      return null
+    }
+
+    setError(finalizeLabel)
+    const claimResult = await claimTelegramTonOrder(order.id, txHashHex, txHashBase64)
+    if (!claimResult.ok) {
+      setError(claimResult.error || 'Payment received, but credit is pending. Retry in a few seconds.')
+      return null
+    }
+
+    return claimResult
+  }
+
+  const openTelegramTonWalletModal = async (setError: (value: string) => void) => {
+    setError('')
+    try {
+      await tonConnectUI.openModal()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setError(message ? `Unable to open TON wallet: ${message}` : 'Unable to open TON wallet.')
+    }
+  }
+
+  const selectTelegramPaymentRail = (rail: TelegramPaymentRail, setError: (value: string) => void) => {
+    setTelegramPaymentRail(rail)
+    setError('')
+  }
+
+  const renderTelegramPaymentRailControls = (setError: (value: string) => void) => {
+    if (!usingTelegramAuth) return null
+
+    return (
+      <div className="tg-pay-rail-wrap">
+        <div className="tg-pay-rail-tabs">
+          <button
+            type="button"
+            className={activeTelegramPaymentRail === 'stars' ? 'active' : ''}
+            onClick={() => selectTelegramPaymentRail('stars', setError)}
+          >
+            ⭐ Stars
+          </button>
+          <button
+            type="button"
+            className={activeTelegramPaymentRail === 'ton' ? 'active' : ''}
+            onClick={() => selectTelegramPaymentRail('ton', setError)}
+          >
+            TON
+          </button>
+          <button
+            type="button"
+            className={activeTelegramPaymentRail === 'usdt' ? 'active' : ''}
+            onClick={() => selectTelegramPaymentRail('usdt', setError)}
+          >
+            USDT
+          </button>
+        </div>
+        {activeTelegramPaymentRail !== 'stars' && (
+          <div className="tg-pay-wallet-box">
+            <div className="tg-pay-wallet-info">
+              {telegramTonWalletConnected
+                ? `Connected: ${telegramTonAddress.slice(0, 6)}...${telegramTonAddress.slice(-6)}`
+                : 'Connect Telegram Wallet to pay with TON/USDT.'}
+            </div>
+            <button
+              type="button"
+              className="tg-pay-wallet-connect"
+              onClick={() => {
+                void openTelegramTonWalletModal(setError)
+              }}
+            >
+              {telegramTonWalletConnected ? 'Change TG Wallet' : 'Connect TG Wallet'}
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
   const submitTreasuryPayment = async (solAmount: number) => {
     if (!publicKey) {
       throw new Error('Connect your wallet first.')
@@ -4386,11 +4691,17 @@ function App() {
     setBuyGoldError('')
     try {
       if (usingTelegramAuth) {
-        const claimResult = await createAndClaimTelegramStarsOrder(
-          { kind: 'buy_gold', packId: pack.id },
-          setBuyGoldError,
-          'Payment confirmed. Crediting gold...',
-        )
+        const claimResult = activeTelegramPaymentRail === 'stars'
+          ? await createAndClaimTelegramStarsOrder(
+            { kind: 'buy_gold', packId: pack.id },
+            setBuyGoldError,
+            'Payment confirmed. Crediting gold...',
+          )
+          : await createAndClaimTelegramTonOrder(
+            { kind: 'buy_gold', packId: pack.id },
+            setBuyGoldError,
+            'Payment sent. Verifying on-chain transaction...',
+          )
         if (!claimResult) return
 
         state.gold = Math.max(0, Math.floor(Number(claimResult.gold ?? state.gold)))
@@ -4432,11 +4743,17 @@ function App() {
     setStarterPackError('')
     try {
       if (usingTelegramAuth) {
-        const claimResult = await createAndClaimTelegramStarsOrder(
-          { kind: 'starter_pack_buy' },
-          setStarterPackError,
-          'Payment confirmed. Activating starter pack...',
-        )
+        const claimResult = activeTelegramPaymentRail === 'stars'
+          ? await createAndClaimTelegramStarsOrder(
+            { kind: 'starter_pack_buy' },
+            setStarterPackError,
+            'Payment confirmed. Activating starter pack...',
+          )
+          : await createAndClaimTelegramTonOrder(
+            { kind: 'starter_pack_buy' },
+            setStarterPackError,
+            'Payment sent. Verifying on-chain transaction...',
+          )
         if (!claimResult) return
 
         state.gold = Math.max(0, Math.floor(Number(claimResult.gold ?? state.gold)))
@@ -4483,11 +4800,17 @@ function App() {
     setPremiumError('')
     try {
       if (usingTelegramAuth) {
-        const claimResult = await createAndClaimTelegramStarsOrder(
-          { kind: 'premium_buy', planId: plan.id },
-          setPremiumError,
-          'Payment confirmed. Activating premium...',
-        )
+        const claimResult = activeTelegramPaymentRail === 'stars'
+          ? await createAndClaimTelegramStarsOrder(
+            { kind: 'premium_buy', planId: plan.id },
+            setPremiumError,
+            'Payment confirmed. Activating premium...',
+          )
+          : await createAndClaimTelegramTonOrder(
+            { kind: 'premium_buy', planId: plan.id },
+            setPremiumError,
+            'Payment sent. Verifying on-chain transaction...',
+          )
         if (!claimResult) return
 
         if (typeof claimResult.premiumEndsAt === 'number') {
@@ -5036,11 +5359,17 @@ function App() {
     setFortuneError('')
     try {
       if (usingTelegramAuth) {
-        const claimResult = await createAndClaimTelegramStarsOrder(
-          { kind: 'fortune_buy', spins },
-          setFortuneError,
-          'Payment confirmed. Finalizing spin credit...',
-        )
+        const claimResult = activeTelegramPaymentRail === 'stars'
+          ? await createAndClaimTelegramStarsOrder(
+            { kind: 'fortune_buy', spins },
+            setFortuneError,
+            'Payment confirmed. Finalizing spin credit...',
+          )
+          : await createAndClaimTelegramTonOrder(
+            { kind: 'fortune_buy', spins },
+            setFortuneError,
+            'Payment sent. Verifying on-chain transaction...',
+          )
         if (!claimResult) return
 
         applyFortuneStatus(claimResult)
@@ -5919,7 +6248,12 @@ function App() {
     if (activePanel !== 'season') {
       setSeasonError('')
     }
-  }, [activePanel, isMobile])
+    if (!usingTelegramAuth) {
+      setTelegramPaymentRail('stars')
+    } else if (activePanel !== 'buygold' && activePanel !== 'starterpack' && activePanel !== 'premium' && activePanel !== 'fortune') {
+      setTelegramPaymentRail('stars')
+    }
+  }, [activePanel, isMobile, usingTelegramAuth])
 
   useEffect(() => {
     if (activePanel !== 'village') return
@@ -8624,6 +8958,7 @@ function App() {
                   <strong>{solBalanceLoading ? 'Loading...' : `${solBalance.toFixed(4)} SOL`}</strong>
                 </div>
               )}
+              {usingTelegramAuth && renderTelegramPaymentRailControls(setBuyGoldError)}
               <div className="buygold-grid">
                 {GOLD_PACKAGES_SOL.map((pack) => (
                   <div key={pack.id} className="shop-card buygold-card">
@@ -8633,7 +8968,7 @@ function App() {
                     <div className="shop-meta">
                       {!usingTelegramAuth && <img className="icon-img small" src={iconSolana} alt="" />}
                       {usingTelegramAuth
-                        ? `Price: ⭐ ${GOLD_PACKAGES_STARS[pack.id]} Stars`
+                        ? `Price: ${formatPaymentAmount(getTelegramGoldPriceByRail(pack.id, activeTelegramPaymentRail))} ${getTelegramRailCurrencyLabel(activeTelegramPaymentRail)}`
                         : `Price: ${pack.sol} SOL`}
                     </div>
                     <button
@@ -8646,7 +8981,7 @@ function App() {
                       {buyGoldLoading === pack.id
                         ? 'Processing...'
                         : usingTelegramAuth
-                          ? `⭐ Buy • ${GOLD_PACKAGES_STARS[pack.id]} Stars`
+                          ? `${activeTelegramPaymentRail === 'stars' ? '⭐' : getTelegramRailCurrencyLabel(activeTelegramPaymentRail)} Buy • ${formatPaymentAmount(getTelegramGoldPriceByRail(pack.id, activeTelegramPaymentRail))} ${getTelegramRailCurrencyLabel(activeTelegramPaymentRail)}`
                           : 'Buy with SOL'}
                     </button>
                   </div>
@@ -8655,7 +8990,9 @@ function App() {
               {buyGoldError && <div className="withdraw-error">{buyGoldError}</div>}
               <div className="withdraw-note">
                 {usingTelegramAuth
-                  ? 'Gold is added right after Telegram confirms the Stars payment.'
+                  ? activeTelegramPaymentRail === 'stars'
+                    ? 'Gold is added right after Telegram confirms the Stars payment.'
+                    : 'Gold is added right after TON transaction confirmation.'
                   : 'Gold is added instantly after the SOL transaction confirms.'}
               </div>
             </div>
@@ -8679,10 +9016,13 @@ function App() {
                   <div className="starterpack-title">Starter Pack</div>
                   <div className="starterpack-price">
                     {!usingTelegramAuth && <img className="icon-img small" src={iconSolana} alt="" />}
-                    {usingTelegramAuth ? `⭐ ${STARTER_PACK_PRICE_STARS} Stars` : `${STARTER_PACK_PRICE} SOL`}
+                    {usingTelegramAuth
+                      ? `${formatPaymentAmount(getTelegramStarterPackPriceByRail(activeTelegramPaymentRail))} ${getTelegramRailCurrencyLabel(activeTelegramPaymentRail)}`
+                      : `${STARTER_PACK_PRICE} SOL`}
                   </div>
                 </div>
               </div>
+              {usingTelegramAuth && renderTelegramPaymentRailControls(setStarterPackError)}
               <div className="starterpack-list">
                 <div className="starterpack-item">
                   <img className="icon-img" src={iconGold} alt="" />
@@ -8722,7 +9062,11 @@ function App() {
                   void buyStarterPack()
                 }}
               >
-                {starterPackLoading ? 'Processing...' : usingTelegramAuth ? `⭐ Buy Starter Pack • ${STARTER_PACK_PRICE_STARS} Stars` : 'Buy Starter Pack (SOL)'}
+                {starterPackLoading
+                  ? 'Processing...'
+                  : usingTelegramAuth
+                    ? `${activeTelegramPaymentRail === 'stars' ? '⭐' : getTelegramRailCurrencyLabel(activeTelegramPaymentRail)} Buy Starter Pack • ${formatPaymentAmount(getTelegramStarterPackPriceByRail(activeTelegramPaymentRail))} ${getTelegramRailCurrencyLabel(activeTelegramPaymentRail)}`
+                    : 'Buy Starter Pack (SOL)'}
               </button>
               <div className="withdraw-note">This pack can be purchased only once.</div>
             </div>
@@ -8765,6 +9109,7 @@ function App() {
                   <strong>{solBalanceLoading ? 'Loading...' : `${solBalance.toFixed(4)} SOL`}</strong>
                 </div>
               )}
+              {usingTelegramAuth && renderTelegramPaymentRailControls(setPremiumError)}
               <div className="shop-grid premium-plans">
                 {PREMIUM_PLANS.map((plan) => {
                   const pricing = getPremiumPlanPrice(plan, premiumSaleNowMs)
@@ -8780,7 +9125,7 @@ function App() {
                     )}
                     <div className="shop-meta premium-price-new">
                       {usingTelegramAuth ? (
-                        <>Price: ⭐ {PREMIUM_PLAN_PRICES_STARS[plan.id]} Stars</>
+                        <>Price: {formatPaymentAmount(getTelegramPremiumPriceByRail(plan.id, activeTelegramPaymentRail))} {getTelegramRailCurrencyLabel(activeTelegramPaymentRail)}</>
                       ) : (
                         <>
                           <img className="icon-img small" src={iconSolana} alt="" />
@@ -8799,8 +9144,8 @@ function App() {
                         ? 'PROCESSING...'
                         : usingTelegramAuth
                           ? (premiumActive
-                            ? `⭐ EXTEND +${plan.days}D • ${PREMIUM_PLAN_PRICES_STARS[plan.id]} Stars`
-                             : `⭐ BUY ${plan.days}D • ${PREMIUM_PLAN_PRICES_STARS[plan.id]} Stars`)
+                            ? `${activeTelegramPaymentRail === 'stars' ? '⭐' : getTelegramRailCurrencyLabel(activeTelegramPaymentRail)} EXTEND +${plan.days}D • ${formatPaymentAmount(getTelegramPremiumPriceByRail(plan.id, activeTelegramPaymentRail))} ${getTelegramRailCurrencyLabel(activeTelegramPaymentRail)}`
+                            : `${activeTelegramPaymentRail === 'stars' ? '⭐' : getTelegramRailCurrencyLabel(activeTelegramPaymentRail)} BUY ${plan.days}D • ${formatPaymentAmount(getTelegramPremiumPriceByRail(plan.id, activeTelegramPaymentRail))} ${getTelegramRailCurrencyLabel(activeTelegramPaymentRail)}`)
                           : premiumActive
                             ? `EXTEND +${plan.days}D`
                             : `BUY ${plan.days}D`}
@@ -9107,10 +9452,17 @@ function App() {
                 <img className="starterpack-image fortune-image" src={iconFortuneWheel} alt="" />
                 <div className="starterpack-meta">
                   <div className="starterpack-title">Wheel of Fortune</div>
-                  <div className="withdraw-note">{usingTelegramAuth ? '1 free spin daily at 00:00 UTC. Extra spins are bought with Telegram Stars.' : '1 free spin daily at 00:00 UTC. Extra spins are bought only with SOL.'}</div>
+                  <div className="withdraw-note">
+                    {usingTelegramAuth
+                      ? activeTelegramPaymentRail === 'stars'
+                        ? '1 free spin daily at 00:00 UTC. Extra spins are bought with Telegram Stars.'
+                        : '1 free spin daily at 00:00 UTC. Extra spins are bought with TON/USDT.'
+                      : '1 free spin daily at 00:00 UTC. Extra spins are bought only with SOL.'}
+                  </div>
                 </div>
               </div>
 
+              {usingTelegramAuth && renderTelegramPaymentRailControls(setFortuneError)}
               <div className="withdraw-info fortune-summary">
                 <span>
                   Free spin:{' '}
@@ -9199,10 +9551,14 @@ function App() {
                       'Processing...'
                     ) : (
                       <>
-                        <span className="fortune-buy-title">{usingTelegramAuth ? `⭐ ${spins} ${spins === 1 ? 'Spin' : 'Spins'}` : `Buy ${spins} ${spins === 1 ? 'Spin' : 'Spins'}`}</span>
+                        <span className="fortune-buy-title">
+                          {usingTelegramAuth
+                            ? `${activeTelegramPaymentRail === 'stars' ? '⭐' : getTelegramRailCurrencyLabel(activeTelegramPaymentRail)} ${spins} ${spins === 1 ? 'Spin' : 'Spins'}`
+                            : `Buy ${spins} ${spins === 1 ? 'Spin' : 'Spins'}`}
+                        </span>
                         <span className="fortune-buy-price">
                           {usingTelegramAuth ? (
-                            <>Price: ⭐ {FORTUNE_SPIN_PRICES_STARS[spins as FortunePackId]} Stars</>
+                            <>Price: {formatPaymentAmount(getTelegramFortunePriceByRail(spins as FortunePackId, activeTelegramPaymentRail))} {getTelegramRailCurrencyLabel(activeTelegramPaymentRail)}</>
                           ) : (
                             <>
                               <img className="icon-img tiny" src={iconSolana} alt="" />
@@ -10429,6 +10785,32 @@ function App() {
   )
 }
 export default App
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
