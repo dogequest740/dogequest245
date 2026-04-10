@@ -8797,8 +8797,9 @@ function App() {
                   {FORTUNE_REWARDS.map((reward, index) => {
                     const angleDeg = index * FORTUNE_WHEEL_SEGMENT_ANGLE + FORTUNE_WHEEL_SEGMENT_ANGLE / 2 - 90
                     const angleRad = (angleDeg * Math.PI) / 180
-                    const radiusPercent = 39
-                    const x = 50 + Math.cos(angleRad) * radiusPercent
+                    const radiusPercent = 42
+                    const xOffsetPercent = 1.2
+                    const x = 50 + Math.cos(angleRad) * radiusPercent + xOffsetPercent
                     const y = 50 + Math.sin(angleRad) * radiusPercent
                     return (
                       <div
