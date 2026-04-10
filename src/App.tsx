@@ -258,6 +258,8 @@ type AdsgramShowResult = {
   state?: string
   status?: string
   done?: boolean
+  error?: boolean
+  description?: string
 }
 
 type AdsgramUnit = {
@@ -6729,16 +6731,52 @@ function App() {
       return { ok: false as const, error: 'Ads service is unavailable right now.' }
     }
 
+    const ADSGRAM_SHOW_TIMEOUT_MS = 30000
+    const ADSGRAM_TIMEOUT_SENTINEL = '__adsgram_timeout__'
+
     try {
       const ad = sdk.init({ blockId })
-      const result = await ad.show()
-      const adState = String(result && typeof result === 'object' ? (result.state ?? result.status ?? '') : '').toLowerCase()
-      if (adState.includes('error') || adState.includes('skip') || adState.includes('cancel')) {
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        window.setTimeout(() => reject(new Error(ADSGRAM_TIMEOUT_SENTINEL)), ADSGRAM_SHOW_TIMEOUT_MS)
+      })
+      const result = (await Promise.race([ad.show(), timeoutPromise])) as AdsgramShowResult | void
+      if (!result || typeof result !== 'object') {
+        return { ok: false as const, error: 'No ads available now. Please try again in a minute.' }
+      }
+
+      const adState = String(result.state ?? result.status ?? '').toLowerCase()
+      const adDescription = String(result.description ?? '').toLowerCase()
+      const done = result.done === true
+      const hasErrorFlag = result.error === true
+      const failed = hasErrorFlag ||
+        adState.includes('error') ||
+        adState.includes('skip') ||
+        adState.includes('cancel') ||
+        adDescription.includes('error') ||
+        adDescription.includes('skip') ||
+        adDescription.includes('cancel') ||
+        adDescription.includes('close') ||
+        adDescription.includes('abort') ||
+        adDescription.includes('fail')
+
+      if (failed || (!done && adState !== 'destroy')) {
         return { ok: false as const, error: 'Ad was not completed.' }
       }
       return { ok: true as const }
     } catch (error) {
       const errorText = error instanceof Error ? error.message : String(error)
+      const normalized = errorText.toLowerCase()
+      if (normalized.includes(ADSGRAM_TIMEOUT_SENTINEL)) {
+        return { ok: false as const, error: 'No ads available now. Please try again in a minute.' }
+      }
+      if (
+        normalized.includes('no fill') ||
+        normalized.includes('inventory') ||
+        normalized.includes('empty') ||
+        normalized.includes('timeout')
+      ) {
+        return { ok: false as const, error: 'No ads available now. Please try again in a minute.' }
+      }
       return { ok: false as const, error: errorText || 'Ad was not completed.' }
     }
   }
@@ -9995,6 +10033,7 @@ function App() {
   )
 }
 export default App
+
 
 
 
