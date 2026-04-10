@@ -18,7 +18,7 @@ const REFERRAL_LEVEL_TARGET = 15;
 const REFERRAL_KEY_BONUS = 3;
 const REFERRAL_CRYSTAL_RATE = 0.05;
 const CRYSTAL_TASK_REFERRAL_LEVEL_MIN = 5;
-const CRYSTAL_TASK_AD_COOLDOWN_SECONDS = 60 * 60;
+const CRYSTAL_TASK_AD_COOLDOWN_SECONDS = 15 * 60;
 const CRYSTAL_TASK_CHANNEL_REWARD = 20;
 const CRYSTAL_TASK_X_REWARD = 15;
 const CRYSTAL_TASK_AD_REWARD = 3;
@@ -6252,4 +6252,3 @@ serve(async (req) => {
 
   return json({ ok: false, error: "Unknown action." });
 });
-
