@@ -50,8 +50,12 @@ import iconLegs from './assets/icons/armory-legs.png'
 import iconBoots from './assets/icons/armory-boots.png'
 import iconArtifact from './assets/icons/armory-artifact.png'
 import iconQuests from './assets/icons/quests.png'
-import iconTelegramBrand from './assets/icons/telegram.svg'
-import iconXBrand from './assets/icons/x.svg'
+import iconTablerTrophy from './assets/icons/tabler-trophy.svg'
+import iconTablerChecklist from './assets/icons/tabler-checklist.svg'
+import iconTablerBrandTelegram from './assets/icons/tabler-brand-telegram.svg'
+import iconTablerBrandX from './assets/icons/tabler-brand-x.svg'
+import iconTablerVideo from './assets/icons/tabler-video.svg'
+import iconTablerUsersPlus from './assets/icons/tabler-users-plus.svg'
 import goldSmallImage from './assets/shop/gold-small.png'
 import goldMiddleImage from './assets/shop/gold-middle.png'
 import goldLargeImage from './assets/shop/gold-large.png'
@@ -243,11 +247,11 @@ type CrystalTaskStatus = {
 }
 
 const CRYSTAL_TASK_ICON_BY_ID: Record<CrystalTaskId, string> = {
-  'join-channel': iconTelegramBrand,
-  'follow-x': iconXBrand,
-  'watch-ad': iconFortuneWheel,
-  'referrals-5': iconReferrals,
-  'referrals-10': iconReferrals,
+  'join-channel': iconTablerBrandTelegram,
+  'follow-x': iconTablerBrandX,
+  'watch-ad': iconTablerVideo,
+  'referrals-5': iconTablerUsersPlus,
+  'referrals-10': iconTablerUsersPlus,
 }
 
 type AdsgramShowResult = {
@@ -9545,7 +9549,7 @@ function App() {
                   className={questPanelTab === 'achievements' ? 'active' : ''}
                   onClick={() => setQuestPanelTab('achievements')}
                 >
-                  <img className="icon-img tiny quest-tab-icon" src={iconQuests} alt="" />
+                  <img className="icon-img tiny quest-tab-icon" src={iconTablerTrophy} alt="" />
                   Achievements
                 </button>
                 <button
@@ -9558,7 +9562,7 @@ function App() {
                     }
                   }}
                 >
-                  <img className="icon-img tiny quest-tab-icon" src={iconCrystals} alt="" />
+                  <img className="icon-img tiny quest-tab-icon" src={iconTablerChecklist} alt="" />
                   Tasks
                 </button>
               </div>
@@ -9608,7 +9612,6 @@ function App() {
                   const taskReady = task.canClaim && task.remainingSec <= 0
                   const isClaimedOneTime = !task.repeatable && task.claimed
                   const isBusy = crystalTaskClaimLoadingId === task.id
-                  const isBrandIcon = task.id === 'join-channel' || task.id === 'follow-x'
                   const claimDisabled = isBusy || isClaimedOneTime || !taskReady
                   const claimLabel = isClaimedOneTime
                     ? 'Claimed'
@@ -9627,7 +9630,7 @@ function App() {
                       <div className="quest-title with-icon">
                         <span className={`quest-task-icon-wrap task-${task.id}`}>
                           <img
-                            className={`icon-img small quest-task-icon ${isBrandIcon ? 'brand' : ''}`}
+                            className="icon-img small quest-task-icon"
                             src={CRYSTAL_TASK_ICON_BY_ID[task.id]}
                             alt=""
                           />

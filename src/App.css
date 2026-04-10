@@ -4270,9 +4270,10 @@ button.ghost {
 }
 
 .quest-tab-icon {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   object-fit: contain;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.35));
 }
 
 .quest-panel-tabs button.active {
@@ -4321,15 +4322,15 @@ button.ghost {
 }
 
 .quest-task-icon-wrap {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  background: linear-gradient(145deg, rgba(127, 210, 255, 0.30), rgba(123, 216, 143, 0.22));
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: linear-gradient(145deg, rgba(127, 210, 255, 0.34), rgba(123, 216, 143, 0.26));
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.30);
+  box-shadow: 0 7px 16px rgba(0, 0, 0, 0.34);
 }
 
 .quest-task-icon-wrap.task-join-channel {
@@ -4350,16 +4351,12 @@ button.ghost {
 }
 
 .quest-task-icon {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   object-fit: contain;
+  filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.3));
 }
 
-.quest-task-icon.brand {
-  width: 18px;
-  height: 18px;
-  filter: brightness(0) invert(1);
-}
 
 .quest-desc {
   font-size: 12px;
