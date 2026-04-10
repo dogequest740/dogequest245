@@ -3026,7 +3026,7 @@ const normalizeCrystalTasksFromResponse = (value: unknown): CrystalTaskStatus[] 
     })
     .filter((entry): entry is CrystalTaskStatus => Boolean(entry))
 
-  const order: CrystalTaskId[] = ['join-channel', 'follow-x', 'watch-ad', 'referrals-5', 'referrals-10']
+  const order: CrystalTaskId[] = ['watch-ad', 'join-channel', 'follow-x', 'referrals-5', 'referrals-10']
   return rows.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id))
 }
 
@@ -3695,6 +3695,12 @@ function App() {
     }
   }, [telegramUser, telegramInitData])
   const usingTelegramAuth = telegramInitData.length > 0
+
+  useEffect(() => {
+    if (!crystalTasksError) return
+    const timer = window.setTimeout(() => setCrystalTasksError(''), 5000)
+    return () => window.clearTimeout(timer)
+  }, [crystalTasksError])
 
   const walletAddress = publicKey?.toBase58() ?? ''
   const walletAuthReady = Boolean(walletAddress && signMessage)
@@ -6740,28 +6746,43 @@ function App() {
         window.setTimeout(() => reject(new Error(ADSGRAM_TIMEOUT_SENTINEL)), ADSGRAM_SHOW_TIMEOUT_MS)
       })
       const result = (await Promise.race([ad.show(), timeoutPromise])) as AdsgramShowResult | void
+
+      // Some AdsGram flows can resolve without a payload on success.
       if (!result || typeof result !== 'object') {
+        return { ok: true as const }
+      }
+
+      const adState = String(result.state ?? '').toLowerCase()
+      const adStatus = String(result.status ?? '').toLowerCase()
+      const adDescription = String(result.description ?? '').toLowerCase()
+      const hasErrorFlag = result.error === true
+
+      const isNoFill =
+        adState.includes('no_fill') ||
+        adStatus.includes('no_fill') ||
+        adDescription.includes('no fill') ||
+        adDescription.includes('inventory')
+
+      if (isNoFill) {
         return { ok: false as const, error: 'No ads available now. Please try again in a minute.' }
       }
 
-      const adState = String(result.state ?? result.status ?? '').toLowerCase()
-      const adDescription = String(result.description ?? '').toLowerCase()
-      const done = result.done === true
-      const hasErrorFlag = result.error === true
-      const failed = hasErrorFlag ||
+      const failed =
+        hasErrorFlag ||
         adState.includes('error') ||
-        adState.includes('skip') ||
-        adState.includes('cancel') ||
+        adStatus.includes('error') ||
         adDescription.includes('error') ||
-        adDescription.includes('skip') ||
+        adState.includes('skip') ||
+        adStatus.includes('skip') ||
+        adState.includes('cancel') ||
+        adStatus.includes('cancel') ||
         adDescription.includes('cancel') ||
-        adDescription.includes('close') ||
-        adDescription.includes('abort') ||
-        adDescription.includes('fail')
+        adDescription.includes('failed')
 
-      if (failed || (!done && adState !== 'destroy')) {
+      if (failed) {
         return { ok: false as const, error: 'Ad was not completed.' }
       }
+
       return { ok: true as const }
     } catch (error) {
       const errorText = error instanceof Error ? error.message : String(error)
@@ -9662,6 +9683,8 @@ function App() {
                           : taskReady
                             ? 'Claim'
                             : 'Incomplete'
+                  const taskTitle = task.id === 'watch-ad' ? 'Watch ads' : task.title
+                  const taskDescription = task.id === 'watch-ad' ? 'Watch ads and get Crystals.' : task.description
 
                   return (
                     <div key={task.id} className={`quest-card ${taskReady ? 'ready' : ''} ${isClaimedOneTime ? 'claimed' : ''}`}>
@@ -9673,9 +9696,9 @@ function App() {
                             alt=""
                           />
                         </span>
-                        <span>{task.title}</span>
+                        <span>{taskTitle}</span>
                       </div>
-                      <div className="quest-desc">{task.description}</div>
+                      <div className="quest-desc">{taskDescription}</div>
                       <div className="quest-progress">
                         {Math.min(task.progress, task.target)}/{task.target}
                       </div>
@@ -9691,7 +9714,6 @@ function App() {
                           <img className="icon-img small" src={iconCrystals} alt="" />
                           +{task.rewardCrystals}
                         </span>
-                        {task.repeatable && <span className="reward-chip repeat">Repeatable</span>}
                       </div>
                       <div className="quest-task-actions">
                         {task.actionUrl && task.id !== 'watch-ad' && (
@@ -10033,11 +10055,4 @@ function App() {
   )
 }
 export default App
-
-
-
-
-
-
-
 
