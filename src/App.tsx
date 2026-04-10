@@ -6739,6 +6739,8 @@ function App() {
 
     const ADSGRAM_SHOW_TIMEOUT_MS = 30000
     const ADSGRAM_TIMEOUT_SENTINEL = '__adsgram_timeout__'
+    const ADSGRAM_SOFT_SUCCESS_MS = 4000
+    const startedAt = Date.now()
 
     try {
       const ad = sdk.init({ blockId })
@@ -6746,6 +6748,7 @@ function App() {
         window.setTimeout(() => reject(new Error(ADSGRAM_TIMEOUT_SENTINEL)), ADSGRAM_SHOW_TIMEOUT_MS)
       })
       const result = (await Promise.race([ad.show(), timeoutPromise])) as AdsgramShowResult | void
+      const elapsedMs = Date.now() - startedAt
 
       // AdsGram can resolve with different payload formats; successful resolve usually means ad flow finished.
       if (!result || typeof result !== 'object') {
@@ -6760,31 +6763,53 @@ function App() {
         adState.includes('cancel') ||
         adStatus.includes('cancel') ||
         adState.includes('skip') ||
-        adStatus.includes('skip')
+        adStatus.includes('skip') ||
+        adState.includes('close') ||
+        adStatus.includes('close') ||
+        adState.includes('abort') ||
+        adStatus.includes('abort')
 
       if (canceled) {
         return { ok: false as const, error: 'Ad was not completed.' }
       }
 
-      // Do not over-interpret payload text; it caused false negatives after real ad views.
-      if (hasErrorFlag && adState.includes('error') && adStatus.includes('error')) {
-        return { ok: false as const, error: 'No ads available now. Please try again in a minute.' }
+      if (hasErrorFlag && (adState.includes('error') || adStatus.includes('error'))) {
+        if (elapsedMs < ADSGRAM_SOFT_SUCCESS_MS) {
+          return { ok: false as const, error: 'No ads available now. Please try again in a minute.' }
+        }
+        return { ok: true as const }
       }
 
       return { ok: true as const }
     } catch (error) {
       const errorText = error instanceof Error ? error.message : String(error)
       const normalized = errorText.toLowerCase()
-      if (
-        normalized.includes(ADSGRAM_TIMEOUT_SENTINEL) ||
-        normalized.includes('no fill') ||
-        normalized.includes('inventory') ||
-        normalized.includes('empty') ||
-        normalized.includes('timeout')
-      ) {
+      const elapsedMs = Date.now() - startedAt
+
+      const canceled =
+        normalized.includes('cancel') ||
+        normalized.includes('skip') ||
+        normalized.includes('close') ||
+        normalized.includes('abort')
+      if (canceled) {
+        return { ok: false as const, error: 'Ad was not completed.' }
+      }
+
+      if (normalized.includes(ADSGRAM_TIMEOUT_SENTINEL)) {
         return { ok: false as const, error: 'No ads available now. Please try again in a minute.' }
       }
-      return { ok: false as const, error: errorText || 'Ad was not completed.' }
+
+      const noFillLike =
+        normalized.includes('no fill') ||
+        normalized.includes('inventory') ||
+        normalized.includes('empty')
+      if (noFillLike && elapsedMs < ADSGRAM_SOFT_SUCCESS_MS) {
+        return { ok: false as const, error: 'No ads available now. Please try again in a minute.' }
+      }
+
+      // Soft fallback: if ad flow lived for several seconds and then SDK errored,
+      // we still allow claim to avoid false negatives on completed views.
+      return { ok: true as const }
     }
   }
 
