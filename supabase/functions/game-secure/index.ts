@@ -1033,16 +1033,25 @@ const tonCenterGet = async (path: string, params: Record<string, string | number
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15_000);
   try {
-    const headers: Record<string, string> = {};
-    if (TELEGRAM_TON_API_KEY) headers["X-API-Key"] = TELEGRAM_TON_API_KEY;
+    const request = async (useApiKey: boolean) => {
+      const headers: Record<string, string> = {};
+      if (useApiKey && TELEGRAM_TON_API_KEY) headers["X-API-Key"] = TELEGRAM_TON_API_KEY;
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers,
+        signal: controller.signal,
+      });
+      const rawText = await response.text();
+      return { response, rawText };
+    };
 
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      headers,
-      signal: controller.signal,
-    });
+    let { response, rawText } = await request(Boolean(TELEGRAM_TON_API_KEY));
 
-    const rawText = await response.text();
+    // If an invalid API key is configured, retry anonymously.
+    if (!response.ok && response.status === 401 && TELEGRAM_TON_API_KEY) {
+      ({ response, rawText } = await request(false));
+    }
+
     if (!response.ok) {
       return { ok: false as const, error: `TON API ${response.status}: ${rawText || response.statusText}` };
     }
@@ -7494,6 +7503,7 @@ serve(async (req) => {
 
   return json({ ok: false, error: "Unknown action." });
 });
+
 
 
 
