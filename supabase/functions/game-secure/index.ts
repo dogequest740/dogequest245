@@ -110,6 +110,7 @@ const TELEGRAM_TON_ORDER_STATUSES = ["pending", "claiming", "claimed", "failed",
 const TELEGRAM_TON_ORDER_SELECT = "id, wallet, tg_user_id, payer_address, rail, kind, product_ref, asset, amount_units, amount_display, tx_hash_hex, tx_hash_base64, status, claim_error, reward, claimed_at, created_at, updated_at";
 const TELEGRAM_TON_USDT_DECIMALS = 6;
 const TELEGRAM_TON_USDT_GAS_NANOTON = 60_000_000n;
+const TELEGRAM_TON_USDT_FORWARD_NANOTON = 20_000_000n;
 const TELEGRAM_TON_TRANSFER_LOOKUP_WINDOW_SECONDS = 3 * 60 * 60;
 const TELEGRAM_TON_TX_VALID_SECONDS = 15 * 60;
 const TELEGRAM_TON_STARTER_PACK = 8.5;
@@ -974,6 +975,16 @@ const normalizeTonAddress = (value: unknown) => {
   }
 };
 
+const normalizeTonRawAddress = (value: unknown) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  try {
+    return Address.parse(raw).toRawString();
+  } catch {
+    return "";
+  }
+};
+
 const paymentAmountToDisplay = (value: number) => {
   if (!Number.isFinite(value) || value <= 0) return "0";
   return Number.isInteger(value) ? String(Math.floor(value)) : value.toString();
@@ -1100,6 +1111,54 @@ const getTonMessageTextComment = (messageRaw: unknown) => {
   const decoded = (messageContent as Record<string, unknown>).decoded;
   if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) return "";
   return String((decoded as Record<string, unknown>).comment ?? "").trim();
+};
+
+const tryDecodeTonTextCommentCell = (payloadRaw: unknown) => {
+  const payload = String(payloadRaw ?? "").trim();
+  if (!payload) return "";
+  try {
+    const slice = Cell.fromBase64(payload).beginParse();
+    if (slice.remainingBits < 32) return "";
+    const opcode = slice.loadUint(32);
+    if (opcode !== 0) return "";
+    return slice.loadStringTail().trim();
+  } catch {
+    return "";
+  }
+};
+
+const findCommentRecursively = (value: unknown): string => {
+  if (typeof value === "string") {
+    const direct = value.trim();
+    return direct.startsWith("dgq-") ? direct : "";
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = findCommentRecursively(item);
+      if (nested) return nested;
+    }
+    return "";
+  }
+  if (!value || typeof value !== "object") return "";
+
+  const record = value as Record<string, unknown>;
+  const directComment = String(record.comment ?? "").trim();
+  if (directComment) return directComment;
+
+  for (const nestedValue of Object.values(record)) {
+    const nestedComment = findCommentRecursively(nestedValue);
+    if (nestedComment) return nestedComment;
+  }
+
+  return "";
+};
+
+const getJettonTransferTextComment = (transferRaw: unknown) => {
+  if (!transferRaw || typeof transferRaw !== "object" || Array.isArray(transferRaw)) return "";
+  const transfer = transferRaw as Record<string, unknown>;
+  const decodedComment = findCommentRecursively(transfer.decoded_forward_payload);
+  if (decodedComment) return decodedComment;
+  return tryDecodeTonTextCommentCell(transfer.forward_payload);
 };
 
 const getTelegramTonPrice = (kind: TelegramTonOrderKind, productRef: string, rail: TelegramTonRail) => {
@@ -4980,9 +5039,9 @@ serve(async (req) => {
         return json({ ok: false, error: jettonWalletResult.error || "Failed to prepare USDT transfer wallet." });
       }
       const jettonWalletRows = parseApiJettonWallets(jettonWalletResult.data);
-      const senderJettonWallet = normalizeTonAddress(jettonWalletRows[0]?.address ?? "");
-      if (!senderJettonWallet) {
-        return json({ ok: false, error: "USDT wallet not found for connected TG wallet." });
+      const senderJettonWalletRaw = normalizeTonRawAddress(jettonWalletRows[0]?.address ?? "");
+      if (!senderJettonWalletRaw) {
+        return json({ ok: false, error: "USDT wallet is not available for the connected TG wallet. Open a wallet that already holds TON USDT and retry." });
       }
 
       const commentPayload = beginCell().storeUint(0, 32).storeStringTail(`dgq-usdt:${orderId}`).endCell();
@@ -4993,13 +5052,13 @@ serve(async (req) => {
         .storeAddress(Address.parse(treasuryWallet))
         .storeAddress(Address.parse(payerAddress))
         .storeBit(false)
-        .storeCoins(1n)
+        .storeCoins(TELEGRAM_TON_USDT_FORWARD_NANOTON)
         .storeBit(true)
         .storeRef(commentPayload)
         .endCell();
 
       txMessages = [{
-        address: senderJettonWallet,
+        address: senderJettonWalletRaw,
         amount: TELEGRAM_TON_USDT_GAS_NANOTON.toString(),
         payload: uint8ToBase64(payloadCell.toBoc()),
       }];
@@ -5219,17 +5278,31 @@ serve(async (req) => {
         return json({ ok: false, error: transferResult.error || "Failed to verify USDT transfer." });
       }
 
+      const expectedComment = `dgq-usdt:${orderId}`;
       const transferRows = parseApiJettonTransfers(transferResult.data);
       for (const transfer of transferRows) {
-        if (!isMatchingTxHash(transfer.transaction_hash, txHashHex, txHashBase64)) continue;
         const destination = normalizeTonAddress(transfer.destination ?? "");
         const master = normalizeTonAddress(transfer.jetton_master ?? "");
         if (destination !== treasuryWallet || master !== usdtMaster) continue;
+
         const amount = BigInt(String(transfer.amount ?? "0").trim() || "0");
-        if (amount >= amountUnits && !Boolean(transfer.transaction_aborted)) {
-          paymentVerified = true;
-          break;
+        if (amount < amountUnits || Boolean(transfer.transaction_aborted)) continue;
+
+        const matchedByHash = isMatchingTxHash(transfer.transaction_hash, txHashHex, txHashBase64);
+        const matchedByComment = getJettonTransferTextComment(transfer) === expectedComment;
+        if (!matchedByHash && !matchedByComment) continue;
+
+        if (!txHashHex) {
+          const normalizedHexFromTx = normalizeTxHashHex(transfer.transaction_hash);
+          if (normalizedHexFromTx) txHashHex = normalizedHexFromTx;
         }
+        if (!txHashBase64) {
+          const normalizedBase64FromTx = normalizeTxHashBase64(transfer.transaction_hash);
+          if (normalizedBase64FromTx) txHashBase64 = normalizedBase64FromTx;
+        }
+
+        paymentVerified = true;
+        break;
       }
     }
 
