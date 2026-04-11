@@ -1092,6 +1092,16 @@ const parseApiJettonWallets = (data: Record<string, unknown> | null) => {
   return rows.filter((entry) => entry && typeof entry === "object") as Array<Record<string, unknown>>;
 };
 
+const getTonMessageTextComment = (messageRaw: unknown) => {
+  if (!messageRaw || typeof messageRaw !== "object" || Array.isArray(messageRaw)) return "";
+  const message = messageRaw as Record<string, unknown>;
+  const messageContent = message.message_content;
+  if (!messageContent || typeof messageContent !== "object" || Array.isArray(messageContent)) return "";
+  const decoded = (messageContent as Record<string, unknown>).decoded;
+  if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) return "";
+  return String((decoded as Record<string, unknown>).comment ?? "").trim();
+};
+
 const getTelegramTonPrice = (kind: TelegramTonOrderKind, productRef: string, rail: TelegramTonRail) => {
   if (kind === "buy_gold") {
     const pack = getGoldPackSol(productRef);
@@ -5163,22 +5173,31 @@ serve(async (req) => {
           .eq("status", "claiming");
         return json({ ok: false, error: txResult.error || "Failed to verify TON transaction." });
       }
-
+      const expectedComment = `dgq-ton:${orderId}`;
       const txRows = parseApiTransactions(txResult.data);
       for (const tx of txRows) {
         const txHashRaw = tx.hash ?? tx.hash_norm;
-        if (!isMatchingTxHash(txHashRaw, txHashHex, txHashBase64)) continue;
         const outMsgs = Array.isArray(tx.out_msgs) ? tx.out_msgs as Array<Record<string, unknown>> : [];
-        const hasTransfer = outMsgs.some((msg) => {
+        const matchingTransfer = outMsgs.find((msg) => {
           const destination = normalizeTonAddress(msg.destination ?? "");
           if (destination !== treasuryWallet) return false;
           const value = BigInt(String(msg.value ?? "0").trim() || "0");
           return value >= amountUnits;
         });
-        if (hasTransfer) {
-          paymentVerified = true;
-          break;
+        if (!matchingTransfer) continue;
+        const matchedByHash = isMatchingTxHash(txHashRaw, txHashHex, txHashBase64);
+        const matchedByComment = outMsgs.some((msg) => getTonMessageTextComment(msg) === expectedComment);
+        if (!matchedByHash && !matchedByComment) continue;
+        if (!txHashHex) {
+          const normalizedHexFromTx = normalizeTxHashHex(txHashRaw);
+          if (normalizedHexFromTx) txHashHex = normalizedHexFromTx;
         }
+        if (!txHashBase64) {
+          const normalizedBase64FromTx = normalizeTxHashBase64(txHashRaw);
+          if (normalizedBase64FromTx) txHashBase64 = normalizedBase64FromTx;
+        }
+        paymentVerified = true;
+        break;
       }
     } else {
       const transferResult = await tonCenterGet("/jetton/transfers", {
@@ -7521,13 +7540,3 @@ serve(async (req) => {
 
   return json({ ok: false, error: "Unknown action." });
 });
-
-
-
-
-
-
-
-
-
-
