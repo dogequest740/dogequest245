@@ -2464,10 +2464,12 @@ const validateStateTransition = (
   if (next.level === MAX_LEVEL && next.monsterKills < 20000 && next.dungeonRuns < 150) {
     return "Max level reached too early.";
   }
-  if (next.crystals > 70000 && next.dungeonRuns < 20) {
+  const crossedCrystalBalanceCap = prev.crystals <= 70000 && next.crystals > 70000;
+  if (crossedCrystalBalanceCap && next.dungeonRuns < 20) {
     return "Crystal balance is too high for current progress.";
   }
-  if (next.gold > 1000000 && next.monsterKills < 5000) {
+  const crossedGoldBalanceCap = prev.gold <= 1000000 && next.gold > 1000000;
+  if (crossedGoldBalanceCap && next.monsterKills < 5000) {
     return "Gold balance is too high for current progress.";
   }
 
