@@ -1741,6 +1741,8 @@ const buildPersistedState = (state: GameState): PersistedState => ({
   stakeId: state.stakeId,
 })
 
+const buildPersistedSnapshot = (state: GameState) => JSON.stringify(buildPersistedState(state))
+
 const applyPersistedState = (state: GameState, saved: PersistedState, _savedUpdatedAt?: string) => {
   if (!saved || saved.version !== PERSIST_VERSION) return
 
@@ -3777,6 +3779,7 @@ function App() {
   const lastResumeSyncAtRef = useRef<number>(0)
   const pendingProfileRef = useRef<LoadedProfile | null>(null)
   const profileUpdatedAtRef = useRef('')
+  const lastPersistedSnapshotRef = useRef('')
   const profileSaveInFlightRef = useRef(false)
   const spriteCacheRef = useRef<PlayerSpriteMap>({
     knight: null,
@@ -3956,6 +3959,7 @@ function App() {
       setPayoutWalletError('')
       setActivePanel(null)
       setHud(null)
+      lastPersistedSnapshotRef.current = ''
       setStage('auth')
       await disconnect().catch(() => undefined)
     } finally {
@@ -4175,6 +4179,7 @@ function App() {
   const callGameSecure = async (
     payload: Record<string, unknown>,
     headers?: Record<string, string>,
+    options?: { keepalive?: boolean },
   ): Promise<GameSecureResponse> => {
     if (!EDGE_BASE_URL || !EDGE_ANON_KEY) return { ok: false, error: 'Supabase not configured.' }
     try {
@@ -4188,6 +4193,7 @@ function App() {
         method: 'POST',
         headers: mergedHeaders,
         body: JSON.stringify(payload),
+        keepalive: options?.keepalive === true,
       })
       const rawText = await response.text()
       let data: GameSecureResponse | null = null
@@ -4216,6 +4222,7 @@ function App() {
     action: string,
     payload: Record<string, unknown> = {},
     interactive = true,
+    options?: { keepalive?: boolean },
   ): Promise<GameSecureResponse> => {
     let token = await ensureDungeonSession(interactive)
     if (!token) {
@@ -4226,6 +4233,7 @@ function App() {
     let result = await callGameSecure(
       { action, ...payload },
       secureHeaders,
+      options,
     )
     if (!result.ok && result.error && isSessionTokenError(result.error)) {
       dungeonSessionRef.current = null
@@ -4238,6 +4246,7 @@ function App() {
           result = await callGameSecure(
             { action, ...payload },
             retryHeaders,
+            options,
           )
         }
       }
@@ -4838,6 +4847,7 @@ function App() {
     if (typeof result.energyTimer === 'number') {
       state.energyTimer = clamp(Math.floor(result.energyTimer), 1, ENERGY_REGEN_SECONDS)
     }
+    lastPersistedSnapshotRef.current = buildPersistedSnapshot(state)
     syncHud()
   }
 
@@ -5117,6 +5127,7 @@ function App() {
     if (!fresh || !gameStateRef.current) return
     profileUpdatedAtRef.current = fresh.updatedAt || profileUpdatedAtRef.current
     applyPersistedState(gameStateRef.current, fresh.state, fresh.updatedAt)
+    lastPersistedSnapshotRef.current = buildPersistedSnapshot(gameStateRef.current)
     syncHud()
   }
 
@@ -5757,6 +5768,7 @@ function App() {
       if (!token) {
         isNewProfileRef.current = false
         pendingProfileRef.current = null
+        lastPersistedSnapshotRef.current = ''
         setStage('auth')
         return
       }
@@ -5776,6 +5788,7 @@ function App() {
         referralProcessedRef.current = false
         profileUpdatedAtRef.current = ''
         pendingProfileRef.current = null
+        lastPersistedSnapshotRef.current = ''
         setStage('select')
       }
     })()
@@ -5861,7 +5874,7 @@ function App() {
     if (stage !== 'game') return
     const interval = window.setInterval(() => {
       void saveGameState()
-    }, 15000)
+    }, 5000)
     const handleUnload = () => {
       void saveGameState(true)
     }
@@ -5899,6 +5912,7 @@ function App() {
       referralProcessedRef.current = false
       profileUpdatedAtRef.current = pendingProfile.updatedAt || ''
       applyPersistedState(state, pendingProfile.state, pendingProfile.updatedAt)
+      lastPersistedSnapshotRef.current = buildPersistedSnapshot(state)
       pendingProfileRef.current = null
       serverLoadedRef.current = true
       syncHud()
@@ -5911,16 +5925,19 @@ function App() {
           referralProcessedRef.current = false
           profileUpdatedAtRef.current = saved.updatedAt || ''
           applyPersistedState(gameStateRef.current, saved.state, saved.updatedAt)
+          lastPersistedSnapshotRef.current = buildPersistedSnapshot(gameStateRef.current)
         } else {
           isNewProfileRef.current = true
           referralProcessedRef.current = false
           profileUpdatedAtRef.current = ''
+          lastPersistedSnapshotRef.current = ''
         }
         serverLoadedRef.current = true
         syncHud()
         void syncDungeonStateFromServer()
       })
     } else {
+      lastPersistedSnapshotRef.current = ''
       serverLoadedRef.current = true
     }
 
@@ -6318,20 +6335,30 @@ function App() {
     if (!state) return
     if (!accountIdentity || !serverLoadedRef.current) return
     if (!force && typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+
+    const persistedState = buildPersistedState(state)
+    const snapshot = JSON.stringify(persistedState)
+    if (snapshot === lastPersistedSnapshotRef.current) return
+
     profileSaveInFlightRef.current = true
     try {
       const clientUpdatedAt = profileUpdatedAtRef.current.trim()
       let result = await callGameSecureAuthed(
         'profile_save',
-        { state: buildPersistedState(state), ...(clientUpdatedAt ? { clientUpdatedAt } : {}) },
+        { state: persistedState, ...(clientUpdatedAt ? { clientUpdatedAt } : {}) },
         false,
+        force ? { keepalive: true } : undefined,
       )
       if (!result.ok && result.error && isSessionTokenError(result.error)) {
         result = await callGameSecureAuthed(
           'profile_save',
-          { state: buildPersistedState(state), ...(clientUpdatedAt ? { clientUpdatedAt } : {}) },
+          { state: persistedState, ...(clientUpdatedAt ? { clientUpdatedAt } : {}) },
           !force,
+          force ? { keepalive: true } : undefined,
         )
+      }
+      if (result.ok) {
+        lastPersistedSnapshotRef.current = snapshot
       }
       if (!result.ok && result.error && result.error !== 'Sign-in required for secure actions.') {
         console.warn('Secure profile save skipped:', result.error)
@@ -6344,6 +6371,7 @@ function App() {
             const current = gameStateRef.current
             if (current) {
               applyPersistedState(current, fresh.state, fresh.updatedAt)
+              lastPersistedSnapshotRef.current = buildPersistedSnapshot(current)
               syncHud()
             }
           }
