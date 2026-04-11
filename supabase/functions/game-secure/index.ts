@@ -975,16 +975,6 @@ const normalizeTonAddress = (value: unknown) => {
   }
 };
 
-const normalizeTonRawAddress = (value: unknown) => {
-  const raw = String(value ?? "").trim();
-  if (!raw) return "";
-  try {
-    return Address.parse(raw).toRawString();
-  } catch {
-    return "";
-  }
-};
-
 const paymentAmountToDisplay = (value: number) => {
   if (!Number.isFinite(value) || value <= 0) return "0";
   return Number.isInteger(value) ? String(Math.floor(value)) : value.toString();
@@ -5039,8 +5029,8 @@ serve(async (req) => {
         return json({ ok: false, error: jettonWalletResult.error || "Failed to prepare USDT transfer wallet." });
       }
       const jettonWalletRows = parseApiJettonWallets(jettonWalletResult.data);
-      const senderJettonWalletRaw = normalizeTonRawAddress(jettonWalletRows[0]?.address ?? "");
-      if (!senderJettonWalletRaw) {
+      const senderJettonWallet = normalizeTonAddress(jettonWalletRows[0]?.address ?? "");
+      if (!senderJettonWallet) {
         return json({ ok: false, error: "USDT wallet is not available for the connected TG wallet. Open a wallet that already holds TON USDT and retry." });
       }
 
@@ -5058,7 +5048,7 @@ serve(async (req) => {
         .endCell();
 
       txMessages = [{
-        address: senderJettonWalletRaw,
+        address: senderJettonWallet,
         amount: TELEGRAM_TON_USDT_GAS_NANOTON.toString(),
         payload: uint8ToBase64(payloadCell.toBoc()),
       }];
