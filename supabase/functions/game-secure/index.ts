@@ -4225,166 +4225,182 @@ serve(async (req) => {
   }
 
   if (action === "profile_save") {
-    let normalizedState = normalizeState(body.state);
-    if (!normalizedState) {
+    const normalizedInputState = normalizeState(body.state);
+    if (!normalizedInputState) {
       return json({ ok: false, error: "Invalid profile payload." });
     }
     const clientUpdatedAt = String(body.clientUpdatedAt ?? "").trim();
 
-    const { data: existing, error: existingError } = await supabase
-      .from("profiles")
-      .select("state, updated_at")
-      .eq("wallet", auth.wallet)
-      .maybeSingle();
+    for (let attempt = 0; attempt < PROFILE_UPDATE_RETRY_ATTEMPTS; attempt += 1) {
+      const attemptNow = new Date();
+      const attemptNowIso = attemptNow.toISOString();
+      let normalizedState = structuredClone(normalizedInputState) as Record<string, unknown>;
 
-    if (existingError) {
-      return json({ ok: false, error: "Failed to load profile." });
-    }
-    if (existing) {
-      if (!clientUpdatedAt) {
-        await auditEvent(supabase, auth.wallet, "profile_save_rejected", {
-          reason: "Missing clientUpdatedAt.",
-        });
-        return json({ ok: false, error: "Profile version is missing. Refresh the game." });
-      }
-      const serverUpdatedAtRaw = String(existing.updated_at ?? "").trim();
-      const serverUpdatedAtMs = serverUpdatedAtRaw ? new Date(serverUpdatedAtRaw).getTime() : Number.NaN;
-      const clientUpdatedAtMs = new Date(clientUpdatedAt).getTime();
-      if (!Number.isFinite(serverUpdatedAtMs) || !Number.isFinite(clientUpdatedAtMs)) {
-        await auditEvent(supabase, auth.wallet, "profile_save_rejected", {
-          reason: "Invalid profile version timestamp.",
-          serverUpdatedAt: existing.updated_at,
-          clientUpdatedAt,
-        });
-        return json({ ok: false, error: "Invalid profile version. Reload game state and retry." });
-      }
-      if (
-        clientUpdatedAtMs < serverUpdatedAtMs
-      ) {
-        await auditEvent(supabase, auth.wallet, "profile_save_rejected", {
-          reason: "Stale client profile version.",
-          serverUpdatedAt: existing.updated_at,
-          clientUpdatedAt,
-        });
-        return json({ ok: false, error: "Profile is outdated. Reload game state and retry." });
-      }
-      if (clientUpdatedAtMs > serverUpdatedAtMs + 5 * 60 * 1000) {
-        await auditEvent(supabase, auth.wallet, "profile_save_rejected", {
-          reason: "Client profile version is in the future.",
-          serverUpdatedAt: existing.updated_at,
-          clientUpdatedAt,
-        });
-        return json({ ok: false, error: "Invalid profile version. Reload game state and retry." });
-      }
-    }
-
-    const prevStateRaw = existing?.state && typeof existing.state === "object"
-      ? (existing.state as Record<string, unknown>)
-      : null;
-    const prevState = prevStateRaw ? normalizeState(prevStateRaw) : null;
-    // Never allow client saves to roll premium back (stale client state can otherwise erase active premium).
-    if (prevState) {
-      normalizedState.classId = String(prevState.classId ?? normalizedState.classId ?? "");
-      const nextPlayer = (normalizedState.player as Record<string, unknown> | undefined) ?? {};
-      const prevPlayer = (prevState.player as Record<string, unknown> | undefined) ?? {};
-      normalizedState.player = {
-        ...nextPlayer,
-        ...prevPlayer,
-        level: asInt(nextPlayer.level, asInt(prevPlayer.level, 1)),
-        xp: asInt(nextPlayer.xp, asInt(prevPlayer.xp, 0)),
-        xpNext: asInt(nextPlayer.xpNext, asInt(prevPlayer.xpNext, 1)),
-      };
-      const prevPremiumEndsAt = Math.max(0, asInt(prevState.premiumEndsAt, 0));
-      const nextPremiumEndsAt = Math.max(0, asInt(normalizedState.premiumEndsAt, 0));
-      if (nextPremiumEndsAt < prevPremiumEndsAt) {
-        normalizedState.premiumEndsAt = prevPremiumEndsAt;
-      }
-      const prevPremiumClaimDay = String(prevState.premiumClaimDay ?? "");
-      const nextPremiumClaimDay = String(normalizedState.premiumClaimDay ?? "");
-      if (nextPremiumClaimDay < prevPremiumClaimDay) {
-        normalizedState.premiumClaimDay = prevPremiumClaimDay;
-      }
-      // Village writes are server-authoritative and must never be accepted from client profile_save.
-      normalizedState.village = normalizeVillageState(prevState.village, now.getTime());
-      normalizedState.payoutWallet = sanitizePayoutWallet(prevState.payoutWallet);
-
-      const prevEnergy = clampInt(prevState.energy, 0, Math.max(1, asInt(prevState.energyMax, ENERGY_MAX)));
-      const prevTimer = clampInt(prevState.energyTimer, 1, ENERGY_REGEN_SECONDS);
-      const nextEnergy = clampInt(normalizedState.energy, 0, Math.max(1, asInt(normalizedState.energyMax, ENERGY_MAX)));
-      const nextTimer = clampInt(normalizedState.energyTimer, 1, ENERGY_REGEN_SECONDS);
-      const prevEnergyUpdatedAt = Math.max(0, asInt(prevState.energyUpdatedAt, 0));
-      const nextEnergyUpdatedAt = Math.max(0, asInt(normalizedState.energyUpdatedAt, 0));
-      if (nextEnergy != prevEnergy || nextTimer != prevTimer) {
-        normalizedState.energyUpdatedAt = now.getTime();
-      } else {
-        normalizedState.energyUpdatedAt = nextEnergyUpdatedAt > 0 ? nextEnergyUpdatedAt : prevEnergyUpdatedAt;
-      }
-      if (Math.max(0, asInt(normalizedState.energyUpdatedAt, 0)) <= 0) {
-        normalizedState.energyUpdatedAt = now.getTime();
-      }
-    } else if (!existing) {
-      normalizedState = createStarterProfileState(normalizedState, now.getTime());
-    } else {
-      return json({ ok: false, error: "Invalid previous profile state. Contact support." });
-    }
-    const prevMetrics = prevState ? getMetrics(prevState) : null;
-    const nextMetrics = getMetrics(normalizedState);
-    const previousUpdatedAtMs = existing?.updated_at ? new Date(String(existing.updated_at)).getTime() : Number.NaN;
-    const elapsedSec = Number.isFinite(previousUpdatedAtMs)
-      ? Math.max(1, Math.floor((now.getTime() - previousUpdatedAtMs) / 1000))
-      : 3600;
-
-    const validationError = validateStateTransition(prevState, normalizedState, prevMetrics, nextMetrics, elapsedSec, now.getTime());
-    if (validationError) {
-      await auditEvent(supabase, auth.wallet, "profile_save_rejected", {
-        reason: validationError,
-        elapsedSec,
-        prev: prevMetrics,
-        next: nextMetrics,
-      });
-      return json({ ok: false, error: validationError });
-    }
-
-    if (!existing) {
-      const { error: insertError } = await supabase
+      const { data: existing, error: existingError } = await supabase
         .from("profiles")
-        .insert({
-          wallet: auth.wallet,
-          state: normalizedState,
-          updated_at: now.toISOString(),
+        .select("state, updated_at")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+
+      if (existingError) {
+        return json({ ok: false, error: "Failed to load profile." });
+      }
+      if (existing) {
+        if (!clientUpdatedAt) {
+          await auditEvent(supabase, auth.wallet, "profile_save_rejected", {
+            reason: "Missing clientUpdatedAt.",
+          });
+          return json({ ok: false, error: "Profile version is missing. Refresh the game." });
+        }
+        const serverUpdatedAtRaw = String(existing.updated_at ?? "").trim();
+        const serverUpdatedAtMs = serverUpdatedAtRaw ? new Date(serverUpdatedAtRaw).getTime() : Number.NaN;
+        const clientUpdatedAtMs = new Date(clientUpdatedAt).getTime();
+        if (!Number.isFinite(serverUpdatedAtMs) || !Number.isFinite(clientUpdatedAtMs)) {
+          await auditEvent(supabase, auth.wallet, "profile_save_rejected", {
+            reason: "Invalid profile version timestamp.",
+            serverUpdatedAt: existing.updated_at,
+            clientUpdatedAt,
+          });
+          return json({ ok: false, error: "Invalid profile version. Reload game state and retry." });
+        }
+        if (clientUpdatedAtMs > serverUpdatedAtMs + 5 * 60 * 1000) {
+          await auditEvent(supabase, auth.wallet, "profile_save_rejected", {
+            reason: "Client profile version is in the future.",
+            serverUpdatedAt: existing.updated_at,
+            clientUpdatedAt,
+          });
+          return json({ ok: false, error: "Invalid profile version. Reload game state and retry." });
+        }
+      }
+
+      const prevStateRaw = existing?.state && typeof existing.state === "object"
+        ? (existing.state as Record<string, unknown>)
+        : null;
+      const prevState = prevStateRaw ? normalizeState(prevStateRaw) : null;
+      if (prevState) {
+        normalizedState.classId = String(prevState.classId ?? normalizedState.classId ?? "");
+        const nextPlayer = (normalizedState.player as Record<string, unknown> | undefined) ?? {};
+        const prevPlayer = (prevState.player as Record<string, unknown> | undefined) ?? {};
+        normalizedState.player = {
+          ...nextPlayer,
+          ...prevPlayer,
+          level: asInt(nextPlayer.level, asInt(prevPlayer.level, 1)),
+          xp: asInt(nextPlayer.xp, asInt(prevPlayer.xp, 0)),
+          xpNext: asInt(nextPlayer.xpNext, asInt(prevPlayer.xpNext, 1)),
+        };
+        const prevPremiumEndsAt = Math.max(0, asInt(prevState.premiumEndsAt, 0));
+        const nextPremiumEndsAt = Math.max(0, asInt(normalizedState.premiumEndsAt, 0));
+        if (nextPremiumEndsAt < prevPremiumEndsAt) {
+          normalizedState.premiumEndsAt = prevPremiumEndsAt;
+        }
+        const prevPremiumClaimDay = String(prevState.premiumClaimDay ?? "");
+        const nextPremiumClaimDay = String(normalizedState.premiumClaimDay ?? "");
+        if (nextPremiumClaimDay < prevPremiumClaimDay) {
+          normalizedState.premiumClaimDay = prevPremiumClaimDay;
+        }
+        normalizedState.village = normalizeVillageState(prevState.village, attemptNow.getTime());
+        normalizedState.payoutWallet = sanitizePayoutWallet(prevState.payoutWallet);
+
+        const prevEnergy = clampInt(prevState.energy, 0, Math.max(1, asInt(prevState.energyMax, ENERGY_MAX)));
+        const prevTimer = clampInt(prevState.energyTimer, 1, ENERGY_REGEN_SECONDS);
+        const nextEnergy = clampInt(normalizedState.energy, 0, Math.max(1, asInt(normalizedState.energyMax, ENERGY_MAX)));
+        const nextTimer = clampInt(normalizedState.energyTimer, 1, ENERGY_REGEN_SECONDS);
+        const prevEnergyUpdatedAt = Math.max(0, asInt(prevState.energyUpdatedAt, 0));
+        const nextEnergyUpdatedAt = Math.max(0, asInt(normalizedState.energyUpdatedAt, 0));
+        if (nextEnergy != prevEnergy || nextTimer != prevTimer) {
+          normalizedState.energyUpdatedAt = attemptNow.getTime();
+        } else {
+          normalizedState.energyUpdatedAt = nextEnergyUpdatedAt > 0 ? nextEnergyUpdatedAt : prevEnergyUpdatedAt;
+        }
+        if (Math.max(0, asInt(normalizedState.energyUpdatedAt, 0)) <= 0) {
+          normalizedState.energyUpdatedAt = attemptNow.getTime();
+        }
+      } else if (!existing) {
+        normalizedState = createStarterProfileState(normalizedState, attemptNow.getTime());
+      } else {
+        return json({ ok: false, error: "Invalid previous profile state. Contact support." });
+      }
+
+      const prevMetrics = prevState ? getMetrics(prevState) : null;
+      const nextMetrics = getMetrics(normalizedState);
+      const previousUpdatedAtMs = existing?.updated_at ? new Date(String(existing.updated_at)).getTime() : Number.NaN;
+      const elapsedSec = Number.isFinite(previousUpdatedAtMs)
+        ? Math.max(1, Math.floor((attemptNow.getTime() - previousUpdatedAtMs) / 1000))
+        : 3600;
+
+      const validationError = validateStateTransition(prevState, normalizedState, prevMetrics, nextMetrics, elapsedSec, attemptNow.getTime());
+      if (validationError) {
+        await auditEvent(supabase, auth.wallet, "profile_save_rejected", {
+          reason: validationError,
+          elapsedSec,
+          prev: prevMetrics,
+          next: nextMetrics,
         });
-      if (insertError) return json({ ok: false, error: "Failed to save profile." });
-    } else {
+        return json({ ok: false, error: validationError });
+      }
+
+      if (!existing) {
+        const { error: insertError } = await supabase
+          .from("profiles")
+          .insert({
+            wallet: auth.wallet,
+            state: normalizedState,
+            updated_at: attemptNowIso,
+          });
+        if (!insertError) {
+          const hasMeaningfulDelta = !prevMetrics ||
+            nextMetrics.level !== prevMetrics.level ||
+            nextMetrics.monsterKills !== prevMetrics.monsterKills ||
+            nextMetrics.dungeonRuns !== prevMetrics.dungeonRuns ||
+            nextMetrics.gold !== prevMetrics.gold ||
+            nextMetrics.crystals !== prevMetrics.crystals;
+          if (hasMeaningfulDelta) {
+            await auditEvent(supabase, auth.wallet, "profile_save", {
+              elapsedSec,
+              prev: prevMetrics,
+              next: nextMetrics,
+            });
+          }
+          return json({ ok: true, savedAt: attemptNowIso });
+        }
+        return json({ ok: false, error: "Failed to save profile." });
+      }
+
       const expectedUpdatedAt = String(existing.updated_at ?? "");
       const { data: updated, error: updateError } = await supabase
         .from("profiles")
         .update({
           state: normalizedState,
-          updated_at: now.toISOString(),
+          updated_at: attemptNowIso,
         })
         .eq("wallet", auth.wallet)
         .eq("updated_at", expectedUpdatedAt)
         .select("wallet")
         .maybeSingle();
 
-      if (updateError || !updated) {
-        return json({ ok: false, error: "Profile changed concurrently, retry save." });
+      if (!updateError && updated) {
+        const hasMeaningfulDelta = !prevMetrics ||
+          nextMetrics.level !== prevMetrics.level ||
+          nextMetrics.monsterKills !== prevMetrics.monsterKills ||
+          nextMetrics.dungeonRuns !== prevMetrics.dungeonRuns ||
+          nextMetrics.gold !== prevMetrics.gold ||
+          nextMetrics.crystals !== prevMetrics.crystals;
+        if (hasMeaningfulDelta) {
+          await auditEvent(supabase, auth.wallet, "profile_save", {
+            elapsedSec,
+            prev: prevMetrics,
+            next: nextMetrics,
+          });
+        }
+        return json({ ok: true, savedAt: attemptNowIso });
+      }
+
+      if (attempt < PROFILE_UPDATE_RETRY_ATTEMPTS - 1) {
+        await waitMs(90 + Math.floor(Math.random() * 180));
       }
     }
-    const hasMeaningfulDelta = !prevMetrics ||
-      nextMetrics.level !== prevMetrics.level ||
-      nextMetrics.monsterKills !== prevMetrics.monsterKills ||
-      nextMetrics.dungeonRuns !== prevMetrics.dungeonRuns ||
-      nextMetrics.gold !== prevMetrics.gold ||
-      nextMetrics.crystals !== prevMetrics.crystals;
-    if (hasMeaningfulDelta) {
-      await auditEvent(supabase, auth.wallet, "profile_save", {
-        elapsedSec,
-        prev: prevMetrics,
-        next: nextMetrics,
-      });
-    }
-    return json({ ok: true, savedAt: now.toISOString() });
+
+    return json({ ok: false, error: "Profile changed concurrently, retry save." });
   }
 
   if (action === "season_status") {
