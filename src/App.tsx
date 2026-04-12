@@ -253,6 +253,7 @@ type QuestState = {
 }
 
 type CrystalTaskId = 'join-channel' | 'follow-x' | 'watch-ad' | 'referrals-5' | 'referrals-10'
+type QuestPanelTab = 'achievements' | 'crystals' | 'partner'
 
 type CrystalTaskStatus = {
   id: CrystalTaskId
@@ -277,6 +278,9 @@ const CRYSTAL_TASK_ICON_BY_ID: Record<CrystalTaskId, string> = {
   'referrals-5': iconTablerUsersPlus,
   'referrals-10': iconTablerUsersPlus,
 }
+
+const ADSGRAM_PARTNER_TASK_BLOCK_ID = 'task-27542'
+const ADSGRAM_PARTNER_TASK_REWARD = 25
 
 type AdsgramShowResult = {
   state?: string
@@ -578,6 +582,8 @@ type GameSecureResponse = {
   tgTonClaimed?: boolean
   tgTonAlreadyClaimed?: boolean
   tgTonReused?: boolean
+  partnerTaskAlreadyClaimed?: boolean
+  partnerTaskRewardCrystals?: number
   buyGoldAlreadyProcessed?: boolean
   starterPackAlreadyProcessed?: boolean
   starterPackPurchased?: boolean
@@ -3749,11 +3755,14 @@ function App() {
   const [fortuneSpinResult, setFortuneSpinResult] = useState<FortuneReward | null>(null)
   const [fortuneSpinUsed, setFortuneSpinUsed] = useState<'free' | 'paid' | null>(null)
   const [questClaimLoadingId, setQuestClaimLoadingId] = useState<string | null>(null)
-  const [questPanelTab, setQuestPanelTab] = useState<'achievements' | 'crystals'>('achievements')
+  const [questPanelTab, setQuestPanelTab] = useState<QuestPanelTab>('achievements')
   const [crystalTasks, setCrystalTasks] = useState<CrystalTaskStatus[]>([])
   const [crystalTasksLoading, setCrystalTasksLoading] = useState(false)
   const [crystalTasksError, setCrystalTasksError] = useState('')
   const [crystalTaskClaimLoadingId, setCrystalTaskClaimLoadingId] = useState<CrystalTaskId | null>(null)
+  const [partnerTaskError, setPartnerTaskError] = useState('')
+  const [partnerTaskReady, setPartnerTaskReady] = useState(false)
+  const [partnerTaskClaimLoading, setPartnerTaskClaimLoading] = useState(false)
   const [hoveredPlayerStat, setHoveredPlayerStat] = useState<'power' | 'fortune' | 'prosperity' | null>(null)
   const [isMobile, setIsMobile] = useState(false)
   const [mobileGameTab, setMobileGameTab] = useState<MobileGameTab>('battle')
@@ -3773,6 +3782,8 @@ function App() {
   const fortuneAutoOpenRef = useRef(false)
   const fortuneSpinTimeoutRef = useRef<number | null>(null)
   const adsgramLoadPromiseRef = useRef<Promise<AdsgramSdk | null> | null>(null)
+  const partnerTaskHostRef = useRef<HTMLDivElement | null>(null)
+  const partnerTaskClaimInFlightRef = useRef(false)
   const dungeonRunBusyRef = useRef(false)
   const consumableBusyIdsRef = useRef<Set<number>>(new Set())
   const lastActiveAtRef = useRef<number>(Date.now())
@@ -3869,6 +3880,12 @@ function App() {
     const timer = window.setTimeout(() => setCrystalTasksError(''), 5000)
     return () => window.clearTimeout(timer)
   }, [crystalTasksError])
+
+  useEffect(() => {
+    if (!partnerTaskError) return
+    const timer = window.setTimeout(() => setPartnerTaskError(''), 5000)
+    return () => window.clearTimeout(timer)
+  }, [partnerTaskError])
 
   const walletAddress = publicKey?.toBase58() ?? ''
   const walletAuthReady = Boolean(walletAddress && signMessage)
@@ -7287,6 +7304,138 @@ function App() {
     }
   }
 
+  const claimPartnerTaskReward = async (rewardKeyRaw: string) => {
+    const state = gameStateRef.current
+    if (!state || partnerTaskClaimInFlightRef.current) return
+
+    const rewardKey = String(rewardKeyRaw ?? '').trim()
+    setPartnerTaskError('')
+    partnerTaskClaimInFlightRef.current = true
+    setPartnerTaskClaimLoading(true)
+    try {
+      const result = await callGameSecureAuthed('partner_task_claim', { rewardKey }, true)
+      if (!result.ok) {
+        setPartnerTaskError(result.error || 'Failed to claim partner task reward.')
+        return
+      }
+
+      const nextCrystals = Number(result.crystals)
+      if (Number.isFinite(nextCrystals)) {
+        state.crystals = Math.max(0, Math.floor(nextCrystals))
+      }
+      const nextCrystalsEarned = Number(result.crystalsEarned)
+      if (Number.isFinite(nextCrystalsEarned)) {
+        state.crystalsEarned = Math.max(0, Math.floor(nextCrystalsEarned))
+      }
+
+      if (!result.partnerTaskAlreadyClaimed) {
+        pushLog(state.eventLog, 'Partner task completed. +' + String(ADSGRAM_PARTNER_TASK_REWARD) + ' crystals.')
+      }
+      syncHud()
+    } finally {
+      partnerTaskClaimInFlightRef.current = false
+      setPartnerTaskClaimLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!usingTelegramAuth || activePanel !== 'quests' || questPanelTab !== 'partner') {
+      setPartnerTaskReady(false)
+      return
+    }
+
+    let cancelled = false
+    let cleanup: (() => void) | null = null
+    setPartnerTaskError('')
+    setPartnerTaskReady(false)
+
+    void (async () => {
+      const sdk = await ensureAdsgramSdk()
+      if (cancelled) return
+      if (!sdk || typeof window === 'undefined' || !window.customElements) {
+        setPartnerTaskError('Partner tasks are unavailable right now.')
+        return
+      }
+
+      if (!window.customElements.get('adsgram-task')) {
+        try {
+          await Promise.race([
+            window.customElements.whenDefined('adsgram-task'),
+            new Promise((_, reject) => window.setTimeout(() => reject(new Error('adsgram-task-timeout')), 8000)),
+          ])
+        } catch {
+          setPartnerTaskError('Partner tasks are unavailable right now.')
+          return
+        }
+      }
+
+      if (cancelled) return
+      const host = partnerTaskHostRef.current
+      if (!host) return
+      host.innerHTML = ''
+
+      const taskElement = document.createElement('adsgram-task')
+      taskElement.setAttribute('data-block-id', ADSGRAM_PARTNER_TASK_BLOCK_ID)
+      taskElement.className = 'partner-task-widget'
+
+      const rewardSlot = document.createElement('span')
+      rewardSlot.slot = 'reward'
+      rewardSlot.className = 'partner-task-slot partner-task-slot-reward'
+      rewardSlot.textContent = `+${ADSGRAM_PARTNER_TASK_REWARD} Crystals`
+
+      const actionSlot = document.createElement('div')
+      actionSlot.slot = 'button'
+      actionSlot.className = 'partner-task-slot partner-task-slot-button'
+      actionSlot.textContent = 'Start task'
+
+      const claimSlot = document.createElement('div')
+      claimSlot.slot = 'claim'
+      claimSlot.className = 'partner-task-slot partner-task-slot-claim'
+      claimSlot.textContent = 'Claim'
+
+      const doneSlot = document.createElement('div')
+      doneSlot.slot = 'done'
+      doneSlot.className = 'partner-task-slot partner-task-slot-done'
+      doneSlot.textContent = 'Completed'
+
+      taskElement.append(rewardSlot, actionSlot, claimSlot, doneSlot)
+
+      const handleReward = (event: Event) => {
+        const rewardKey = event instanceof CustomEvent ? String(event.detail ?? '').trim() : ''
+        void claimPartnerTaskReward(rewardKey)
+      }
+      const handleError = (event: Event) => {
+        const detail = event instanceof CustomEvent ? String(event.detail ?? '').trim() : ''
+        setPartnerTaskError(detail ? `Partner task error: ${detail}` : 'Partner task could not be completed right now.')
+      }
+      const handleBannerNotFound = () => setPartnerTaskError('No partner tasks are available right now.')
+      const handleTooLongSession = () => setPartnerTaskError('Partner task session expired. Please start it again.')
+
+      taskElement.addEventListener('reward', handleReward as EventListener)
+      taskElement.addEventListener('onError', handleError as EventListener)
+      taskElement.addEventListener('onBannerNotFound', handleBannerNotFound as EventListener)
+      taskElement.addEventListener('onTooLongSession', handleTooLongSession as EventListener)
+
+      host.appendChild(taskElement)
+      setPartnerTaskReady(true)
+
+      cleanup = () => {
+        taskElement.removeEventListener('reward', handleReward as EventListener)
+        taskElement.removeEventListener('onError', handleError as EventListener)
+        taskElement.removeEventListener('onBannerNotFound', handleBannerNotFound as EventListener)
+        taskElement.removeEventListener('onTooLongSession', handleTooLongSession as EventListener)
+        if (host.contains(taskElement)) {
+          host.removeChild(taskElement)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      cleanup?.()
+    }
+  }, [usingTelegramAuth, activePanel, questPanelTab])
+
   const openCrystalTaskLink = async (task: CrystalTaskStatus) => {
     const safeUrl = String(task.actionUrl ?? '').trim()
     if (!safeUrl) return
@@ -10366,6 +10515,7 @@ function App() {
                   className={questPanelTab === 'crystals' ? 'active' : ''}
                   onClick={() => {
                     setQuestPanelTab('crystals')
+                    setPartnerTaskError('')
                     if (!crystalTasks.length) {
                       void loadCrystalTasks(true)
                     }
@@ -10373,6 +10523,17 @@ function App() {
                 >
                   <img className="icon-img tiny quest-tab-icon" src={iconTablerChecklist} alt="" />
                   Tasks
+                </button>
+                <button
+                  type="button"
+                  className={questPanelTab === 'partner' ? 'active' : ''}
+                  onClick={() => {
+                    setQuestPanelTab('partner')
+                    setCrystalTasksError('')
+                  }}
+                >
+                  <img className="icon-img tiny quest-tab-icon" src={iconTablerBrandTelegram} alt="" />
+                  Partner Tasks
                 </button>
               </div>
             )}
@@ -10478,6 +10639,33 @@ function App() {
                     </div>
                   )
                 })}
+              </div>
+            )}
+
+            {usingTelegramAuth && questPanelTab === 'partner' && (
+              <div className="quest-list partner-task-list">
+                {partnerTaskError && <div className="quest-task-error">{partnerTaskError}</div>}
+                <div className="quest-card ready partner-task-card">
+                  <div className="quest-title with-icon">
+                    <span className="quest-task-icon-wrap task-join-channel">
+                      <img className="icon-img small quest-task-icon" src={iconTablerBrandTelegram} alt="" />
+                    </span>
+                    <span>Partner Task</span>
+                  </div>
+                  <div className="quest-desc">Complete a sponsored Telegram action and claim your crystal reward.</div>
+                  <div className="quest-reward">
+                    <span className="reward-label">Reward</span>
+                    <span className="reward-chip item">
+                      <img className="icon-img small" src={iconCrystals} alt="" />
+                      +{ADSGRAM_PARTNER_TASK_REWARD}
+                    </span>
+                  </div>
+                  <div className="partner-task-shell">
+                    {!partnerTaskReady && <div className="quest-task-loading">Loading partner task...</div>}
+                    <div ref={partnerTaskHostRef} className="partner-task-host" />
+                  </div>
+                  {partnerTaskClaimLoading && <div className="quest-task-loading">Crediting reward...</div>}
+                </div>
               </div>
             )}
           </div>

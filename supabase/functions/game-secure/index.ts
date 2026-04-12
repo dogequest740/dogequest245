@@ -42,6 +42,8 @@ const TELEGRAM_CHANNEL_HANDLE = "doge_mmorpg";
 const TELEGRAM_CHANNEL_URL = "https://t.me/" + TELEGRAM_CHANNEL_HANDLE;
 const TWITTER_FOLLOW_URL = "https://x.com/Doge_mmorpg";
 const ADSGRAM_BLOCK_ID = "27346";
+const ADSGRAM_PARTNER_TASK_REWARD = 25;
+const PARTNER_TASK_DUPLICATE_SUPPRESS_MS = 5_000;
 const PREMIUM_MAX_FUTURE_DAYS = 180;
 const PREMIUM_MAX_EXTENSION_DAYS = 90;
 const STAKE_MIN_AMOUNT = 50;
@@ -4002,6 +4004,26 @@ const loadCrystalTaskOpenHistory = async (
   return { ok: true as const, opened };
 };
 
+const loadRecentPartnerTaskClaims = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+) => {
+  const { data, error } = await supabase
+    .from("security_events")
+    .select("created_at, details")
+    .eq("wallet", wallet)
+    .eq("kind", "partner_task_claim")
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  if (error) return { ok: false as const, error: "Failed to load partner task activity." };
+
+  return {
+    ok: true as const,
+    claims: (data ?? []) as Array<{ created_at: string; details: Record<string, unknown> | null }>,
+  };
+};
+
 const buildCrystalTaskStatuses = async (
   supabase: ReturnType<typeof createClient>,
   wallet: string,
@@ -6790,6 +6812,75 @@ serve(async (req) => {
       crystalsEarned: Math.max(0, asInt(updated.state.crystalsEarned, 0)),
       crystalTasks: tasksAfter.tasks,
       adBlockId: ADSGRAM_BLOCK_ID,
+    });
+  }
+
+  if (action === "partner_task_claim") {
+    if (!isTelegramIdentity(auth.wallet)) {
+      return json({ ok: false, error: "Partner tasks are available only in Telegram Mini App." });
+    }
+
+    const rewardKey = String(body.rewardKey ?? "").trim().slice(0, 512);
+    const { data: profileRow, error: profileError } = await supabase
+      .from("profiles")
+      .select("state")
+      .eq("wallet", auth.wallet)
+      .maybeSingle();
+    if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+      return json({ ok: false, error: "Profile not found." });
+    }
+
+    const currentState = normalizeState(profileRow.state as unknown);
+    if (!currentState) return json({ ok: false, error: "Invalid profile state." });
+
+    const recentClaimsResult = await loadRecentPartnerTaskClaims(supabase, auth.wallet);
+    if (!recentClaimsResult.ok) return json({ ok: false, error: recentClaimsResult.error });
+
+    const nowMs = now.getTime();
+    const alreadyClaimed = recentClaimsResult.claims.some((entry) => {
+      const details = entry.details && typeof entry.details === "object" && !Array.isArray(entry.details)
+        ? entry.details as Record<string, unknown>
+        : {};
+      const existingRewardKey = String(details.rewardKey ?? "").trim();
+      if (rewardKey && existingRewardKey && rewardKey === existingRewardKey) return true;
+      if (rewardKey) return false;
+      const createdAtMs = new Date(String(entry.created_at ?? "")).getTime();
+      return Number.isFinite(createdAtMs) && nowMs >= createdAtMs && (nowMs - createdAtMs) <= PARTNER_TASK_DUPLICATE_SUPPRESS_MS;
+    });
+
+    if (alreadyClaimed) {
+      return json({
+        ok: true,
+        partnerTaskAlreadyClaimed: true,
+        crystals: Math.max(0, asInt(currentState.crystals, 0)),
+        crystalsEarned: Math.max(0, asInt(currentState.crystalsEarned, 0)),
+      });
+    }
+
+    if (!rewardKey) {
+      return json({ ok: false, error: "Partner task reward token is missing. Please retry the task." });
+    }
+
+    const updated = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
+      state.crystals = Math.max(0, asInt(state.crystals, 0)) + ADSGRAM_PARTNER_TASK_REWARD;
+      state.crystalsEarned = Math.max(0, asInt(state.crystalsEarned, 0)) + ADSGRAM_PARTNER_TASK_REWARD;
+    });
+    if (!updated.ok || !updated.state) {
+      return json({ ok: false, error: updated.error || "Failed to credit partner task reward." });
+    }
+
+    await auditEvent(supabase, auth.wallet, "partner_task_claim", {
+      rewardKey,
+      rewardCrystals: ADSGRAM_PARTNER_TASK_REWARD,
+      source: "adsgram_task",
+    });
+
+    return json({
+      ok: true,
+      savedAt: typeof updated.updatedAt === "string" ? updated.updatedAt : undefined,
+      crystals: Math.max(0, asInt(updated.state.crystals, 0)),
+      crystalsEarned: Math.max(0, asInt(updated.state.crystalsEarned, 0)),
+      partnerTaskRewardCrystals: ADSGRAM_PARTNER_TASK_REWARD,
     });
   }
 
