@@ -280,7 +280,7 @@ const CRYSTAL_TASK_ICON_BY_ID: Record<CrystalTaskId, string> = {
 }
 
 const ADSGRAM_PARTNER_TASK_BLOCK_ID = 'task-27542'
-const ADSGRAM_PARTNER_TASK_REWARD = 25
+const ADSGRAM_PARTNER_TASK_REWARD = 10
 
 type AdsgramShowResult = {
   state?: string
@@ -7378,31 +7378,9 @@ function App() {
       taskElement.setAttribute('data-block-id', ADSGRAM_PARTNER_TASK_BLOCK_ID)
       taskElement.className = 'partner-task-widget'
 
-      const rewardSlot = document.createElement('span')
-      rewardSlot.slot = 'reward'
-      rewardSlot.className = 'partner-task-slot partner-task-slot-reward'
-      rewardSlot.textContent = `+${ADSGRAM_PARTNER_TASK_REWARD} Crystals`
-
-      const actionSlot = document.createElement('div')
-      actionSlot.slot = 'button'
-      actionSlot.className = 'partner-task-slot partner-task-slot-button'
-      actionSlot.textContent = 'Start task'
-
-      const claimSlot = document.createElement('div')
-      claimSlot.slot = 'claim'
-      claimSlot.className = 'partner-task-slot partner-task-slot-claim'
-      claimSlot.textContent = 'Claim'
-
-      const doneSlot = document.createElement('div')
-      doneSlot.slot = 'done'
-      doneSlot.className = 'partner-task-slot partner-task-slot-done'
-      doneSlot.textContent = 'Completed'
-
-      taskElement.append(rewardSlot, actionSlot, claimSlot, doneSlot)
-
       const handleReward = (event: Event) => {
         const rewardKey = event instanceof CustomEvent ? String(event.detail ?? '').trim() : ''
-        void claimPartnerTaskReward(rewardKey)
+        void claimPartnerTaskReward(rewardKey || ADSGRAM_PARTNER_TASK_BLOCK_ID)
       }
       const handleError = (event: Event) => {
         const detail = event instanceof CustomEvent ? String(event.detail ?? '').trim() : ''
@@ -10652,7 +10630,7 @@ function App() {
                     </span>
                     <span>Partner Task</span>
                   </div>
-                  <div className="quest-desc">Complete a sponsored Telegram action and claim your crystal reward.</div>
+                  <div className="quest-desc">Complete partner requirements in the card below, then claim your reward.</div>
                   <div className="quest-reward">
                     <span className="reward-label">Reward</span>
                     <span className="reward-chip item">
@@ -10660,6 +10638,7 @@ function App() {
                       +{ADSGRAM_PARTNER_TASK_REWARD}
                     </span>
                   </div>
+                  <div className="partner-task-note">Crystals are credited only after AdsGram confirms the completed task.</div>
                   <div className="partner-task-shell">
                     {!partnerTaskReady && <div className="quest-task-loading">Loading partner task...</div>}
                     <div ref={partnerTaskHostRef} className="partner-task-host" />

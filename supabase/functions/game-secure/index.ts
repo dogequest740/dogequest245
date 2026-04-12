@@ -42,7 +42,7 @@ const TELEGRAM_CHANNEL_HANDLE = "doge_mmorpg";
 const TELEGRAM_CHANNEL_URL = "https://t.me/" + TELEGRAM_CHANNEL_HANDLE;
 const TWITTER_FOLLOW_URL = "https://x.com/Doge_mmorpg";
 const ADSGRAM_BLOCK_ID = "27346";
-const ADSGRAM_PARTNER_TASK_REWARD = 25;
+const ADSGRAM_PARTNER_TASK_REWARD = 10;
 const PARTNER_TASK_DUPLICATE_SUPPRESS_MS = 5_000;
 const PREMIUM_MAX_FUTURE_DAYS = 180;
 const PREMIUM_MAX_EXTENSION_DAYS = 90;
@@ -6820,7 +6820,7 @@ serve(async (req) => {
       return json({ ok: false, error: "Partner tasks are available only in Telegram Mini App." });
     }
 
-    const rewardKey = String(body.rewardKey ?? "").trim().slice(0, 512);
+    const rewardKey = String(body.rewardKey ?? "").trim().slice(0, 512) || ADSGRAM_BLOCK_ID;
     const { data: profileRow, error: profileError } = await supabase
       .from("profiles")
       .select("state")
@@ -6838,12 +6838,6 @@ serve(async (req) => {
 
     const nowMs = now.getTime();
     const alreadyClaimed = recentClaimsResult.claims.some((entry) => {
-      const details = entry.details && typeof entry.details === "object" && !Array.isArray(entry.details)
-        ? entry.details as Record<string, unknown>
-        : {};
-      const existingRewardKey = String(details.rewardKey ?? "").trim();
-      if (rewardKey && existingRewardKey && rewardKey === existingRewardKey) return true;
-      if (rewardKey) return false;
       const createdAtMs = new Date(String(entry.created_at ?? "")).getTime();
       return Number.isFinite(createdAtMs) && nowMs >= createdAtMs && (nowMs - createdAtMs) <= PARTNER_TASK_DUPLICATE_SUPPRESS_MS;
     });
@@ -6855,10 +6849,6 @@ serve(async (req) => {
         crystals: Math.max(0, asInt(currentState.crystals, 0)),
         crystalsEarned: Math.max(0, asInt(currentState.crystalsEarned, 0)),
       });
-    }
-
-    if (!rewardKey) {
-      return json({ ok: false, error: "Partner task reward token is missing. Please retry the task." });
     }
 
     const updated = await updateProfileWithRetry(supabase, auth.wallet, (state) => {

@@ -4402,23 +4402,29 @@ button.ghost {
 }
 
 .quest-panel-tabs {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 10px;
 }
 
 .quest-panel-tabs button {
+  width: 100%;
+  min-height: 46px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 10px;
-  padding: 8px 12px;
+  padding: 8px 10px;
   background: rgba(11, 17, 25, 0.85);
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.15;
   font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  justify-content: center;
+  gap: 6px;
+  text-align: center;
 }
 
 .quest-tab-icon {
@@ -4432,6 +4438,19 @@ button.ghost {
   color: #0a1116;
   background: linear-gradient(140deg, #7fd2ff, #7bd88f);
   border-color: rgba(123, 216, 143, 0.65);
+}
+
+@media (max-width: 560px) {
+  .quest-panel-tabs button {
+    font-size: 10px;
+    padding: 8px 6px;
+    gap: 5px;
+  }
+
+  .quest-tab-icon {
+    width: 16px;
+    height: 16px;
+  }
 }
 
 .quest-list {
@@ -4613,6 +4632,10 @@ button.ghost {
   gap: 8px;
 }
 
+.partner-task-list {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .partner-task-list .quest-card {
   gap: 10px;
 }
@@ -4622,6 +4645,16 @@ button.ghost {
   background:
     radial-gradient(circle at top right, rgba(56, 182, 255, 0.12), transparent 36%),
     linear-gradient(160deg, rgba(16, 22, 30, 0.96), rgba(11, 16, 24, 0.92));
+  padding: 14px;
+}
+
+.partner-task-note {
+  font-size: 11px;
+  color: rgba(196, 225, 238, 0.9);
+  border: 1px solid rgba(127, 210, 255, 0.24);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: rgba(7, 20, 30, 0.45);
 }
 
 .partner-task-shell {
@@ -4630,45 +4663,29 @@ button.ghost {
 }
 
 .partner-task-host {
-  display: grid;
-  min-height: 132px;
+  display: block;
+  width: 100%;
+  min-height: 186px;
+}
+
+.partner-task-host adsgram-task {
+  display: block;
+  width: 100%;
+  min-height: 186px;
 }
 
 .partner-task-widget {
   display: block;
   width: 100%;
+  min-height: 186px;
+  --adsgram-task-font-size: 14px;
+  --adsgram-task-icon-size: 36px;
+  --adsgram-task-icon-title-gap: 10px;
+  --adsgram-task-button-width: 112px;
+  --adsgram-task-icon-border-radius: 10px;
 }
 
-.partner-task-slot {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 38px;
-  padding: 0 14px;
-  border-radius: 12px;
-  font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
-  font-size: 12px;
-  letter-spacing: 0.3px;
-}
 
-.partner-task-slot-reward {
-  color: #dff8ff;
-  background: linear-gradient(135deg, rgba(56, 182, 255, 0.26), rgba(120, 255, 216, 0.22));
-  border: 1px solid rgba(127, 210, 255, 0.4);
-}
-
-.partner-task-slot-button,
-.partner-task-slot-claim,
-.partner-task-slot-done {
-  color: #061017;
-  background: linear-gradient(135deg, #88ddff, #79d99a);
-  box-shadow: 0 8px 18px rgba(41, 169, 214, 0.22);
-}
-
-.partner-task-slot-done {
-  background: linear-gradient(135deg, #f6d488, #d9b04e);
-  box-shadow: 0 8px 18px rgba(214, 178, 95, 0.2);
-}
 
 .quest-card button {
   border: none;
