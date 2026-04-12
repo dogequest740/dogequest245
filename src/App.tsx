@@ -3762,7 +3762,6 @@ function App() {
   const [crystalTaskClaimLoadingId, setCrystalTaskClaimLoadingId] = useState<CrystalTaskId | null>(null)
   const [partnerTaskError, setPartnerTaskError] = useState('')
   const [partnerTaskReady, setPartnerTaskReady] = useState(false)
-  const [partnerTaskClaimLoading, setPartnerTaskClaimLoading] = useState(false)
   const [partnerTaskWidgetVersion, setPartnerTaskWidgetVersion] = useState(0)
   const [hoveredPlayerStat, setHoveredPlayerStat] = useState<'power' | 'fortune' | 'prosperity' | null>(null)
   const [isMobile, setIsMobile] = useState(false)
@@ -7312,7 +7311,6 @@ function App() {
     const rewardKey = String(rewardKeyRaw ?? '').trim()
     setPartnerTaskError('')
     partnerTaskClaimInFlightRef.current = true
-    setPartnerTaskClaimLoading(true)
     try {
       const result = await callGameSecureAuthed('partner_task_claim', { rewardKey }, true)
       if (!result.ok) {
@@ -7337,7 +7335,6 @@ function App() {
       syncHud()
     } finally {
       partnerTaskClaimInFlightRef.current = false
-      setPartnerTaskClaimLoading(false)
     }
   }
 
@@ -10660,7 +10657,6 @@ function App() {
                     {!partnerTaskReady && <div className="quest-task-loading">Loading partner task...</div>}
                     <div ref={partnerTaskHostRef} className="partner-task-host" />
                   </div>
-                  {partnerTaskClaimLoading && <div className="quest-task-loading">Crediting reward...</div>}
                 </div>
               </div>
             )}
