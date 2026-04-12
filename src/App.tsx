@@ -3784,6 +3784,7 @@ function App() {
   const adsgramLoadPromiseRef = useRef<Promise<AdsgramSdk | null> | null>(null)
   const partnerTaskHostRef = useRef<HTMLDivElement | null>(null)
   const partnerTaskClaimInFlightRef = useRef(false)
+  const partnerTaskRefreshTimeoutRef = useRef<number | null>(null)
   const dungeonRunBusyRef = useRef(false)
   const consumableBusyIdsRef = useRef<Set<number>>(new Set())
   const lastActiveAtRef = useRef<number>(Date.now())
@@ -7331,6 +7332,15 @@ function App() {
 
       if (!result.partnerTaskAlreadyClaimed) {
         pushLog(state.eventLog, 'Partner task completed. +' + String(ADSGRAM_PARTNER_TASK_REWARD) + ' crystals.')
+        if (partnerTaskRefreshTimeoutRef.current !== null) {
+          window.clearTimeout(partnerTaskRefreshTimeoutRef.current)
+        }
+        partnerTaskRefreshTimeoutRef.current = window.setTimeout(() => {
+          partnerTaskRefreshTimeoutRef.current = null
+          setPartnerTaskReady(false)
+          setPartnerTaskError('')
+          setPartnerTaskWidgetVersion((value) => value + 1)
+        }, 10000)
       }
       syncHud()
     } finally {
@@ -7381,7 +7391,13 @@ function App() {
       const rewardSlot = document.createElement('span')
       rewardSlot.slot = 'reward'
       rewardSlot.className = 'partner-task-slot partner-task-slot-reward'
-      rewardSlot.textContent = 'Reward +' + String(ADSGRAM_PARTNER_TASK_REWARD) + ' Crystals'
+      const rewardIcon = document.createElement('img')
+      rewardIcon.src = iconCrystals
+      rewardIcon.alt = ''
+      rewardIcon.className = 'partner-task-slot-reward-icon'
+      const rewardText = document.createElement('span')
+      rewardText.textContent = '+' + String(ADSGRAM_PARTNER_TASK_REWARD) + ' Crystals'
+      rewardSlot.append(rewardIcon, rewardText)
 
       const buttonSlot = document.createElement('span')
       buttonSlot.slot = 'button'
@@ -7408,8 +7424,15 @@ function App() {
         const detail = event instanceof CustomEvent ? String(event.detail ?? '').trim() : ''
         setPartnerTaskError(detail ? `Partner task error: ${detail}` : 'Partner task could not be completed right now.')
       }
-      const handleBannerNotFound = () => setPartnerTaskError('No partner tasks are available right now.')
-      const handleTooLongSession = () => setPartnerTaskError('Partner task session expired. Please start it again.')
+      const handleBannerNotFound = () => {
+        setPartnerTaskReady(false)
+        setPartnerTaskError('No partner tasks are available right now.')
+        if (host) host.innerHTML = ''
+      }
+      const handleTooLongSession = () => {
+        setPartnerTaskReady(false)
+        setPartnerTaskError('Partner task session expired. Please start it again.')
+      }
 
       taskElement.addEventListener('reward', handleReward as EventListener)
       taskElement.addEventListener('onError', handleError as EventListener)
@@ -7435,6 +7458,15 @@ function App() {
       cleanup?.()
     }
   }, [usingTelegramAuth, activePanel, questPanelTab, partnerTaskWidgetVersion])
+
+  useEffect(() => {
+    return () => {
+      if (partnerTaskRefreshTimeoutRef.current !== null) {
+        window.clearTimeout(partnerTaskRefreshTimeoutRef.current)
+        partnerTaskRefreshTimeoutRef.current = null
+      }
+    }
+  }, [])
 
   const openCrystalTaskLink = async (task: CrystalTaskStatus) => {
     const safeUrl = String(task.actionUrl ?? '').trim()
@@ -7775,6 +7807,8 @@ function App() {
         return 0
     }
   }
+
+  const partnerTaskNotAvailable = partnerTaskError.toLowerCase().includes('no partner tasks')
 
   const questEntries = useMemo(() => {
     if (!hud) return []
@@ -10644,7 +10678,7 @@ function App() {
 
             {usingTelegramAuth && questPanelTab === 'partner' && (
               <div className="quest-list partner-task-list">
-                {partnerTaskError && <div className="quest-task-error">{partnerTaskError}</div>}
+                {partnerTaskError && !partnerTaskNotAvailable && <div className="quest-task-error">{partnerTaskError}</div>}
                 <div className="quest-card ready partner-task-card">
                   <div className="quest-title with-icon">
                     <span className="quest-task-icon-wrap task-join-channel">
@@ -10654,8 +10688,12 @@ function App() {
                   </div>
                   <div className="quest-desc">Complete a sponsored action and claim crystals in the task card.</div>
                   <div className="partner-task-shell">
-                    {!partnerTaskReady && <div className="quest-task-loading">Loading partner task...</div>}
-                    <div ref={partnerTaskHostRef} className="partner-task-host" />
+                    {!partnerTaskReady && !partnerTaskNotAvailable && <div className="quest-task-loading">Loading partner task...</div>}
+                    {partnerTaskNotAvailable ? (
+                      <div className="quest-task-empty">No partner tasks are available right now. Check back later.</div>
+                    ) : (
+                      <div ref={partnerTaskHostRef} className="partner-task-host" />
+                    )}
                   </div>
                 </div>
               </div>

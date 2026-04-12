@@ -4623,6 +4623,16 @@ button.ghost {
   font-size: 12px;
 }
 
+.quest-task-empty {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px dashed rgba(127, 210, 255, 0.28);
+  background: rgba(10, 22, 33, 0.52);
+  color: #bfe9ff;
+  font-size: 12px;
+  text-align: center;
+}
+
 .reward-chip.repeat {
   color: #9fe7ff;
   border-color: rgba(127, 210, 255, 0.35);
@@ -4675,6 +4685,46 @@ button.ghost {
   --adsgram-task-icon-title-gap: 10px;
   --adsgram-task-button-width: 112px;
   --adsgram-task-icon-border-radius: 10px;
+}
+
+.partner-task-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.25px;
+}
+
+.partner-task-slot-reward {
+  gap: 6px;
+  color: #e5f8ff;
+  border: 1px solid rgba(127, 210, 255, 0.44);
+  background: linear-gradient(135deg, rgba(45, 145, 205, 0.36), rgba(93, 209, 242, 0.24));
+}
+
+.partner-task-slot-reward-icon {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.4));
+}
+
+.partner-task-slot-button,
+.partner-task-slot-claim,
+.partner-task-slot-done {
+  color: #081016;
+  background: linear-gradient(135deg, #7fd2ff, #7bd88f);
+  box-shadow: 0 8px 16px rgba(58, 169, 225, 0.22);
+}
+
+.partner-task-slot-done {
+  background: linear-gradient(135deg, #f6d488, #d9b04e);
+  box-shadow: 0 8px 16px rgba(214, 178, 95, 0.22);
 }
 
 
