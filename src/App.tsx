@@ -280,7 +280,7 @@ const CRYSTAL_TASK_ICON_BY_ID: Record<CrystalTaskId, string> = {
 }
 
 const ADSGRAM_PARTNER_TASK_BLOCK_ID = 'task-27542'
-const ADSGRAM_PARTNER_TASK_REWARD = 10
+const ADSGRAM_PARTNER_TASK_REWARD = 6
 
 type AdsgramShowResult = {
   state?: string
@@ -3763,6 +3763,7 @@ function App() {
   const [partnerTaskError, setPartnerTaskError] = useState('')
   const [partnerTaskReady, setPartnerTaskReady] = useState(false)
   const [partnerTaskClaimLoading, setPartnerTaskClaimLoading] = useState(false)
+  const [partnerTaskWidgetVersion, setPartnerTaskWidgetVersion] = useState(0)
   const [hoveredPlayerStat, setHoveredPlayerStat] = useState<'power' | 'fortune' | 'prosperity' | null>(null)
   const [isMobile, setIsMobile] = useState(false)
   const [mobileGameTab, setMobileGameTab] = useState<MobileGameTab>('battle')
@@ -7316,6 +7317,8 @@ function App() {
       const result = await callGameSecureAuthed('partner_task_claim', { rewardKey }, true)
       if (!result.ok) {
         setPartnerTaskError(result.error || 'Failed to claim partner task reward.')
+        setPartnerTaskReady(false)
+        setPartnerTaskWidgetVersion((value) => value + 1)
         return
       }
 
@@ -7378,6 +7381,28 @@ function App() {
       taskElement.setAttribute('data-block-id', ADSGRAM_PARTNER_TASK_BLOCK_ID)
       taskElement.className = 'partner-task-widget'
 
+      const rewardSlot = document.createElement('span')
+      rewardSlot.slot = 'reward'
+      rewardSlot.className = 'partner-task-slot partner-task-slot-reward'
+      rewardSlot.textContent = 'Reward +' + String(ADSGRAM_PARTNER_TASK_REWARD) + ' Crystals'
+
+      const buttonSlot = document.createElement('span')
+      buttonSlot.slot = 'button'
+      buttonSlot.className = 'partner-task-slot partner-task-slot-button'
+      buttonSlot.textContent = 'Open Task'
+
+      const claimSlot = document.createElement('span')
+      claimSlot.slot = 'claim'
+      claimSlot.className = 'partner-task-slot partner-task-slot-claim'
+      claimSlot.textContent = 'Claim Reward'
+
+      const doneSlot = document.createElement('span')
+      doneSlot.slot = 'done'
+      doneSlot.className = 'partner-task-slot partner-task-slot-done'
+      doneSlot.textContent = 'Completed'
+
+      taskElement.append(rewardSlot, buttonSlot, claimSlot, doneSlot)
+
       const handleReward = (event: Event) => {
         const rewardKey = event instanceof CustomEvent ? String(event.detail ?? '').trim() : ''
         void claimPartnerTaskReward(rewardKey || ADSGRAM_PARTNER_TASK_BLOCK_ID)
@@ -7412,7 +7437,7 @@ function App() {
       cancelled = true
       cleanup?.()
     }
-  }, [usingTelegramAuth, activePanel, questPanelTab])
+  }, [usingTelegramAuth, activePanel, questPanelTab, partnerTaskWidgetVersion])
 
   const openCrystalTaskLink = async (task: CrystalTaskStatus) => {
     const safeUrl = String(task.actionUrl ?? '').trim()
@@ -10630,15 +10655,7 @@ function App() {
                     </span>
                     <span>Partner Task</span>
                   </div>
-                  <div className="quest-desc">Complete partner requirements in the card below, then claim your reward.</div>
-                  <div className="quest-reward">
-                    <span className="reward-label">Reward</span>
-                    <span className="reward-chip item">
-                      <img className="icon-img small" src={iconCrystals} alt="" />
-                      +{ADSGRAM_PARTNER_TASK_REWARD}
-                    </span>
-                  </div>
-                  <div className="partner-task-note">Crystals are credited only after AdsGram confirms the completed task.</div>
+                  <div className="quest-desc">Complete a sponsored action and claim crystals in the task card.</div>
                   <div className="partner-task-shell">
                     {!partnerTaskReady && <div className="quest-task-loading">Loading partner task...</div>}
                     <div ref={partnerTaskHostRef} className="partner-task-host" />

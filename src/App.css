@@ -4648,14 +4648,6 @@ button.ghost {
   padding: 14px;
 }
 
-.partner-task-note {
-  font-size: 11px;
-  color: rgba(196, 225, 238, 0.9);
-  border: 1px solid rgba(127, 210, 255, 0.24);
-  border-radius: 10px;
-  padding: 8px 10px;
-  background: rgba(7, 20, 30, 0.45);
-}
 
 .partner-task-shell {
   display: grid;
