@@ -578,6 +578,7 @@ type GameSecureResponse = {
   tgStarsReused?: boolean
   tgStarsClaimed?: boolean
   tgStarsAlreadyClaimed?: boolean
+  tgStarsNoPending?: boolean
   tgTonOrder?: TelegramTonOrder | null
   tgTonClaimed?: boolean
   tgTonAlreadyClaimed?: boolean
@@ -3784,6 +3785,7 @@ function App() {
   const adsgramLoadPromiseRef = useRef<Promise<AdsgramSdk | null> | null>(null)
   const partnerTaskHostRef = useRef<HTMLDivElement | null>(null)
   const partnerTaskClaimInFlightRef = useRef(false)
+  const tgStarsBacklogClaimInFlightRef = useRef(false)
   const partnerTaskRefreshTimeoutRef = useRef<number | null>(null)
   const dungeonRunBusyRef = useRef(false)
   const consumableBusyIdsRef = useRef<Set<number>>(new Set())
@@ -4422,6 +4424,79 @@ function App() {
     }
 
     return lastResult
+  }
+
+  const claimPendingTelegramStarsOrders = async (maxClaims = 6) => {
+    const state = gameStateRef.current
+    if (!state || !usingTelegramAuth || tgStarsBacklogClaimInFlightRef.current) return
+
+    tgStarsBacklogClaimInFlightRef.current = true
+    try {
+      for (let i = 0; i < maxClaims; i += 1) {
+        const result = await callGameSecureAuthed('tg_stars_claim', {}, false)
+        if (!result.ok) {
+          const errorText = String(result.error ?? '').toLowerCase()
+          if (
+            errorText.includes('payment not completed yet') ||
+            errorText.includes('being finalized') ||
+            errorText.includes('retry in a few seconds')
+          ) {
+            break
+          }
+          break
+        }
+
+        if (result.tgStarsNoPending) break
+
+        let applied = false
+        if (typeof result.gold === 'number') {
+          state.gold = Math.max(0, Math.floor(result.gold))
+          applied = true
+        }
+        if (typeof result.premiumEndsAt === 'number') {
+          state.premiumEndsAt = Math.max(0, Math.floor(result.premiumEndsAt))
+          applied = true
+        }
+        if (typeof result.worldBossTickets === 'number') {
+          state.worldBossTickets = Math.max(0, Math.floor(result.worldBossTickets))
+          applied = true
+        }
+        if (typeof result.fortunePaidSpins === 'number') {
+          setFortunePaidSpins(Math.max(0, Math.floor(result.fortunePaidSpins)))
+          applied = true
+        }
+        if (typeof result.starterPackPurchased === 'boolean') {
+          state.starterPackPurchased = result.starterPackPurchased
+          applied = true
+        }
+        if (result.consumables) {
+          state.consumables = normalizeLoadedConsumables(result.consumables)
+          applied = true
+        }
+        if (typeof result.savedAt === 'string' && result.savedAt) {
+          profileUpdatedAtRef.current = result.savedAt
+        }
+
+        if (result.tgStarsClaimed && result.tgStarsOrder) {
+          const order = result.tgStarsOrder
+          const label =
+            order.kind === 'buy_gold'
+              ? 'Gold ' + order.productRef
+              : order.kind === 'premium_buy'
+                ? 'Premium ' + order.productRef
+                : order.kind === 'starter_pack_buy'
+                  ? 'Starter Pack'
+                  : 'Fortune ' + order.productRef
+          pushLog(state.eventLog, 'Telegram Stars credited: ' + label + '.')
+        }
+
+        if (applied) {
+          syncHud()
+        }
+      }
+    } finally {
+      tgStarsBacklogClaimInFlightRef.current = false
+    }
   }
 
   const createAndClaimTelegramStarsOrder = async (
@@ -5935,6 +6010,9 @@ function App() {
       serverLoadedRef.current = true
       syncHud()
       void syncDungeonStateFromServer()
+      if (usingTelegramAuth) {
+        void claimPendingTelegramStarsOrders()
+      }
     } else if (accountIdentity) {
       loadProfileStateSecure(false).then((saved) => {
         if (!gameStateRef.current) return
@@ -5953,6 +6031,9 @@ function App() {
         serverLoadedRef.current = true
         syncHud()
         void syncDungeonStateFromServer()
+        if (usingTelegramAuth) {
+          void claimPendingTelegramStarsOrders()
+        }
       })
     } else {
       lastPersistedSnapshotRef.current = ''

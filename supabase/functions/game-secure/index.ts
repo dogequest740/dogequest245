@@ -4734,9 +4734,25 @@ serve(async (req) => {
       return json({ ok: false, error: "Telegram Stars are available only in Telegram Mini App." });
     }
 
-    const orderId = String(body.orderId ?? "").trim().slice(0, 80);
+    let orderId = String(body.orderId ?? "").trim().slice(0, 80);
     if (!orderId) {
-      return json({ ok: false, error: "Missing Stars order id." });
+      const { data: pendingRow, error: pendingError } = await supabase
+        .from("telegram_stars_orders")
+        .select("id")
+        .eq("wallet", auth.wallet)
+        .eq("status", "paid")
+        .order("paid_at", { ascending: true, nullsFirst: true })
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (pendingError) {
+        return json({ ok: false, error: "Failed to load pending Stars orders." });
+      }
+      const pendingId = String((pendingRow as Record<string, unknown> | null)?.id ?? "").trim();
+      if (!pendingId) {
+        return json({ ok: true, tgStarsNoPending: true });
+      }
+      orderId = pendingId;
     }
 
     const lockTs = now.toISOString();
