@@ -2347,6 +2347,33 @@ const getLatestClosedSeason = async (supabase: ReturnType<typeof createClient>) 
   return { ok: true as const, season: normalizeSeason((data as Record<string, unknown> | null) ?? null) };
 };
 
+const SEASON_PROFILE_BATCH_SIZE = 1000;
+
+const loadSeasonProfileRows = async (supabase: ReturnType<typeof createClient>) => {
+  const rows: Array<Record<string, unknown>> = [];
+
+  for (let offset = 0; offset < 1_000_000; offset += SEASON_PROFILE_BATCH_SIZE) {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("wallet, state, updated_at")
+      .order("wallet", { ascending: true })
+      .range(offset, offset + SEASON_PROFILE_BATCH_SIZE - 1);
+
+    if (error) {
+      return { ok: false as const, error: "Failed to load season profiles." };
+    }
+
+    const batch = ((data as Array<Record<string, unknown>> | null) ?? []);
+    rows.push(...batch);
+
+    if (batch.length < SEASON_PROFILE_BATCH_SIZE) {
+      return { ok: true as const, rows };
+    }
+  }
+
+  return { ok: false as const, error: "Season profile pagination exceeded the safety limit." };
+};
+
 const buildSeasonComputedRows = (
   profileRows: Array<Record<string, unknown>>,
   poolUsdt: number,
@@ -4518,13 +4545,11 @@ serve(async (req) => {
     }
 
     const limit = clampInt(body.limit, 1, 20);
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("wallet, state, updated_at");
-    if (error) return json({ ok: false, error: "Failed to load season leaderboard." });
+    const profileRowsResult = await loadSeasonProfileRows(supabase);
+    if (!profileRowsResult.ok) return json({ ok: false, error: profileRowsResult.error });
 
     const computed = buildSeasonComputedRows(
-      ((data as Array<Record<string, unknown>> | null) ?? []),
+      profileRowsResult.rows,
       Math.max(0, Number(activeSeasonResult.season.poolUsdt ?? 0)),
       now.getTime(),
     );
@@ -7468,13 +7493,11 @@ serve(async (req) => {
     }
 
     const limit = clampInt(body.limit, 1, 10000);
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("wallet, state, updated_at");
-    if (error) return json({ ok: false, error: "Failed to build season preview." });
+    const profileRowsResult = await loadSeasonProfileRows(supabase);
+    if (!profileRowsResult.ok) return json({ ok: false, error: profileRowsResult.error });
 
     const computed = buildSeasonComputedRows(
-      ((data as Array<Record<string, unknown>> | null) ?? []),
+      profileRowsResult.rows,
       Number(activeSeasonResult.season.poolUsdt ?? 0),
       now.getTime(),
       MIN_SEASON_SNAPSHOT_CRYSTALS,
