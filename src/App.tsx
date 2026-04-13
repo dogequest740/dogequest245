@@ -281,6 +281,7 @@ const CRYSTAL_TASK_ICON_BY_ID: Record<CrystalTaskId, string> = {
 
 const ADSGRAM_PARTNER_TASK_BLOCK_ID = 'task-27542'
 const ADSGRAM_PARTNER_TASK_REWARD = 6
+const ADSGRAM_PARTNER_TASK_COOLDOWN_SECONDS = 5 * 60
 
 type AdsgramShowResult = {
   state?: string
@@ -604,6 +605,8 @@ type GameSecureResponse = {
   tgTonReused?: boolean
   partnerTaskAlreadyClaimed?: boolean
   partnerTaskRewardCrystals?: number
+  partnerTaskCooldownSec?: number
+  partnerTaskRemainingSec?: number
   buyGoldAlreadyProcessed?: boolean
   starterPackAlreadyProcessed?: boolean
   starterPackPurchased?: boolean
@@ -3782,6 +3785,8 @@ function App() {
   const [crystalTaskClaimLoadingId, setCrystalTaskClaimLoadingId] = useState<CrystalTaskId | null>(null)
   const [partnerTaskError, setPartnerTaskError] = useState('')
   const [partnerTaskReady, setPartnerTaskReady] = useState(false)
+  const [partnerTaskCooldownSec, setPartnerTaskCooldownSec] = useState(ADSGRAM_PARTNER_TASK_COOLDOWN_SECONDS)
+  const [partnerTaskRemainingSec, setPartnerTaskRemainingSec] = useState(0)
   const [partnerTaskWidgetVersion, setPartnerTaskWidgetVersion] = useState(0)
   const [hoveredPlayerStat, setHoveredPlayerStat] = useState<'power' | 'fortune' | 'prosperity' | null>(null)
   const [isMobile, setIsMobile] = useState(false)
@@ -3909,6 +3914,14 @@ function App() {
     const timer = window.setTimeout(() => setPartnerTaskError(''), 5000)
     return () => window.clearTimeout(timer)
   }, [partnerTaskError])
+
+  useEffect(() => {
+    if (partnerTaskRemainingSec <= 0) return
+    const timer = window.setInterval(() => {
+      setPartnerTaskRemainingSec((value) => Math.max(0, value - 1))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [partnerTaskRemainingSec > 0])
 
   const walletAddress = publicKey?.toBase58() ?? ''
   const walletAuthReady = Boolean(walletAddress && signMessage)
@@ -7324,6 +7337,25 @@ function App() {
     }
   }
 
+  const applyPartnerTaskTiming = (result: Pick<GameSecureResponse, 'partnerTaskCooldownSec' | 'partnerTaskRemainingSec'>) => {
+    const cooldownSec = Math.max(0, Math.floor(Number(result.partnerTaskCooldownSec ?? ADSGRAM_PARTNER_TASK_COOLDOWN_SECONDS)))
+    const remainingSec = Math.max(0, Math.floor(Number(result.partnerTaskRemainingSec ?? 0)))
+    setPartnerTaskCooldownSec(cooldownSec || ADSGRAM_PARTNER_TASK_COOLDOWN_SECONDS)
+    setPartnerTaskRemainingSec(remainingSec)
+  }
+
+  const loadPartnerTaskStatus = async (interactive = false) => {
+    const result = await callGameSecureAuthed('partner_task_status', {}, interactive)
+    if (!result.ok) {
+      if (interactive) {
+        setPartnerTaskError(result.error || 'Failed to load partner tasks.')
+      }
+      return null
+    }
+    applyPartnerTaskTiming(result)
+    return result
+  }
+
   const schedulePartnerTaskWidgetReload = (delayMs: number, clearError = false) => {
     if (typeof window === 'undefined') return
     clearPartnerTaskRefreshTimer()
@@ -7350,10 +7382,6 @@ function App() {
     const taskTitle = String(taskElement?.taskEntity?.data?.banner?.title ?? '').trim()
     const fallback = taskUrl || taskTitle
     return fallback ? ADSGRAM_PARTNER_TASK_BLOCK_ID + ':' + fallback : ADSGRAM_PARTNER_TASK_BLOCK_ID
-  }
-  const getPartnerTaskCooldownMs = (taskElement: AdsgramTaskElement | null) => {
-    const extendedWindow = Boolean(taskElement?.expRecord?.TASK_EXTENDED_TIME_BETWEEN)
-    return extendedWindow ? 65000 : 35000
   }
 
   const playAdsgramRewardedAd = async (blockId: string) => {
@@ -7457,12 +7485,18 @@ function App() {
       return
     }
 
-    const nextTaskReloadMs = getPartnerTaskCooldownMs(currentTaskElement)
     setPartnerTaskError('')
     partnerTaskClaimInFlightRef.current = true
     try {
       const result = await callGameSecureAuthed('partner_task_claim', { rewardKey }, true)
+      applyPartnerTaskTiming(result)
       if (!result.ok) {
+        const cooldownMessage = String(result.error ?? '').toLowerCase().includes('partner task is on cooldown')
+        if (cooldownMessage) {
+          setPartnerTaskError('')
+          setPartnerTaskReady(false)
+          return
+        }
         setPartnerTaskError(result.error || 'Failed to claim partner task reward.')
         schedulePartnerTaskWidgetReload(1200)
         return
@@ -7481,7 +7515,10 @@ function App() {
         pushLog(state.eventLog, 'Partner task completed. +' + String(ADSGRAM_PARTNER_TASK_REWARD) + ' crystals.')
       }
 
-      schedulePartnerTaskWidgetReload(result.partnerTaskAlreadyClaimed ? 1200 : nextTaskReloadMs, !result.partnerTaskAlreadyClaimed)
+      setPartnerTaskError('')
+      setPartnerTaskReady(false)
+      partnerTaskElementRef.current = null
+      setPartnerTaskWidgetVersion((value) => value + 1)
       syncHud()
     } finally {
       partnerTaskClaimInFlightRef.current = false
@@ -7502,6 +7539,21 @@ function App() {
     setPartnerTaskReady(false)
 
     void (async () => {
+      const statusResult = await loadPartnerTaskStatus(false)
+      if (cancelled) return
+      if (!statusResult) {
+        setPartnerTaskError('Partner tasks are unavailable right now.')
+        return
+      }
+
+      const remainingSec = Math.max(0, Math.floor(Number(statusResult.partnerTaskRemainingSec ?? 0)))
+      if (remainingSec > 0) {
+        partnerTaskElementRef.current = null
+        setPartnerTaskError('')
+        setPartnerTaskReady(false)
+        return
+      }
+
       const sdk = await ensureAdsgramSdk()
       if (cancelled) return
       if (!sdk || typeof window === 'undefined' || !window.customElements) {
@@ -7617,8 +7669,7 @@ function App() {
       clearPartnerTaskRefreshTimer()
       cleanup?.()
     }
-  }, [usingTelegramAuth, activePanel, questPanelTab, partnerTaskWidgetVersion])
-
+  }, [usingTelegramAuth, activePanel, questPanelTab, partnerTaskWidgetVersion, partnerTaskRemainingSec > 0])
   useEffect(() => {
     if (!usingTelegramAuth || activePanel !== 'quests' || questPanelTab !== 'partner' || typeof document === 'undefined') {
       return
@@ -7999,7 +8050,8 @@ function App() {
     }
   }
 
-  const partnerTaskNotAvailable = partnerTaskError.toLowerCase().includes('no partner tasks')
+  const partnerTaskOnCooldown = partnerTaskRemainingSec > 0
+  const partnerTaskNotAvailable = !partnerTaskOnCooldown && partnerTaskError.toLowerCase().includes('no partner tasks')
 
   const questEntries = useMemo(() => {
     if (!hud) return []
@@ -10869,7 +10921,7 @@ function App() {
 
             {usingTelegramAuth && questPanelTab === 'partner' && (
               <div className="quest-list partner-task-list">
-                {partnerTaskError && !partnerTaskNotAvailable && <div className="quest-task-error">{partnerTaskError}</div>}
+                {partnerTaskError && !partnerTaskNotAvailable && !partnerTaskOnCooldown && <div className="quest-task-error">{partnerTaskError}</div>}
                 <div className="quest-card ready partner-task-card">
                   <div className="quest-title with-icon">
                     <span className="quest-task-icon-wrap task-join-channel">
@@ -10878,10 +10930,17 @@ function App() {
                     <span>Partner Task</span>
                   </div>
                   <div className="quest-desc">Complete a sponsored action and claim crystals in the task card.</div>
+                  {partnerTaskOnCooldown && (
+                    <div className="quest-task-loading">
+                      Ready in {formatLongTimer(partnerTaskRemainingSec)}
+                    </div>
+                  )}
                   <div className="partner-task-shell">
-                    {!partnerTaskReady && !partnerTaskNotAvailable && <div className="quest-task-loading">Loading partner task...</div>}
+                    {!partnerTaskOnCooldown && !partnerTaskReady && !partnerTaskNotAvailable && <div className="quest-task-loading">Loading partner task...</div>}
                     {partnerTaskNotAvailable ? (
                       <div className="quest-task-empty">No partner tasks are available right now. Check back later.</div>
+                    ) : partnerTaskOnCooldown ? (
+                      <div className="quest-task-empty">Next partner task unlocks after {formatLongTimer(partnerTaskCooldownSec)}.</div>
                     ) : (
                       <div ref={partnerTaskHostRef} className="partner-task-host" />
                     )}

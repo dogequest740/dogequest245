@@ -4028,6 +4028,18 @@ const loadRecentPartnerTaskClaims = async (
   };
 };
 
+const getPartnerTaskRemainingSec = (
+  claims: Array<{ created_at: string; details: Record<string, unknown> | null }>,
+  nowMs: number,
+) => {
+  const latestClaimAtMs = claims.reduce((latest, entry) => {
+    const createdAtMs = new Date(String(entry.created_at ?? "")).getTime();
+    return Number.isFinite(createdAtMs) ? Math.max(latest, createdAtMs) : latest;
+  }, 0);
+  if (latestClaimAtMs <= 0) return 0;
+  return Math.max(0, Math.ceil(((latestClaimAtMs + (PARTNER_TASK_COOLDOWN_SECONDS * 1000)) - nowMs) / 1000));
+};
+
 const buildCrystalTaskStatuses = async (
   supabase: ReturnType<typeof createClient>,
   wallet: string,
@@ -6843,6 +6855,22 @@ serve(async (req) => {
     });
   }
 
+  if (action === "partner_task_status") {
+    if (!isTelegramIdentity(auth.wallet)) {
+      return json({ ok: false, error: "Partner tasks are available only in Telegram Mini App." });
+    }
+
+    const recentClaimsResult = await loadRecentPartnerTaskClaims(supabase, auth.wallet);
+    if (!recentClaimsResult.ok) return json({ ok: false, error: recentClaimsResult.error });
+
+    const remainingSec = getPartnerTaskRemainingSec(recentClaimsResult.claims, now.getTime());
+    return json({
+      ok: true,
+      partnerTaskCooldownSec: PARTNER_TASK_COOLDOWN_SECONDS,
+      partnerTaskRemainingSec: remainingSec,
+    });
+  }
+
   if (action === "partner_task_claim") {
     if (!isTelegramIdentity(auth.wallet)) {
       return json({ ok: false, error: "Partner tasks are available only in Telegram Mini App." });
@@ -6865,6 +6893,7 @@ serve(async (req) => {
     if (!recentClaimsResult.ok) return json({ ok: false, error: recentClaimsResult.error });
 
     const nowMs = now.getTime();
+    const remainingSec = getPartnerTaskRemainingSec(recentClaimsResult.claims, nowMs);
     const normalizedRewardKey = rewardKey.toLowerCase();
     const alreadyClaimed = recentClaimsResult.claims.some((entry) => {
       const createdAtMs = new Date(String(entry.created_at ?? "")).getTime();
@@ -6884,6 +6913,17 @@ serve(async (req) => {
         partnerTaskAlreadyClaimed: true,
         crystals: Math.max(0, asInt(currentState.crystals, 0)),
         crystalsEarned: Math.max(0, asInt(currentState.crystalsEarned, 0)),
+        partnerTaskCooldownSec: PARTNER_TASK_COOLDOWN_SECONDS,
+        partnerTaskRemainingSec: remainingSec,
+      });
+    }
+
+    if (remainingSec > 0) {
+      return json({
+        ok: false,
+        error: "Partner task is on cooldown (" + String(remainingSec) + "s).",
+        partnerTaskCooldownSec: PARTNER_TASK_COOLDOWN_SECONDS,
+        partnerTaskRemainingSec: remainingSec,
       });
     }
 
@@ -6907,6 +6947,8 @@ serve(async (req) => {
       crystals: Math.max(0, asInt(updated.state.crystals, 0)),
       crystalsEarned: Math.max(0, asInt(updated.state.crystalsEarned, 0)),
       partnerTaskRewardCrystals: ADSGRAM_PARTNER_TASK_REWARD,
+      partnerTaskCooldownSec: PARTNER_TASK_COOLDOWN_SECONDS,
+      partnerTaskRemainingSec: PARTNER_TASK_COOLDOWN_SECONDS,
     });
   }
 
