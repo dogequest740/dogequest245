@@ -7344,9 +7344,28 @@ function App() {
     setPartnerTaskRemainingSec(remainingSec)
   }
 
+  const isPartnerTaskStatusSoftFailure = (errorText: string) => {
+    const normalized = errorText.toLowerCase()
+    return normalized.includes('unknown action') ||
+      normalized.includes('secure service unavailable') ||
+      normalized.includes('empty secure service response') ||
+      normalized.includes('failed to fetch') ||
+      normalized.includes('network')
+  }
+
   const loadPartnerTaskStatus = async (interactive = false) => {
     const result = await callGameSecureAuthed('partner_task_status', {}, interactive)
     if (!result.ok) {
+      const errorText = String(result.error ?? '')
+      if (isPartnerTaskStatusSoftFailure(errorText)) {
+        const fallbackResult: GameSecureResponse = {
+          ok: true,
+          partnerTaskCooldownSec: ADSGRAM_PARTNER_TASK_COOLDOWN_SECONDS,
+          partnerTaskRemainingSec: 0,
+        }
+        applyPartnerTaskTiming(fallbackResult)
+        return fallbackResult
+      }
       if (interactive) {
         setPartnerTaskError(result.error || 'Failed to load partner tasks.')
       }
@@ -7489,7 +7508,14 @@ function App() {
     partnerTaskClaimInFlightRef.current = true
     try {
       const result = await callGameSecureAuthed('partner_task_claim', { rewardKey }, true)
-      applyPartnerTaskTiming(result)
+      applyPartnerTaskTiming({
+        partnerTaskCooldownSec: result.partnerTaskCooldownSec,
+        partnerTaskRemainingSec: typeof result.partnerTaskRemainingSec === 'number'
+          ? result.partnerTaskRemainingSec
+          : result.ok
+            ? ADSGRAM_PARTNER_TASK_COOLDOWN_SECONDS
+            : 0,
+      })
       if (!result.ok) {
         const cooldownMessage = String(result.error ?? '').toLowerCase().includes('partner task is on cooldown')
         if (cooldownMessage) {
@@ -7541,13 +7567,9 @@ function App() {
     void (async () => {
       const statusResult = await loadPartnerTaskStatus(false)
       if (cancelled) return
-      if (!statusResult) {
-        setPartnerTaskError('Partner tasks are unavailable right now.')
-        return
-      }
 
-      const remainingSec = Math.max(0, Math.floor(Number(statusResult.partnerTaskRemainingSec ?? 0)))
-      if (remainingSec > 0) {
+      const remainingSec = Math.max(0, Math.floor(Number(statusResult?.partnerTaskRemainingSec ?? 0)))
+      if (statusResult && remainingSec > 0) {
         partnerTaskElementRef.current = null
         setPartnerTaskError('')
         setPartnerTaskReady(false)
@@ -11273,6 +11295,7 @@ function App() {
   )
 }
 export default App
+
 
 
 
