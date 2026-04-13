@@ -3841,7 +3841,10 @@ const buildReferralContestSnapshot = async (
     const referrerPlayer = referrerState?.player && typeof referrerState.player === "object"
       ? referrerState.player as Record<string, unknown>
       : null;
-    const referrerName = sanitizeName(String(referrerPlayer?.name ?? "").trim()) || shortContestWallet(referrerWallet);
+    const rawReferrerName = String(referrerPlayer?.name ?? referrerState?.name ?? "").trim();
+    const referrerName = rawReferrerName
+      ? sanitizeName(rawReferrerName)
+      : shortContestWallet(referrerWallet);
 
     const current = scoreByReferrer.get(referrerWallet) ?? {
       wallet: referrerWallet,
