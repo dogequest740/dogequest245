@@ -70,6 +70,7 @@ const PREMIUM_TX_MAX_AGE_SECONDS = 2 * 60 * 60;
 const PAYMENT_TX_LOOKUP_ATTEMPTS = 22;
 const PAYMENT_TX_LOOKUP_BASE_DELAY_MS = 1200;
 const PROFILE_UPDATE_RETRY_ATTEMPTS = 10;
+const PROFILE_STALE_WRITE_TOLERANCE_MS = 1000;
 const BLOCKED_ERROR_MESSAGE = "You have been banned for cheating.";
 const GOLD_PACKS_SOL = [
   { id: "gold-50k", gold: 50000, lamports: Math.round(0.04 * SOL_LAMPORTS) },
@@ -4353,6 +4354,14 @@ serve(async (req) => {
             clientUpdatedAt,
           });
           return json({ ok: false, error: "Invalid profile version. Reload game state and retry." });
+        }
+        if (clientUpdatedAtMs + PROFILE_STALE_WRITE_TOLERANCE_MS < serverUpdatedAtMs) {
+          await auditEvent(supabase, auth.wallet, "profile_save_rejected", {
+            reason: "Profile is outdated.",
+            serverUpdatedAt: existing.updated_at,
+            clientUpdatedAt,
+          });
+          return json({ ok: false, error: "Profile is outdated. Reload game state and retry." });
         }
       }
 
