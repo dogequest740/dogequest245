@@ -420,6 +420,7 @@ type PersistedState = {
   ticketDay: string
   inventory: EquipmentItem[]
   equipment: Record<EquipmentSlot, EquipmentItem | null>
+  pendingLoot?: EquipmentItem | null
   consumables: ConsumableItem[]
   questStates: Record<string, QuestState>
   monsterKills: number
@@ -1755,6 +1756,7 @@ const buildPersistedState = (state: GameState): PersistedState => ({
   ticketDay: state.ticketDay,
   inventory: state.inventory,
   equipment: state.equipment,
+  pendingLoot: state.pendingLoot,
   consumables: state.consumables,
   questStates: state.questStates,
   monsterKills: state.monsterKills,
@@ -1812,6 +1814,7 @@ const applyPersistedState = (state: GameState, saved: PersistedState, _savedUpda
 
   state.inventory = saved.inventory ?? []
   state.equipment = { ...state.equipment, ...(saved.equipment ?? {}) }
+  state.pendingLoot = normalizeLoadedEquipmentItem(saved.pendingLoot)
   state.consumables = normalizeLoadedConsumables(saved.consumables)
   state.questStates = { ...state.questStates, ...(saved.questStates ?? {}) }
   state.monsterKills = Math.max(0, saved.monsterKills ?? state.monsterKills)
@@ -1859,6 +1862,7 @@ const applyPersistedState = (state: GameState, saved: PersistedState, _savedUpda
     ...Object.values(state.equipment)
       .filter((item): item is EquipmentItem => Boolean(item))
       .map((item) => item.id),
+    ...(state.pendingLoot ? [state.pendingLoot.id] : []),
   ]
   const consumableIds = state.consumables.map((item) => item.id)
   state.itemId = Math.max(state.itemId, ...itemIds, 0)
@@ -2223,6 +2227,13 @@ const normalizeEquipment = (
     return acc
   }, {} as Record<EquipmentSlot, EquipmentItem | null>)
   return { ...base, ...(equipment ?? {}) }
+}
+
+const normalizeLoadedEquipmentItem = (value: unknown): EquipmentItem | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const item = value as EquipmentItem
+  if (!EQUIPMENT_SLOTS.some((slot) => slot.id === item.slot)) return null
+  return item
 }
 
 const shadeColor = (hex: string, amount: number) => {
@@ -3820,6 +3831,9 @@ function App() {
   const profileUpdatedAtRef = useRef('')
   const lastPersistedSnapshotRef = useRef('')
   const profileSaveInFlightRef = useRef(false)
+  const profileSaveQueuedRef = useRef(false)
+  const profileSaveQueuedForceRef = useRef(false)
+  const lastPendingLootPersistedIdRef = useRef(0)
   const spriteCacheRef = useRef<PlayerSpriteMap>({
     knight: null,
     mage: null,
@@ -6503,7 +6517,11 @@ function App() {
 
 
   const saveGameState = async (force = false) => {
-    if (profileSaveInFlightRef.current) return
+    if (profileSaveInFlightRef.current) {
+      profileSaveQueuedRef.current = true
+      profileSaveQueuedForceRef.current = profileSaveQueuedForceRef.current || force
+      return
+    }
     const state = gameStateRef.current
     if (!state) return
     if (!accountIdentity || !serverLoadedRef.current) return
@@ -6552,8 +6570,24 @@ function App() {
       }
     } finally {
       profileSaveInFlightRef.current = false
+      if (profileSaveQueuedRef.current) {
+        const queuedForce = profileSaveQueuedForceRef.current
+        profileSaveQueuedRef.current = false
+        profileSaveQueuedForceRef.current = false
+        Promise.resolve().then(() => {
+          void saveGameState(queuedForce)
+        })
+      }
     }
   }
+
+  useEffect(() => {
+    const pendingLootId = hud?.pendingLoot?.id ?? 0
+    if (stage !== 'game' || !accountIdentity || pendingLootId <= 0) return
+    if (pendingLootId === lastPendingLootPersistedIdRef.current) return
+    lastPendingLootPersistedIdRef.current = pendingLootId
+    void saveGameState()
+  }, [hud?.pendingLoot?.id, stage, accountIdentity])
 
   const syncWorldBossFromServer = async (interactive = false, requestJoin = false) => {
     const state = gameStateRef.current

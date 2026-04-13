@@ -2293,6 +2293,8 @@ const normalizeState = (raw: unknown) => {
   const usedEquipmentIds = new Set<number>(inventory.map((item) => item.id));
   state.inventory = inventory;
   state.equipment = normalizeEquipment(state.equipment, playerLevel, usedEquipmentIds);
+  const pendingLoot = normalizeEquipmentItem(state.pendingLoot, playerLevel);
+  state.pendingLoot = pendingLoot && !usedEquipmentIds.has(pendingLoot.id) ? pendingLoot : null;
 
   const normalizedConsumables = normalizeConsumables(state.consumables);
   state.consumables = normalizedConsumables.rows;
