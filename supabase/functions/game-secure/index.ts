@@ -6865,9 +6865,17 @@ serve(async (req) => {
     if (!recentClaimsResult.ok) return json({ ok: false, error: recentClaimsResult.error });
 
     const nowMs = now.getTime();
+    const normalizedRewardKey = rewardKey.toLowerCase();
     const alreadyClaimed = recentClaimsResult.claims.some((entry) => {
       const createdAtMs = new Date(String(entry.created_at ?? "")).getTime();
-      return Number.isFinite(createdAtMs) && nowMs >= createdAtMs && (nowMs - createdAtMs) <= PARTNER_TASK_DUPLICATE_SUPPRESS_MS;
+      if (!Number.isFinite(createdAtMs) || nowMs < createdAtMs || (nowMs - createdAtMs) > PARTNER_TASK_DUPLICATE_SUPPRESS_MS) {
+        return false;
+      }
+      const details = entry.details && typeof entry.details === "object" && !Array.isArray(entry.details)
+        ? entry.details as Record<string, unknown>
+        : {};
+      const entryRewardKey = String(details.rewardKey ?? "").trim().toLowerCase();
+      return entryRewardKey ? entryRewardKey === normalizedRewardKey : rewardKey === ADSGRAM_BLOCK_ID;
     });
 
     if (alreadyClaimed) {

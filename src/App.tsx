@@ -298,6 +298,25 @@ type AdsgramSdk = {
   init: (options: { blockId: string; debug?: boolean }) => AdsgramUnit
 }
 
+type AdsgramTaskEntityData = {
+  campaignId?: string | number | null
+  banner?: {
+    title?: string | null
+    url?: string | null
+  } | null
+}
+
+type AdsgramTaskEntity = {
+  data?: AdsgramTaskEntityData | null
+  doneTimestamp?: number
+  fetchTimestamp?: number
+}
+
+type AdsgramTaskElement = HTMLElement & {
+  taskEntity?: AdsgramTaskEntity | null
+  expRecord?: Record<string, boolean> | null
+}
+
 
 type EquipmentItem = {
   id: number
@@ -3784,6 +3803,7 @@ function App() {
   const fortuneSpinTimeoutRef = useRef<number | null>(null)
   const adsgramLoadPromiseRef = useRef<Promise<AdsgramSdk | null> | null>(null)
   const partnerTaskHostRef = useRef<HTMLDivElement | null>(null)
+  const partnerTaskElementRef = useRef<AdsgramTaskElement | null>(null)
   const partnerTaskClaimInFlightRef = useRef(false)
   const tgStarsBacklogClaimInFlightRef = useRef(false)
   const partnerTaskRefreshTimeoutRef = useRef<number | null>(null)
@@ -7297,6 +7317,45 @@ function App() {
     return sdk
   }
 
+  const clearPartnerTaskRefreshTimer = () => {
+    if (partnerTaskRefreshTimeoutRef.current !== null) {
+      window.clearTimeout(partnerTaskRefreshTimeoutRef.current)
+      partnerTaskRefreshTimeoutRef.current = null
+    }
+  }
+
+  const schedulePartnerTaskWidgetReload = (delayMs: number, clearError = false) => {
+    if (typeof window === 'undefined') return
+    clearPartnerTaskRefreshTimer()
+    partnerTaskRefreshTimeoutRef.current = window.setTimeout(() => {
+      partnerTaskRefreshTimeoutRef.current = null
+      partnerTaskElementRef.current = null
+      setPartnerTaskReady(false)
+      if (clearError) {
+        setPartnerTaskError('')
+      }
+      setPartnerTaskWidgetVersion((value) => value + 1)
+    }, Math.max(0, Math.floor(delayMs)))
+  }
+
+  const getPartnerTaskCurrentElement = () => partnerTaskElementRef.current
+
+  const getPartnerTaskRewardKey = (taskElement: AdsgramTaskElement | null) => {
+    const campaignId = String(taskElement?.taskEntity?.data?.campaignId ?? '').trim()
+    if (campaignId) {
+      return ADSGRAM_PARTNER_TASK_BLOCK_ID + ':' + campaignId
+    }
+
+    const taskUrl = String(taskElement?.taskEntity?.data?.banner?.url ?? '').trim()
+    const taskTitle = String(taskElement?.taskEntity?.data?.banner?.title ?? '').trim()
+    const fallback = taskUrl || taskTitle
+    return fallback ? ADSGRAM_PARTNER_TASK_BLOCK_ID + ':' + fallback : ADSGRAM_PARTNER_TASK_BLOCK_ID
+  }
+  const getPartnerTaskCooldownMs = (taskElement: AdsgramTaskElement | null) => {
+    const extendedWindow = Boolean(taskElement?.expRecord?.TASK_EXTENDED_TIME_BETWEEN)
+    return extendedWindow ? 65000 : 35000
+  }
+
   const playAdsgramRewardedAd = async (blockId: string) => {
     const sdk = await ensureAdsgramSdk()
     if (!sdk) {
@@ -7386,19 +7445,26 @@ function App() {
     }
   }
 
-  const claimPartnerTaskReward = async (rewardKeyRaw: string) => {
+  const claimPartnerTaskReward = async () => {
     const state = gameStateRef.current
     if (!state || partnerTaskClaimInFlightRef.current) return
 
-    const rewardKey = String(rewardKeyRaw ?? '').trim()
+    const currentTaskElement = getPartnerTaskCurrentElement()
+    const rewardKey = getPartnerTaskRewardKey(currentTaskElement)
+    if (!rewardKey) {
+      setPartnerTaskError('Partner task is still loading. Please try again in a moment.')
+      schedulePartnerTaskWidgetReload(800)
+      return
+    }
+
+    const nextTaskReloadMs = getPartnerTaskCooldownMs(currentTaskElement)
     setPartnerTaskError('')
     partnerTaskClaimInFlightRef.current = true
     try {
       const result = await callGameSecureAuthed('partner_task_claim', { rewardKey }, true)
       if (!result.ok) {
         setPartnerTaskError(result.error || 'Failed to claim partner task reward.')
-        setPartnerTaskReady(false)
-        setPartnerTaskWidgetVersion((value) => value + 1)
+        schedulePartnerTaskWidgetReload(1200)
         return
       }
 
@@ -7413,16 +7479,9 @@ function App() {
 
       if (!result.partnerTaskAlreadyClaimed) {
         pushLog(state.eventLog, 'Partner task completed. +' + String(ADSGRAM_PARTNER_TASK_REWARD) + ' crystals.')
-        if (partnerTaskRefreshTimeoutRef.current !== null) {
-          window.clearTimeout(partnerTaskRefreshTimeoutRef.current)
-        }
-        partnerTaskRefreshTimeoutRef.current = window.setTimeout(() => {
-          partnerTaskRefreshTimeoutRef.current = null
-          setPartnerTaskReady(false)
-          setPartnerTaskError('')
-          setPartnerTaskWidgetVersion((value) => value + 1)
-        }, 10000)
       }
+
+      schedulePartnerTaskWidgetReload(result.partnerTaskAlreadyClaimed ? 1200 : nextTaskReloadMs, !result.partnerTaskAlreadyClaimed)
       syncHud()
     } finally {
       partnerTaskClaimInFlightRef.current = false
@@ -7431,6 +7490,8 @@ function App() {
 
   useEffect(() => {
     if (!usingTelegramAuth || activePanel !== 'quests' || questPanelTab !== 'partner') {
+      clearPartnerTaskRefreshTimer()
+      partnerTaskElementRef.current = null
       setPartnerTaskReady(false)
       return
     }
@@ -7465,9 +7526,10 @@ function App() {
       if (!host) return
       host.innerHTML = ''
 
-      const taskElement = document.createElement('adsgram-task')
+      const taskElement = document.createElement('adsgram-task') as AdsgramTaskElement
       taskElement.setAttribute('data-block-id', ADSGRAM_PARTNER_TASK_BLOCK_ID)
       taskElement.className = 'partner-task-widget'
+      partnerTaskElementRef.current = taskElement
 
       const rewardSlot = document.createElement('span')
       rewardSlot.slot = 'reward'
@@ -7497,37 +7559,53 @@ function App() {
 
       taskElement.append(rewardSlot, buttonSlot, claimSlot, doneSlot)
 
-      const handleReward = (event: Event) => {
-        const rewardKey = event instanceof CustomEvent ? String(event.detail ?? '').trim() : ''
-        void claimPartnerTaskReward(rewardKey || ADSGRAM_PARTNER_TASK_BLOCK_ID)
+      const handleReward = () => {
+        void claimPartnerTaskReward()
       }
       const handleError = (event: Event) => {
         const detail = event instanceof CustomEvent ? String(event.detail ?? '').trim() : ''
-        setPartnerTaskError(detail ? `Partner task error: ${detail}` : 'Partner task could not be completed right now.')
+        const message = detail && detail !== ADSGRAM_PARTNER_TASK_BLOCK_ID
+          ? 'Partner task error: ' + detail
+          : 'Partner task could not be completed right now.'
+        setPartnerTaskReady(false)
+        setPartnerTaskError(message)
+        schedulePartnerTaskWidgetReload(2500)
       }
       const handleBannerNotFound = () => {
         setPartnerTaskReady(false)
         setPartnerTaskError('No partner tasks are available right now.')
         if (host) host.innerHTML = ''
+        schedulePartnerTaskWidgetReload(45000)
       }
       const handleTooLongSession = () => {
         setPartnerTaskReady(false)
-        setPartnerTaskError('Partner task session expired. Please start it again.')
+        setPartnerTaskError('Partner task session expired. Reopening task widget...')
+        schedulePartnerTaskWidgetReload(1500)
+      }
+      const handleFastReturn = () => {
+        setPartnerTaskReady(false)
+        setPartnerTaskError('Task was not completed. Stay on the partner page a little longer before returning.')
+        schedulePartnerTaskWidgetReload(1500)
       }
 
       taskElement.addEventListener('reward', handleReward as EventListener)
       taskElement.addEventListener('onError', handleError as EventListener)
       taskElement.addEventListener('onBannerNotFound', handleBannerNotFound as EventListener)
       taskElement.addEventListener('onTooLongSession', handleTooLongSession as EventListener)
+      taskElement.addEventListener('onFastReturn', handleFastReturn as EventListener)
 
       host.appendChild(taskElement)
       setPartnerTaskReady(true)
 
       cleanup = () => {
+        if (partnerTaskElementRef.current === taskElement) {
+          partnerTaskElementRef.current = null
+        }
         taskElement.removeEventListener('reward', handleReward as EventListener)
         taskElement.removeEventListener('onError', handleError as EventListener)
         taskElement.removeEventListener('onBannerNotFound', handleBannerNotFound as EventListener)
         taskElement.removeEventListener('onTooLongSession', handleTooLongSession as EventListener)
+        taskElement.removeEventListener('onFastReturn', handleFastReturn as EventListener)
         if (host.contains(taskElement)) {
           host.removeChild(taskElement)
         }
@@ -7536,16 +7614,48 @@ function App() {
 
     return () => {
       cancelled = true
+      clearPartnerTaskRefreshTimer()
       cleanup?.()
     }
   }, [usingTelegramAuth, activePanel, questPanelTab, partnerTaskWidgetVersion])
 
   useEffect(() => {
-    return () => {
-      if (partnerTaskRefreshTimeoutRef.current !== null) {
-        window.clearTimeout(partnerTaskRefreshTimeoutRef.current)
-        partnerTaskRefreshTimeoutRef.current = null
+    if (!usingTelegramAuth || activePanel !== 'quests' || questPanelTab !== 'partner' || typeof document === 'undefined') {
+      return
+    }
+
+    let hiddenAtMs = 0
+    const refreshAfterResume = () => {
+      if (partnerTaskClaimInFlightRef.current) return
+      schedulePartnerTaskWidgetReload(400)
+    }
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenAtMs = Date.now()
+        return
       }
+      if (hiddenAtMs > 0) {
+        hiddenAtMs = 0
+        refreshAfterResume()
+      }
+    }
+    const handleFocus = () => {
+      if (document.visibilityState === 'visible') {
+        refreshAfterResume()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('focus', handleFocus)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('focus', handleFocus)
+    }
+  }, [usingTelegramAuth, activePanel, questPanelTab])
+
+  useEffect(() => {
+    return () => {
+      clearPartnerTaskRefreshTimer()
     }
   }, [])
 
