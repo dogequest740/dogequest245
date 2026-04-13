@@ -4378,6 +4378,47 @@ function App() {
     )
   }
 
+  const isPartnerTaskClaimRetryableError = (errorText: string) => {
+    const normalized = errorText.toLowerCase()
+    return (
+      normalized.includes('secure service unavailable') ||
+      normalized.includes('empty secure service response') ||
+      normalized.includes('failed to fetch') ||
+      normalized.includes('network') ||
+      normalized.includes('timeout') ||
+      normalized.includes('retry')
+    )
+  }
+
+  const finalizePartnerTaskClaim = async (
+    rewardKey: string,
+    attempts = 5,
+    baseDelayMs = 900,
+  ): Promise<GameSecureResponse> => {
+    let delayMs = Math.max(400, Math.floor(baseDelayMs))
+    let lastResult: GameSecureResponse = { ok: false, error: 'Failed to claim partner task reward.' }
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const result = await callGameSecureAuthed('partner_task_claim', { rewardKey }, true)
+      if (result.ok) return result
+      lastResult = result
+
+      const errorText = String(result.error ?? '')
+      const normalized = errorText.toLowerCase()
+      if (normalized.includes('partner task is on cooldown')) {
+        return result
+      }
+      if (attempt >= attempts - 1 || !isPartnerTaskClaimRetryableError(errorText)) {
+        return result
+      }
+
+      setPartnerTaskError('Finalizing task reward...')
+      await new Promise<void>((resolve) => window.setTimeout(resolve, delayMs))
+      delayMs = Math.min(3200, Math.round(delayMs * 1.45))
+    }
+
+    return lastResult
+  }
   const finalizePaymentCredit = async (
     action: string,
     payload: Record<string, unknown>,
@@ -7507,7 +7548,7 @@ function App() {
     setPartnerTaskError('')
     partnerTaskClaimInFlightRef.current = true
     try {
-      const result = await callGameSecureAuthed('partner_task_claim', { rewardKey }, true)
+      const result = await finalizePartnerTaskClaim(rewardKey)
       applyPartnerTaskTiming({
         partnerTaskCooldownSec: result.partnerTaskCooldownSec,
         partnerTaskRemainingSec: typeof result.partnerTaskRemainingSec === 'number'
@@ -11319,6 +11360,9 @@ function App() {
   )
 }
 export default App
+
+
+
 
 
 
