@@ -7605,6 +7605,18 @@ function App() {
       taskElement.className = 'partner-task-widget'
       partnerTaskElementRef.current = taskElement
 
+      let lastAutoClaimMarker = ''
+      const maybeAutoClaimPartnerTask = () => {
+        if (cancelled || partnerTaskClaimInFlightRef.current) return
+        const rewardKey = getPartnerTaskRewardKey(taskElement)
+        const doneTimestamp = Math.max(0, Math.floor(Number(taskElement.taskEntity?.doneTimestamp ?? 0)))
+        if (!rewardKey || doneTimestamp <= 0) return
+        const marker = rewardKey + ':' + String(doneTimestamp)
+        if (marker === lastAutoClaimMarker) return
+        lastAutoClaimMarker = marker
+        void claimPartnerTaskReward()
+      }
+
       const rewardSlot = document.createElement('span')
       rewardSlot.slot = 'reward'
       rewardSlot.className = 'partner-task-slot partner-task-slot-reward'
@@ -7634,6 +7646,9 @@ function App() {
       taskElement.append(rewardSlot, buttonSlot, claimSlot, doneSlot)
 
       const handleReward = () => {
+        void claimPartnerTaskReward()
+      }
+      const handleClaimClick = () => {
         void claimPartnerTaskReward()
       }
       const handleError = (event: Event) => {
@@ -7667,11 +7682,19 @@ function App() {
       taskElement.addEventListener('onBannerNotFound', handleBannerNotFound as EventListener)
       taskElement.addEventListener('onTooLongSession', handleTooLongSession as EventListener)
       taskElement.addEventListener('onFastReturn', handleFastReturn as EventListener)
+      claimSlot.addEventListener('click', handleClaimClick)
 
       host.appendChild(taskElement)
       setPartnerTaskReady(true)
+      const autoClaimInterval = window.setInterval(() => {
+        maybeAutoClaimPartnerTask()
+      }, 700)
+      window.setTimeout(() => {
+        maybeAutoClaimPartnerTask()
+      }, 350)
 
       cleanup = () => {
+        window.clearInterval(autoClaimInterval)
         if (partnerTaskElementRef.current === taskElement) {
           partnerTaskElementRef.current = null
         }
@@ -7680,6 +7703,7 @@ function App() {
         taskElement.removeEventListener('onBannerNotFound', handleBannerNotFound as EventListener)
         taskElement.removeEventListener('onTooLongSession', handleTooLongSession as EventListener)
         taskElement.removeEventListener('onFastReturn', handleFastReturn as EventListener)
+        claimSlot.removeEventListener('click', handleClaimClick)
         if (host.contains(taskElement)) {
           host.removeChild(taskElement)
         }
@@ -11295,6 +11319,7 @@ function App() {
   )
 }
 export default App
+
 
 
 
