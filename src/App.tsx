@@ -444,6 +444,10 @@ type LoadedProfile = {
   updatedAt?: string
 }
 
+type LoadedProfileStateResult =
+  | { status: 'ok'; profile: LoadedProfile | null }
+  | { status: 'error'; error: string }
+
 type SecureProfileRow = {
   wallet: string
   state: PersistedState
@@ -5035,19 +5039,27 @@ function App() {
     syncHud()
   }
 
-  const loadProfileStateSecure = async (interactive = false): Promise<LoadedProfile | null> => {
+  const loadProfileStateSecure = async (interactive = false): Promise<LoadedProfileStateResult> => {
     const result = await callGameSecureAuthed('profile_load', {}, interactive)
     if (!result.ok) {
       if (result.error && result.error !== 'Sign-in required for secure actions.') {
         console.warn('Secure profile load skipped:', result.error)
       }
-      return null
+      return {
+        status: 'error',
+        error: result.error || 'Failed to load profile.',
+      }
     }
     const profile = result.profile
-    if (!profile || !profile.state) return null
+    if (!profile || !profile.state) {
+      return { status: 'ok', profile: null }
+    }
     return {
-      state: profile.state,
-      updatedAt: typeof profile.updated_at === 'string' ? profile.updated_at : undefined,
+      status: 'ok',
+      profile: {
+        state: profile.state,
+        updatedAt: typeof profile.updated_at === 'string' ? profile.updated_at : undefined,
+      },
     }
   }
 
@@ -5307,8 +5319,9 @@ function App() {
   const refreshProfileFromServer = async () => {
     const current = gameStateRef.current
     if (!current || !accountIdentity) return
-    const fresh = await loadProfileStateSecure(false)
-    if (!fresh || !gameStateRef.current) return
+    const freshResult = await loadProfileStateSecure(false)
+    if (freshResult.status !== 'ok' || !freshResult.profile || !gameStateRef.current) return
+    const fresh = freshResult.profile
     profileUpdatedAtRef.current = fresh.updatedAt || profileUpdatedAtRef.current
     applyPersistedState(gameStateRef.current, fresh.state, fresh.updatedAt)
     lastPersistedSnapshotRef.current = buildPersistedSnapshot(gameStateRef.current)
@@ -5957,9 +5970,18 @@ function App() {
         return
       }
 
-      const saved = await loadProfileStateSecure(false)
+      const savedResult = await loadProfileStateSecure(false)
       if (!active) return
-      if (saved) {
+      if (savedResult.status === 'error') {
+        isNewProfileRef.current = false
+        pendingProfileRef.current = null
+        lastPersistedSnapshotRef.current = ''
+        setSecurityAuthError(savedResult.error)
+        setStage('auth')
+        return
+      }
+      if (savedResult.profile) {
+        const saved = savedResult.profile
         isNewProfileRef.current = false
         referralProcessedRef.current = false
         profileUpdatedAtRef.current = saved.updatedAt || ''
@@ -6105,15 +6127,16 @@ function App() {
         void claimPendingTelegramStarsOrders()
       }
     } else if (accountIdentity) {
-      loadProfileStateSecure(false).then((saved) => {
+      loadProfileStateSecure(false).then((savedResult) => {
         if (!gameStateRef.current) return
-        if (saved) {
+        if (savedResult.status === 'ok' && savedResult.profile) {
+          const saved = savedResult.profile
           isNewProfileRef.current = false
           referralProcessedRef.current = false
           profileUpdatedAtRef.current = saved.updatedAt || ''
           applyPersistedState(gameStateRef.current, saved.state, saved.updatedAt)
           lastPersistedSnapshotRef.current = buildPersistedSnapshot(gameStateRef.current)
-        } else {
+        } else if (savedResult.status === 'ok') {
           isNewProfileRef.current = true
           referralProcessedRef.current = false
           profileUpdatedAtRef.current = ''
@@ -6557,8 +6580,9 @@ function App() {
       if (!result.ok && result.error && result.error !== 'Sign-in required for secure actions.') {
         console.warn('Secure profile save skipped:', result.error)
         if (isStaleProfileError(result.error)) {
-          const fresh = await loadProfileStateSecure(false)
-          if (fresh) {
+          const freshResult = await loadProfileStateSecure(false)
+          if (freshResult.status === 'ok' && freshResult.profile) {
+            const fresh = freshResult.profile
             if (fresh.updatedAt) {
               profileUpdatedAtRef.current = fresh.updatedAt
             }
@@ -11397,6 +11421,7 @@ function App() {
   )
 }
 export default App
+
 
 
 
