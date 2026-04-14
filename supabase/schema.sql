@@ -278,7 +278,7 @@ create table if not exists public.telegram_ton_orders (
   created_at timestamptz default now(),
   updated_at timestamptz default now(),
   check (rail in ('ton', 'usdt')),
-  check (kind in ('buy_gold', 'starter_pack_buy', 'premium_buy', 'fortune_buy')),
+  constraint telegram_ton_orders_kind_check check (kind in ('buy_gold', 'starter_pack_buy', 'premium_buy', 'fortune_buy', 'miner_buy')),
   check (asset in ('TON', 'USDT')),
   check (amount_units > 0),
   check (status in ('pending', 'claiming', 'claimed', 'failed', 'expired'))

@@ -43,6 +43,7 @@ const TELEGRAM_CHANNEL_URL = "https://t.me/" + TELEGRAM_CHANNEL_HANDLE;
 const TWITTER_FOLLOW_URL = "https://x.com/Doge_mmorpg";
 const ADSGRAM_BLOCK_ID = "27346";
 const ADSGRAM_PARTNER_TASK_REWARD = 6;
+const PARTNER_TASK_COOLDOWN_SECONDS = 5 * 60;
 const PARTNER_TASK_DUPLICATE_SUPPRESS_MS = 5_000;
 const PREMIUM_MAX_FUTURE_DAYS = 180;
 const PREMIUM_MAX_EXTENSION_DAYS = 90;
@@ -5466,6 +5467,14 @@ serve(async (req) => {
       .maybeSingle();
 
     if (createError || !createdRow) {
+      console.error("telegram_ton_orders insert failed", {
+        wallet: auth.wallet,
+        orderId,
+        kind: prepared.purchase.kind,
+        rail: prepared.purchase.rail,
+        productRef: prepared.purchase.productRef,
+        error: createError?.message ?? null,
+      });
       return json({ ok: false, error: "Failed to create TON payment order." });
     }
 
