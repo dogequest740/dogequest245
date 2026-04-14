@@ -5,7 +5,8 @@ import { handler as telegramStarsWebhookHandler } from "./functions/telegram-sta
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-telegram-bot-api-secret-token",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-session-token, x-telegram-bot-api-secret-token",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
 const json = (payload: Record<string, unknown>, status = 200) =>
@@ -25,6 +26,7 @@ serve(async (req) => {
   if (pathname === "/game-secure") return await gameSecureHandler(req);
   if (pathname === "/dungeon-secure") return await dungeonSecureHandler(req);
   if (pathname === "/telegram-stars-webhook") return await telegramStarsWebhookHandler(req);
-  if (pathname === "/health") return json({ ok: true });
+  if (pathname === "/health") return json({ ok: true, version: "cors-fix-2026-04-14-1" });
   return json({ ok: false, error: "Not found." }, 404);
 }, { port });
+
