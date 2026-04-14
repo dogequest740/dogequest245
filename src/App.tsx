@@ -150,6 +150,9 @@ const LANDING_BANNERS = [
   { src: landingBanner5Png, alt: 'Doge Quest banner 5' },
 ] as const
 const EDGE_BASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || ''
+const EDGE_FUNCTIONS_BASE_URL =
+  (import.meta.env.VITE_EDGE_FUNCTIONS_BASE_URL as string | undefined)?.trim().replace(/\/+$/, '') ||
+  (EDGE_BASE_URL ? `${EDGE_BASE_URL.replace(/\/+$/, '')}/functions/v1` : '')
 const EDGE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() || ''
 const TELEGRAM_TON_TX_VALID_SECONDS = 900
 const TELEGRAM_BOT_USERNAME = String(import.meta.env.VITE_TELEGRAM_BOT_USERNAME ?? 'dogemmorpgbot').trim().replace(/^@+/, '')
@@ -4038,7 +4041,7 @@ function App() {
     payload: Record<string, unknown>,
     headers?: Record<string, string>,
   ): Promise<DungeonSecureResponse> => {
-    if (!EDGE_BASE_URL || !EDGE_ANON_KEY) return { ok: false, error: 'Supabase not configured.' }
+    if (!EDGE_FUNCTIONS_BASE_URL || !EDGE_ANON_KEY) return { ok: false, error: 'Supabase not configured.' }
     try {
       const mergedHeaders: Record<string, string> = {
         'content-type': 'application/json',
@@ -4046,7 +4049,7 @@ function App() {
         authorization: `Bearer ${EDGE_ANON_KEY}`,
         ...(headers ?? {}),
       }
-      const response = await fetch(`${EDGE_BASE_URL}/functions/v1/dungeon-secure`, {
+      const response = await fetch(`${EDGE_FUNCTIONS_BASE_URL}/dungeon-secure`, {
         method: 'POST',
         headers: mergedHeaders,
         body: JSON.stringify(payload),
@@ -4248,7 +4251,7 @@ function App() {
     headers?: Record<string, string>,
     options?: { keepalive?: boolean },
   ): Promise<GameSecureResponse> => {
-    if (!EDGE_BASE_URL || !EDGE_ANON_KEY) return { ok: false, error: 'Supabase not configured.' }
+    if (!EDGE_FUNCTIONS_BASE_URL || !EDGE_ANON_KEY) return { ok: false, error: 'Supabase not configured.' }
     try {
       const mergedHeaders: Record<string, string> = {
         'content-type': 'application/json',
@@ -4256,7 +4259,7 @@ function App() {
         authorization: `Bearer ${EDGE_ANON_KEY}`,
         ...(headers ?? {}),
       }
-      const response = await fetch(`${EDGE_BASE_URL}/functions/v1/game-secure`, {
+      const response = await fetch(`${EDGE_FUNCTIONS_BASE_URL}/game-secure`, {
         method: 'POST',
         headers: mergedHeaders,
         body: JSON.stringify(payload),
