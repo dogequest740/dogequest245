@@ -4386,7 +4386,7 @@ const buildCrystalTaskStatuses = async (
   return { ok: true as const, tasks };
 };
 
-serve(async (req) => {
+export const handler = async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -8181,4 +8181,6 @@ serve(async (req) => {
   }
 
   return json({ ok: false, error: "Unknown action." });
-});
+};
+
+if (import.meta.main) serve(handler);
