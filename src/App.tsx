@@ -3966,6 +3966,7 @@ function App() {
   const [mobileGameTab, setMobileGameTab] = useState<MobileGameTab>('battle')
   const [mobileProfileTab, setMobileProfileTab] = useState<'profile' | 'inventory' | 'settings'>('profile')
   const [dungeonRunBusy, setDungeonRunBusy] = useState(false)
+  const [pendingLootActionLoading, setPendingLootActionLoading] = useState(false)
   const [, setConsumableBusyVersion] = useState(0)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const gameStateRef = useRef<GameState | null>(null)
@@ -3996,6 +3997,7 @@ function App() {
   const profileSaveQueuedRef = useRef(false)
   const profileSaveQueuedForceRef = useRef(false)
   const lastPendingLootPersistedIdRef = useRef(0)
+  const lastAcknowledgedLevelNoticeRef = useRef(0)
   const spriteCacheRef = useRef<PlayerSpriteMap>({
     knight: null,
     mage: null,
@@ -5380,6 +5382,20 @@ function App() {
     }
   }
 
+  function syncPersistedSnapshot(state: GameState) {
+    lastPersistedSnapshotRef.current = buildPersistedSnapshot(state)
+  }
+
+  function applyProfileStateFromResult(state: GameState, result: GameSecureResponse) {
+    const profileState = result.profile?.state
+    if (!profileState) return false
+    applyPersistedState(state, profileState, result.profile?.updated_at)
+    recomputePlayerStats(state)
+    lastPendingLootPersistedIdRef.current = state.pendingLoot?.id ?? 0
+    syncPersistedSnapshot(state)
+    return true
+  }
+
   function applyMinerStateFromResult(state: GameState, result: GameSecureResponse) {
     if (Array.isArray(result.miners)) {
       state.miners = normalizeLoadedMiners(result.miners, Date.now())
@@ -6215,8 +6231,10 @@ function App() {
       setPayoutWallet('')
       setPayoutWalletDraft('')
       setPayoutWalletError('')
+      setPendingLootActionLoading(false)
       setActivePanel(null)
       setHud(null)
+      lastAcknowledgedLevelNoticeRef.current = 0
       setStage('auth')
       return () => {
         active = false
@@ -6245,6 +6263,7 @@ function App() {
         isNewProfileRef.current = false
         pendingProfileRef.current = null
         lastPersistedSnapshotRef.current = ''
+        setPendingLootActionLoading(false)
         setStage('auth')
         return
       }
@@ -6255,6 +6274,7 @@ function App() {
         isNewProfileRef.current = false
         pendingProfileRef.current = null
         lastPersistedSnapshotRef.current = ''
+        setPendingLootActionLoading(false)
         setSecurityAuthError(savedResult.error)
         setStage('auth')
         return
@@ -6560,6 +6580,15 @@ function App() {
     if (!state) return
     setHud(buildHud(state))
   }
+
+  useEffect(() => {
+    const state = gameStateRef.current
+    const notice = hud?.levelUpNotice
+    if (!state || !notice) return
+    if (notice.level > lastAcknowledgedLevelNoticeRef.current) return
+    state.levelUpNotice = null
+    syncHud()
+  }, [hud?.levelUpNotice])
 
   const openMobileGameTab = (tab: MobileGameTab) => {
     setMobileGameTab(tab)
@@ -7290,40 +7319,67 @@ function App() {
     syncHud()
   }
 
-  const addConsumable = (state: GameState, type: ConsumableType) => {
-    const consumable = createConsumable(++state.consumableId, type)
-    state.consumables = [consumable, ...state.consumables]
-    return consumable
-  }
 
-  const buyEnergyPotion = (cost: number) => {
+  const buyEnergyPotion = async (cost: number) => {
     const state = gameStateRef.current
     if (!state) return
+    if (!accountIdentity) {
+      pushLog(state.eventLog, 'Sign in to buy Energy Tonics.')
+      syncHud()
+      return
+    }
     if (state.gold < cost) {
       pushLog(state.eventLog, 'Not enough gold.')
       syncHud()
       return
     }
-    state.gold -= cost
-    addConsumable(state, 'energy-small')
-    pushLog(state.eventLog, 'Energy tonic added to consumables.')
-    syncHud()
-    void saveGameState()
+    try {
+      const result = await callGameSecureAuthed('shop_buy_consumable', { type: 'energy-small' }, true)
+      if (!result.ok) {
+        pushLog(state.eventLog, result.error || 'Failed to buy Energy Tonic.')
+        syncHud()
+        return
+      }
+      state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
+      applyServerConsumables(state, result.consumables)
+      applyConsumableEffectsFromServer(state, result)
+      syncPersistedSnapshot(state)
+      pushLog(state.eventLog, 'Energy tonic added to consumables.')
+      syncHud()
+    } catch (error) {
+      console.warn('Energy Tonic purchase failed', error)
+    }
   }
 
-  const buyFullEnergy = (cost: number) => {
+  const buyFullEnergy = async (cost: number) => {
     const state = gameStateRef.current
     if (!state) return
+    if (!accountIdentity) {
+      pushLog(state.eventLog, 'Sign in to buy Grand Energy Elixirs.')
+      syncHud()
+      return
+    }
     if (state.gold < cost) {
       pushLog(state.eventLog, 'Not enough gold.')
       syncHud()
       return
     }
-    state.gold -= cost
-    addConsumable(state, 'energy-full')
-    pushLog(state.eventLog, 'Grand Energy Elixir added to consumables.')
-    syncHud()
-    void saveGameState()
+    try {
+      const result = await callGameSecureAuthed('shop_buy_consumable', { type: 'energy-full' }, true)
+      if (!result.ok) {
+        pushLog(state.eventLog, result.error || 'Failed to buy Grand Energy Elixir.')
+        syncHud()
+        return
+      }
+      state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
+      applyServerConsumables(state, result.consumables)
+      applyConsumableEffectsFromServer(state, result)
+      syncPersistedSnapshot(state)
+      pushLog(state.eventLog, 'Grand Energy Elixir added to consumables.')
+      syncHud()
+    } catch (error) {
+      console.warn('Grand Energy Elixir purchase failed', error)
+    }
   }
 
   const buyBossMark = async () => {
@@ -7563,13 +7619,43 @@ function App() {
     try {
       switch (item.type) {
         case 'energy-small':
-          state.energy = clamp(state.energy + 10, 0, state.energyMax)
+        {
+          const result = await callGameSecureAuthed('use_energy_consumable', { consumableId: item.id, type: item.type }, true)
+          if (!result.ok) {
+            applied = false
+            message = result.error || 'Failed to use Energy Tonic.'
+            break
+          }
+          if (typeof result.energy === 'number') {
+            state.energy = clamp(Math.floor(Number(result.energy)), 0, state.energyMax)
+          }
+          if (typeof result.energyTimer === 'number') {
+            state.energyTimer = clamp(Math.floor(Number(result.energyTimer)), 1, ENERGY_REGEN_SECONDS)
+          }
+          applyServerConsumables(state, result.consumables)
+          syncPersistedSnapshot(state)
           message = 'Energy restored by 10.'
           break
+        }
         case 'energy-full':
-          state.energy = state.energyMax
+        {
+          const result = await callGameSecureAuthed('use_energy_consumable', { consumableId: item.id, type: item.type }, true)
+          if (!result.ok) {
+            applied = false
+            message = result.error || 'Failed to use Grand Energy Elixir.'
+            break
+          }
+          if (typeof result.energy === 'number') {
+            state.energy = clamp(Math.floor(Number(result.energy)), 0, state.energyMax)
+          }
+          if (typeof result.energyTimer === 'number') {
+            state.energyTimer = clamp(Math.floor(Number(result.energyTimer)), 1, ENERGY_REGEN_SECONDS)
+          }
+          applyServerConsumables(state, result.consumables)
+          syncPersistedSnapshot(state)
           message = 'Energy fully restored.'
           break
+        }
         case 'boss-mark':
         {
           const result = await callGameSecureAuthed('use_boss_mark', { consumableId: item.id }, true)
@@ -7624,7 +7710,9 @@ function App() {
       }
       pushLog(state.eventLog, message)
       syncHud()
-      void saveGameState()
+      if (item.type === 'key') {
+        void saveGameState()
+      }
     } finally {
       setConsumableBusy(item.id, false)
     }
@@ -8268,9 +8356,36 @@ function App() {
     }
   }
 
-  const equipItem = (item: EquipmentItem, source: 'loot' | 'inventory') => {
+  const equipItem = async (item: EquipmentItem, source: 'loot' | 'inventory') => {
     const state = gameStateRef.current
     if (!state) return
+    if (source === 'loot' && accountIdentity) {
+      if (pendingLootActionLoading) return
+      setPendingLootActionLoading(true)
+      try {
+        const result = await callGameSecureAuthed('resolve_pending_loot', { resolution: 'equip', itemId: item.id }, true)
+        if (!result.ok) {
+          pushLog(state.eventLog, result.error || 'Failed to equip loot.')
+          syncHud()
+          return
+        }
+        if (!applyProfileStateFromResult(state, result)) {
+          pushLog(state.eventLog, 'Failed to sync equipped loot.')
+          syncHud()
+          return
+        }
+        pushLog(state.eventLog, `Equipped ${item.rarity} ${item.name}.`)
+        syncHud()
+        return
+      } catch (error) {
+        console.warn('Pending loot equip failed', error)
+        pushLog(state.eventLog, 'Failed to equip loot.')
+        syncHud()
+        return
+      } finally {
+        setPendingLootActionLoading(false)
+      }
+    }
     const current = state.equipment[item.slot]
     if (current) {
       state.inventory.push(current)
@@ -8287,10 +8402,37 @@ function App() {
     void saveGameState()
   }
 
-  const sellItem = (item: EquipmentItem, source: 'loot' | 'inventory') => {
+  const sellItem = async (item: EquipmentItem, source: 'loot' | 'inventory') => {
     const state = gameStateRef.current
     if (!state) return
     const sellValue = getLootSellPrice(item.sellValue, state.equipment)
+    if (source === 'loot' && accountIdentity) {
+      if (pendingLootActionLoading) return
+      setPendingLootActionLoading(true)
+      try {
+        const result = await callGameSecureAuthed('resolve_pending_loot', { resolution: 'sell', itemId: item.id }, true)
+        if (!result.ok) {
+          pushLog(state.eventLog, result.error || 'Failed to sell loot.')
+          syncHud()
+          return
+        }
+        if (!applyProfileStateFromResult(state, result)) {
+          pushLog(state.eventLog, 'Failed to sync sold loot.')
+          syncHud()
+          return
+        }
+        pushLog(state.eventLog, `Sold ${item.rarity} ${item.name} for ${sellValue} gold.`)
+        syncHud()
+        return
+      } catch (error) {
+        console.warn('Pending loot sell failed', error)
+        pushLog(state.eventLog, 'Failed to sell loot.')
+        syncHud()
+        return
+      } finally {
+        setPendingLootActionLoading(false)
+      }
+    }
     state.gold += sellValue
     if (source === 'loot') {
       state.pendingLoot = null
@@ -8356,7 +8498,8 @@ function App() {
 
   const acknowledgeLevelUp = () => {
     const state = gameStateRef.current
-    if (!state) return
+    if (!state || !state.levelUpNotice) return
+    lastAcknowledgedLevelNoticeRef.current = Math.max(lastAcknowledgedLevelNoticeRef.current, state.levelUpNotice.level)
     state.levelUpNotice = null
     syncHud()
   }
@@ -8411,7 +8554,10 @@ function App() {
     : ''
   const accountHint = usingWalletAuth ? `Wallet: ${shortKey}` : ''
 
-  const levelUpNotice = hud?.levelUpNotice ?? null
+  const levelUpNotice =
+    hud?.levelUpNotice && hud.levelUpNotice.level > lastAcknowledgedLevelNoticeRef.current
+      ? hud.levelUpNotice
+      : null
   const currentDayKey = getDayKey()
   const dailyResetSeconds = getSecondsToNextUtcDay()
   const premiumSaleNowMs = Date.now()
@@ -9407,12 +9553,19 @@ function App() {
               })()}
             </div>
             <div className="modal-actions">
-              <button type="button" onClick={() => equipItem(hud.pendingLoot!, 'loot')}>
-                Equip
+              <button type="button" disabled={pendingLootActionLoading} onClick={() => void equipItem(hud.pendingLoot!, 'loot')}>
+                {pendingLootActionLoading ? 'Working...' : 'Equip'}
               </button>
-              <button type="button" className="ghost" onClick={() => sellItem(hud.pendingLoot!, 'loot')}>
+              <button
+                type="button"
+                className="ghost"
+                disabled={pendingLootActionLoading}
+                onClick={() => void sellItem(hud.pendingLoot!, 'loot')}
+              >
                 <img className="icon-img small" src={iconGold} alt="" />
-                Sell for {getLootSellPrice(hud.pendingLoot.sellValue, hud.equipment)}
+                {pendingLootActionLoading
+                  ? 'Working...'
+                  : `Sell for ${getLootSellPrice(hud.pendingLoot.sellValue, hud.equipment)}`}
               </button>
             </div>
           </div>

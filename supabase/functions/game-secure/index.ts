@@ -93,6 +93,7 @@ const FORTUNE_SPIN_PRICES_LAMPORTS: Record<(typeof FORTUNE_SPIN_PACKS_SOL)[numbe
   10: Math.round(0.04 * SOL_LAMPORTS),
 };
 const MIN_SEASON_SNAPSHOT_CRYSTALS = 1000;
+const LOOT_SELL_PRICE_MULTIPLIER = 0.6;
 const ENERGY_REGEN_SECONDS = 420;
 const PREMIUM_PLANS = [
   { id: "premium-30", days: 30, lamports: Math.round(0.2 * SOL_LAMPORTS) },
@@ -3607,6 +3608,17 @@ const getEquipmentEffectBonusFromState = (
     }
   }
   return Math.min(EQUIPMENT_EFFECT_CAPS[kind], Number(total.toFixed(3)));
+};
+
+const getLootSellMultiplierFromState = (state: Record<string, unknown>) => {
+  const prosperityBonus = Math.min(0.15, getEquipmentStatBonusFromState(state, "prosperity") * 0.0012);
+  const sellBoost = getEquipmentEffectBonusFromState(state, "sell-boost");
+  return 1 + prosperityBonus + sellBoost;
+};
+
+const getLootSellPriceFromState = (state: Record<string, unknown>, baseSellValue: unknown) => {
+  const sellValue = Math.max(0, asInt(baseSellValue, 0));
+  return Math.max(1, Math.round(sellValue * LOOT_SELL_PRICE_MULTIPLIER * getLootSellMultiplierFromState(state)));
 };
 
 const getWorldBossAttackFromState = (state: Record<string, unknown>) => {
@@ -7381,14 +7393,20 @@ serve(async (req) => {
 
   if (action === "shop_buy_consumable") {
     const consumableTypeRaw = String(body.type ?? "").trim();
-    const consumableType = consumableTypeRaw === "boss-mark" || consumableTypeRaw === "crystal-flask"
+    const consumableType = ["energy-small", "energy-full", "boss-mark", "crystal-flask"].includes(consumableTypeRaw)
       ? consumableTypeRaw as ConsumableType
       : null;
     if (!consumableType) {
       return json({ ok: false, error: "Invalid consumable type." });
     }
 
-    const cost = consumableType === "boss-mark" ? 20000 : 7500;
+    const cost = consumableType === "boss-mark"
+      ? 20000
+      : consumableType === "crystal-flask"
+        ? 7500
+        : consumableType === "energy-small"
+          ? 4500
+          : 15000;
     for (let attempt = 0; attempt < 4; attempt += 1) {
       const { data: profileRow, error: profileError } = await supabase
         .from("profiles")
@@ -7480,6 +7498,105 @@ serve(async (req) => {
       consumables: normalizeConsumables(updated.state.consumables).rows,
       bossMarkCycleStart: String(updated.state.bossMarkCycleStart ?? ""),
       crystalFlaskRuns: Math.max(0, asInt(updated.state.crystalFlaskRuns, 0)),
+    });
+  }
+
+  if (action === "use_energy_consumable") {
+    const consumableId = Math.max(0, asInt(body.consumableId, 0));
+    const consumableTypeRaw = String(body.type ?? "").trim();
+    const consumableType = consumableTypeRaw === "energy-small" || consumableTypeRaw === "energy-full"
+      ? consumableTypeRaw as ConsumableType
+      : null;
+    if (!consumableType) {
+      return json({ ok: false, error: "Invalid energy consumable." });
+    }
+    const updated = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
+      if (!removeConsumableFromState(state, consumableType, consumableId || null)) {
+        throw new Error(consumableType === "energy-full" ? "Grand Energy Elixir not found." : "Energy Tonic not found.");
+      }
+      const energyMax = Math.max(1, asInt(state.energyMax, 50));
+      const nextEnergy = consumableType === "energy-full"
+        ? energyMax
+        : Math.min(energyMax, Math.max(0, asInt(state.energy, 0)) + 10);
+      state.energy = nextEnergy;
+      state.energyTimer = nextEnergy >= energyMax
+        ? ENERGY_REGEN_SECONDS
+        : Math.max(1, asInt(state.energyTimer, ENERGY_REGEN_SECONDS));
+      state.energyUpdatedAt = now.getTime();
+    });
+    if (!updated.ok || !updated.state) {
+      return json({ ok: false, error: updated.error || "Failed to use energy consumable." });
+    }
+    await auditEvent(supabase, auth.wallet, "use_energy_consumable", {
+      consumableType,
+      energy: Math.max(0, asInt(updated.state.energy, 0)),
+      energyTimer: Math.max(1, asInt(updated.state.energyTimer, ENERGY_REGEN_SECONDS)),
+    });
+    return json({
+      ok: true,
+      savedAt: updated.updatedAt,
+      energy: Math.max(0, asInt(updated.state.energy, 0)),
+      energyTimer: Math.max(1, asInt(updated.state.energyTimer, ENERGY_REGEN_SECONDS)),
+      consumables: normalizeConsumables(updated.state.consumables).rows,
+    });
+  }
+
+  if (action === "resolve_pending_loot") {
+    const resolution = String(body.resolution ?? "").trim();
+    if (resolution !== "equip" && resolution !== "sell") {
+      return json({ ok: false, error: "Invalid loot action." });
+    }
+    const expectedItemId = Math.max(0, asInt(body.itemId, 0));
+    let soldGold = 0;
+    const updated = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
+      const playerState = (state.player as Record<string, unknown> | undefined) ?? {};
+      const playerLevel = Math.max(1, asInt(playerState.level, 1));
+      const pendingLoot = normalizeEquipmentItem(state.pendingLoot, playerLevel);
+      if (!pendingLoot) {
+        throw new Error("No pending loot to resolve.");
+      }
+      if (expectedItemId > 0 && pendingLoot.id !== expectedItemId) {
+        throw new Error("Pending loot changed. Reopen the latest drop and retry.");
+      }
+
+      if (resolution === "equip") {
+        const equipmentState = ((state.equipment as Record<string, unknown> | undefined) ?? {}) as Record<EquipmentSlot, unknown>;
+        const currentEquipped = normalizeEquipmentItem(equipmentState[pendingLoot.slot], playerLevel, pendingLoot.slot);
+        const inventory = normalizeInventory(state.inventory, playerLevel);
+        if (currentEquipped) {
+          if (inventory.length >= INVENTORY_ITEM_CAP) {
+            throw new Error("Inventory is full. Clear one slot first.");
+          }
+          inventory.push(currentEquipped);
+        }
+        state.inventory = inventory;
+        state.equipment = {
+          ...equipmentState,
+          [pendingLoot.slot]: pendingLoot,
+        };
+      } else {
+        soldGold = getLootSellPriceFromState(state, pendingLoot.sellValue);
+        state.gold = Math.max(0, asInt(state.gold, 0)) + soldGold;
+      }
+
+      state.pendingLoot = null;
+    });
+    if (!updated.ok || !updated.state) {
+      return json({ ok: false, error: updated.error || "Failed to resolve loot." });
+    }
+    await auditEvent(supabase, auth.wallet, "resolve_pending_loot", {
+      resolution,
+      itemId: expectedItemId,
+      soldGold,
+    });
+    return json({
+      ok: true,
+      savedAt: updated.updatedAt,
+      gold: Math.max(0, asInt(updated.state.gold, 0)),
+      profile: {
+        state: updated.state,
+        updated_at: typeof updated.updatedAt === "string" ? updated.updatedAt : undefined,
+      },
     });
   }
 
