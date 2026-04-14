@@ -58,6 +58,14 @@ const PREMIUM_DAILY_BIG_POTIONS = 3;
 const SOL_LAMPORTS = 1_000_000_000;
 const STARTER_PACK_GOLD = 300000;
 const STARTER_PACK_PRICE_LAMPORTS = Math.round(0.13 * SOL_LAMPORTS);
+const MINER_LEASE_DURATION_DAYS = 30;
+const MINER_LEASE_DURATION_MS = MINER_LEASE_DURATION_DAYS * 24 * 60 * 60 * 1000;
+const MINER_DAY_MS = 24 * 60 * 60 * 1000;
+const MINERS = [
+  { id: "shiba", title: "Shiba Miner", crystalsPerDay: 200, lamports: Math.round(0.4 * SOL_LAMPORTS), starsAmount: 1500, tonAmount: 25, usdtAmount: 32 },
+  { id: "pepe", title: "Pepe Miner", crystalsPerDay: 400, lamports: Math.round(0.7 * SOL_LAMPORTS), starsAmount: 2600, tonAmount: 43, usdtAmount: 56 },
+  { id: "trump", title: "Trump Miner", crystalsPerDay: 800, lamports: Math.round(1.2 * SOL_LAMPORTS), starsAmount: 4500, tonAmount: 75, usdtAmount: 95 },
+] as const;
 const STARTER_PACK_ITEMS: Array<{ type: ConsumableType; qty: number }> = [
   { type: "energy-small", qty: 20 },
   { type: "energy-full", qty: 5 },
@@ -96,6 +104,11 @@ const TELEGRAM_STARS_GOLD_PACKS: Record<(typeof GOLD_PACKS_SOL)[number]["id"], n
   "gold-500k": 1050,
   "gold-1200k": 1650,
 };
+const TELEGRAM_STARS_MINERS: Record<MinerId, number> = {
+  shiba: 1500,
+  pepe: 2600,
+  trump: 4500,
+};
 const TELEGRAM_STARS_PREMIUM_PLANS: Record<(typeof PREMIUM_PLANS)[number]["id"], number> = {
   "premium-30": 749,
   "premium-90": 1700,
@@ -129,6 +142,16 @@ const TELEGRAM_USDT_GOLD_PACKS: Record<(typeof GOLD_PACKS_SOL)[number]["id"], nu
   "gold-100k": 5.8,
   "gold-500k": 23,
   "gold-1200k": 41,
+};
+const TELEGRAM_TON_MINERS: Record<MinerId, number> = {
+  shiba: 25,
+  pepe: 43,
+  trump: 75,
+};
+const TELEGRAM_USDT_MINERS: Record<MinerId, number> = {
+  shiba: 32,
+  pepe: 56,
+  trump: 95,
 };
 const TELEGRAM_TON_PREMIUM_PLANS: Record<(typeof PREMIUM_PLANS)[number]["id"], number> = {
   "premium-30": 13,
@@ -441,7 +464,7 @@ type SeasonComputedRow = {
 };
 
 type TelegramStarsOrderStatus = (typeof TELEGRAM_STARS_ORDER_STATUSES)[number];
-type TelegramStarsOrderKind = "buy_gold" | "starter_pack_buy" | "premium_buy" | "fortune_buy";
+type TelegramStarsOrderKind = "buy_gold" | "starter_pack_buy" | "premium_buy" | "fortune_buy" | "miner_buy";
 
 type TelegramStarsOrderRow = {
   id: string;
@@ -555,6 +578,14 @@ type VillageState = {
   carryGold: number;
   carryCrystals: number;
   buildings: Record<VillageBuildingId, VillageBuildingState>;
+};
+type MinerId = "shiba" | "pepe" | "trump";
+type MinerLeaseState = {
+  id: number;
+  minerId: MinerId;
+  startedAt: number;
+  endsAt: number;
+  claimedAt: number;
 };
 
 const CONSUMABLE_DEFS: Record<ConsumableType, { name: string; description: string }> = {
@@ -839,10 +870,16 @@ const getGoldPackSol = (packIdRaw: unknown) => {
   return GOLD_PACKS_SOL.find((entry) => entry.id === packId) ?? null;
 };
 
+const getMinerDefinition = (minerIdRaw: unknown) => {
+  const minerId = String(minerIdRaw ?? "").trim();
+  if (!minerId) return null;
+  return MINERS.find((entry) => entry.id === minerId) ?? null;
+};
+
 const TELEGRAM_STARS_ORDER_SELECT = "id, wallet, tg_user_id, kind, product_ref, stars_amount, status, invoice_payload, invoice_link, telegram_charge_id, provider_charge_id, reward, paid_at, claimed_at, created_at, updated_at";
 
 const isTelegramStarsOrderKind = (value: string): value is TelegramStarsOrderKind =>
-  value === "buy_gold" || value === "starter_pack_buy" || value === "premium_buy" || value === "fortune_buy";
+  value === "buy_gold" || value === "starter_pack_buy" || value === "premium_buy" || value === "fortune_buy" || value === "miner_buy";
 
 const isTelegramStarsOrderStatus = (value: string): value is TelegramStarsOrderStatus =>
   (TELEGRAM_STARS_ORDER_STATUSES as readonly string[]).includes(value);
@@ -937,6 +974,26 @@ const prepareTelegramStarsPurchase = (
         title: `Premium ${plan.days}d`,
         description: `Activate Premium for ${plan.days} days.`,
         reward: { planId: plan.id, days: plan.days },
+      },
+    };
+  }
+
+  if (kindRaw === "miner_buy") {
+    const miner = getMinerDefinition(body.minerId);
+    if (!miner) return { ok: false, error: "Invalid miner." };
+    const starsAmount = TELEGRAM_STARS_MINERS[miner.id as MinerId];
+    if (!Number.isFinite(starsAmount) || starsAmount <= 0) {
+      return { ok: false, error: "Stars pricing is not configured for this miner." };
+    }
+    return {
+      ok: true,
+      purchase: {
+        kind: "miner_buy",
+        productRef: miner.id,
+        starsAmount,
+        title: miner.title,
+        description: `Lease ${miner.title} for ${MINER_LEASE_DURATION_DAYS} days and earn ${miner.crystalsPerDay} crystals per day.`,
+        reward: { minerId: miner.id },
       },
     };
   }
@@ -1185,6 +1242,17 @@ const getTelegramTonPrice = (kind: TelegramTonOrderKind, productRef: string, rai
     };
   }
 
+  if (kind === "miner_buy") {
+    const miner = getMinerDefinition(productRef);
+    if (!miner) return null;
+    const value = rail === "ton" ? TELEGRAM_TON_MINERS[miner.id as MinerId] : TELEGRAM_USDT_MINERS[miner.id as MinerId];
+    if (!Number.isFinite(value) || value <= 0) return null;
+    return {
+      numeric: value,
+      units: rail === "ton" ? decimalToUnits(value, 9) : decimalToUnits(value, TELEGRAM_TON_USDT_DECIMALS),
+    };
+  }
+
   const spins = asInt(productRef, 0);
   if (!(FORTUNE_SPIN_PACKS_SOL as readonly number[]).includes(spins)) return null;
   const value = rail === "ton"
@@ -1271,6 +1339,27 @@ const prepareTelegramTonPurchase = (
         amountDisplay: paymentAmountToDisplay(price.numeric),
         title: `Premium ${plan.days}d`,
         reward: { planId: plan.id, days: plan.days },
+      },
+    };
+  }
+
+
+  if (kind === "miner_buy") {
+    const miner = getMinerDefinition(body.minerId);
+    if (!miner) return { ok: false, error: "Invalid miner." };
+    const price = getTelegramTonPrice(kind, miner.id, rail);
+    if (!price) return { ok: false, error: "Payment pricing is not configured." };
+    return {
+      ok: true,
+      purchase: {
+        kind,
+        rail,
+        asset: rail === "ton" ? "TON" : "USDT",
+        productRef: miner.id,
+        amountUnits: price.units,
+        amountDisplay: paymentAmountToDisplay(price.numeric),
+        title: miner.title,
+        reward: { minerId: miner.id },
       },
     };
   }
@@ -1444,6 +1533,12 @@ const wasStarterPackTxAlreadyProcessed = async (
   txSignature: string,
 ) => wasTxAlreadyProcessed(supabase, wallet, ["starter_pack_buy"], txSignature);
 
+const wasMinerTxAlreadyProcessed = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  txSignature: string,
+) => wasTxAlreadyProcessed(supabase, wallet, ["miner_buy"], txSignature);
+
 const verifySolTransferTx = async (
   wallet: string,
   txSignature: string,
@@ -1570,6 +1665,21 @@ const verifyStarterPackPaymentTx = async (
     STARTER_PACK_PRICE_LAMPORTS,
     PREMIUM_PAYMENT_WALLET,
     "Payment transfer mismatch for Starter Pack.",
+    now,
+  );
+
+const verifyMinerPaymentTx = async (
+  wallet: string,
+  txSignature: string,
+  lamportsRequired: number,
+  now: Date,
+) =>
+  verifySolTransferTx(
+    wallet,
+    txSignature,
+    lamportsRequired,
+    PREMIUM_PAYMENT_WALLET,
+    "Payment transfer mismatch for selected miner lease.",
     now,
   );
 
@@ -1889,7 +1999,101 @@ const removeConsumableFromState = (
   state.consumableId = Math.max(asInt(state.consumableId, 0), normalized.maxId);
   return true;
 };
+const normalizeMinerCarry = (value: unknown) => {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric)
+    ? Math.max(0, Math.min(numeric, 0.999999))
+    : 0;
+};
 
+const normalizeMinerLeases = (raw: unknown, nowMs = Date.now()): MinerLeaseState[] => {
+  if (!Array.isArray(raw)) return [];
+  const usedIds = new Set<number>();
+  return raw
+    .map((entry) => {
+      const row = entry && typeof entry === "object" ? entry as Record<string, unknown> : null;
+      if (!row) return null;
+      const miner = getMinerDefinition(row.minerId);
+      if (!miner) return null;
+      const id = Math.max(1, asInt(row.id, 0));
+      if (!id || usedIds.has(id)) return null;
+      const startedAt = Math.max(0, asInt(row.startedAt, 0));
+      const endsAt = Math.max(startedAt, asInt(row.endsAt, startedAt));
+      const claimedAt = Math.max(startedAt, Math.min(endsAt, asInt(row.claimedAt, startedAt)));
+      usedIds.add(id);
+      return { id, minerId: miner.id as MinerId, startedAt, endsAt, claimedAt };
+    })
+    .filter((entry): entry is MinerLeaseState => Boolean(entry))
+    .filter((entry) => entry.endsAt > nowMs || entry.claimedAt < entry.endsAt)
+    .sort((a, b) => a.endsAt - b.endsAt || a.id - b.id);
+};
+
+const getMinerLeaseState = (state: Record<string, unknown>, nowMs = Date.now()) => {
+  const leases = normalizeMinerLeases(state.miners, nowMs);
+  const leaseId = Math.max(asInt(state.minerLeaseId, 0), ...leases.map((entry) => entry.id), 0);
+  const carryCrystals = normalizeMinerCarry(state.minerCarryCrystals);
+  let exactCrystals = carryCrystals;
+  let activeCount = 0;
+  let totalPerDay = 0;
+  for (const lease of leases) {
+    const miner = getMinerDefinition(lease.minerId);
+    if (!miner) continue;
+    if (lease.endsAt > nowMs) {
+      activeCount += 1;
+      totalPerDay += miner.crystalsPerDay;
+    }
+    const claimStart = Math.max(lease.startedAt, Math.min(lease.endsAt, lease.claimedAt));
+    const claimEnd = Math.max(lease.startedAt, Math.min(lease.endsAt, nowMs));
+    if (claimEnd <= claimStart) continue;
+    exactCrystals += (miner.crystalsPerDay * (claimEnd - claimStart)) / MINER_DAY_MS;
+  }
+  const claimableCrystals = Math.max(0, Math.floor(exactCrystals));
+  return {
+    leases,
+    leaseId,
+    carryCrystals,
+    exactCrystals,
+    claimableCrystals,
+    activeCount,
+    totalPerDay,
+  };
+};
+
+const addMinerLeaseToState = (state: Record<string, unknown>, minerId: MinerId, nowMs = Date.now()) => {
+  const miner = getMinerDefinition(minerId);
+  if (!miner) throw new Error("Invalid miner.");
+  const current = getMinerLeaseState(state, nowMs);
+  const nextId = Math.max(0, current.leaseId) + 1;
+  state.miners = [
+    ...current.leases,
+    {
+      id: nextId,
+      minerId: miner.id as MinerId,
+      startedAt: nowMs,
+      endsAt: nowMs + MINER_LEASE_DURATION_MS,
+      claimedAt: nowMs,
+    },
+  ];
+  state.minerLeaseId = nextId;
+  state.minerCarryCrystals = current.carryCrystals;
+};
+
+const claimMinerRewardsOnState = (state: Record<string, unknown>, nowMs = Date.now()) => {
+  const current = getMinerLeaseState(state, nowMs);
+  const claimed = current.claimableCrystals;
+  const nextCarry = Math.max(0, current.exactCrystals - claimed);
+  const nextLeases = current.leases
+    .map((lease) => ({ ...lease, claimedAt: Math.max(lease.startedAt, Math.min(lease.endsAt, nowMs)) }))
+    .filter((lease) => lease.endsAt > nowMs || lease.claimedAt < lease.endsAt);
+  state.miners = nextLeases;
+  state.minerLeaseId = Math.max(asInt(state.minerLeaseId, 0), ...nextLeases.map((entry) => entry.id), current.leaseId, 0);
+  state.minerCarryCrystals = nextCarry;
+  if (claimed > 0) {
+    state.crystals = Math.max(0, asInt(state.crystals, 0)) + claimed;
+    state.crystalsEarned = Math.max(0, asInt(state.crystalsEarned ?? state.crystals, 0)) + claimed;
+  }
+  return claimed;
+};
 
 const normalizeStakes = (raw: unknown, fallbackId = 1): StakeEntryState[] => {
   if (Array.isArray(raw)) {
@@ -4182,7 +4386,7 @@ const buildCrystalTaskStatuses = async (
   return { ok: true as const, tasks };
 };
 
-export const handler = async (req: Request) => {
+serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -4451,6 +4655,10 @@ export const handler = async (req: Request) => {
         if (Math.max(0, asInt(normalizedState.energyUpdatedAt, 0)) <= 0) {
           normalizedState.energyUpdatedAt = attemptNow.getTime();
         }
+        const minerState = getMinerLeaseState(prevState, attemptNow.getTime());
+        normalizedState.miners = minerState.leases;
+        normalizedState.minerLeaseId = minerState.leaseId;
+        normalizedState.minerCarryCrystals = minerState.carryCrystals;
       } else if (!existing) {
         normalizedState = createStarterProfileState(normalizedState, attemptNow.getTime());
       } else {
@@ -4537,6 +4745,62 @@ export const handler = async (req: Request) => {
     }
 
     return json({ ok: false, error: "Profile changed concurrently, retry save." });
+  }
+
+  if (action === "miners_status") {
+    const { data: profileRow, error: profileError } = await supabase
+      .from("profiles")
+      .select("state, updated_at")
+      .eq("wallet", auth.wallet)
+      .maybeSingle();
+
+    if (profileError || !profileRow?.state || typeof profileRow.state !== "object") {
+      return json({ ok: false, error: "Profile not found." });
+    }
+
+    const state = normalizeState(profileRow.state as unknown);
+    if (!state) return json({ ok: false, error: "Invalid profile state." });
+    const minerState = getMinerLeaseState(state, now.getTime());
+
+    return json({
+      ok: true,
+      miners: minerState.leases,
+      minerLeaseId: minerState.leaseId,
+      minerCarryCrystals: minerState.carryCrystals,
+      savedAt: String(profileRow.updated_at ?? ""),
+    });
+  }
+
+  if (action === "miners_claim") {
+    let claimedCrystals = 0;
+    const creditResult = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
+      claimedCrystals = claimMinerRewardsOnState(state, now.getTime());
+      if (claimedCrystals > 0) {
+        state.crystals = Math.max(0, asInt(state.crystals, 0)) + claimedCrystals;
+        state.crystalsEarned = Math.max(0, asInt(state.crystalsEarned, 0)) + claimedCrystals;
+      }
+    });
+
+    if (!creditResult.ok || !creditResult.state) {
+      return json({ ok: false, error: creditResult.error || "Failed to claim miner rewards." });
+    }
+
+    const minerState = getMinerLeaseState(creditResult.state, now.getTime());
+    await auditEvent(supabase, auth.wallet, "miners_claim", {
+      claimedCrystals,
+      activeLeases: minerState.leases.filter((entry) => entry.endsAt > now.getTime()).length,
+    });
+
+    return json({
+      ok: true,
+      minerClaimedCrystals: claimedCrystals,
+      miners: minerState.leases,
+      minerLeaseId: minerState.leaseId,
+      minerCarryCrystals: minerState.carryCrystals,
+      crystals: Math.max(0, asInt(creditResult.state.crystals, 0)),
+      crystalsEarned: Math.max(0, asInt(creditResult.state.crystalsEarned, 0)),
+      savedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
+    });
   }
 
   if (action === "season_status") {
@@ -4954,6 +5218,38 @@ export const handler = async (req: Request) => {
       payload = {
         premiumEndsAt: Math.max(0, asInt(creditResult.state.premiumEndsAt, 0)),
         premiumDaysAdded: plan.days,
+        savedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
+      };
+    } else if (orderKind === "miner_buy") {
+      const miner = getMinerDefinition(orderRow.product_ref);
+      if (!miner) {
+        await supabase
+          .from("telegram_stars_orders")
+          .update({ status: "paid", updated_at: new Date().toISOString() })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: "Invalid miner in Stars order." });
+      }
+
+      const creditResult = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
+        addMinerLeaseToState(state, miner.id as MinerId, now.getTime());
+      });
+      if (!creditResult.ok || !creditResult.state) {
+        await supabase
+          .from("telegram_stars_orders")
+          .update({ status: "paid", updated_at: new Date().toISOString() })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: creditResult.error || "Failed to activate miner lease." });
+      }
+
+      const minerState = getMinerLeaseState(creditResult.state, now.getTime());
+      payload = {
+        miners: minerState.leases,
+        minerLeaseId: minerState.leaseId,
+        minerCarryCrystals: minerState.carryCrystals,
         savedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
       };
     } else {
@@ -5488,6 +5784,38 @@ export const handler = async (req: Request) => {
         premiumDaysAdded: plan.days,
         savedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
       };
+    } else if (orderKind === "miner_buy") {
+      const miner = getMinerDefinition(orderRow.product_ref);
+      if (!miner) {
+        await supabase
+          .from("telegram_ton_orders")
+          .update({ status: "pending", updated_at: new Date().toISOString(), claim_error: "Invalid miner." })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: "Invalid miner in TON order." });
+      }
+
+      const creditResult = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
+        addMinerLeaseToState(state, miner.id as MinerId, now.getTime());
+      });
+      if (!creditResult.ok || !creditResult.state) {
+        await supabase
+          .from("telegram_ton_orders")
+          .update({ status: "pending", updated_at: new Date().toISOString(), claim_error: creditResult.error || "Miner credit failed." })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: creditResult.error || "Failed to activate miner lease." });
+      }
+
+      const minerState = getMinerLeaseState(creditResult.state, now.getTime());
+      payload = {
+        miners: minerState.leases,
+        minerLeaseId: minerState.leaseId,
+        minerCarryCrystals: minerState.carryCrystals,
+        savedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
+      };
     } else {
       const spins = asInt(orderRow.product_ref, 0);
       if (!(FORTUNE_SPIN_PACKS_SOL as readonly number[]).includes(spins)) {
@@ -5583,7 +5911,9 @@ export const handler = async (req: Request) => {
       tgTonOrder: normalizedOrder,
       ...payload,
     });
-  }  if (action === "fortune_buy") {
+  }
+
+  if (action === "fortune_buy") {
     const spins = asInt(body.spins, 0);
     if (!(FORTUNE_SPIN_PACKS_SOL as readonly number[]).includes(spins)) {
       return json({ ok: false, error: "Invalid fortune spin pack." });
@@ -6071,6 +6401,71 @@ export const handler = async (req: Request) => {
     }
 
     return json({ ok: false, error: "Profile changed concurrently, retry starter pack activation." });
+  }
+
+  if (action === "miner_buy") {
+    const miner = getMinerDefinition(body.minerId);
+    if (!miner) {
+      return json({ ok: false, error: "Invalid miner." });
+    }
+
+    const txSignature = String(body.txSignature ?? "").trim().slice(0, 120);
+    if (!isTxSignatureLike(txSignature)) {
+      return json({ ok: false, error: "Invalid payment transaction signature." });
+    }
+
+    const alreadyProcessed = await wasMinerTxAlreadyProcessed(supabase, auth.wallet, txSignature);
+    if (alreadyProcessed) {
+      const { data: profileRow } = await supabase
+        .from("profiles")
+        .select("state, updated_at")
+        .eq("wallet", auth.wallet)
+        .maybeSingle();
+      const state = normalizeState(profileRow?.state ?? null);
+      if (!state) return json({ ok: false, error: "Profile not found." });
+      const minerState = getMinerLeaseState(state, now.getTime());
+      return json({
+        ok: true,
+        minerAlreadyProcessed: true,
+        miners: minerState.leases,
+        minerLeaseId: minerState.leaseId,
+        minerCarryCrystals: minerState.carryCrystals,
+        savedAt: String(profileRow?.updated_at ?? ""),
+      });
+    }
+
+    const txCheck = await verifyMinerPaymentTx(auth.wallet, txSignature, miner.lamports, now);
+    if (!txCheck.ok) {
+      return json({ ok: false, error: txCheck.error });
+    }
+
+    const creditResult = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
+      addMinerLeaseToState(state, miner.id as MinerId, now.getTime());
+    });
+    if (!creditResult.ok || !creditResult.state) {
+      return json({ ok: false, error: creditResult.error || "Failed to activate miner lease, retry." });
+    }
+
+    const minerState = getMinerLeaseState(creditResult.state, now.getTime());
+    await auditEvent(supabase, auth.wallet, "miner_buy", {
+      minerId: miner.id,
+      crystalsPerDay: miner.crystalsPerDay,
+      leaseDays: MINER_LEASE_DURATION_DAYS,
+      txSignature,
+      lamports: miner.lamports,
+      txBlockTime: txCheck.blockTime,
+      txSlot: txCheck.slot,
+      leases: minerState.leases.length,
+    });
+
+    return json({
+      ok: true,
+      minerAlreadyProcessed: false,
+      miners: minerState.leases,
+      minerLeaseId: minerState.leaseId,
+      minerCarryCrystals: minerState.carryCrystals,
+      savedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
+    });
   }
 
   if (action === "premium_buy") {
@@ -7786,6 +8181,4 @@ export const handler = async (req: Request) => {
   }
 
   return json({ ok: false, error: "Unknown action." });
-};
-
-if (import.meta.main) serve(handler);
+});

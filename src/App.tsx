@@ -78,6 +78,10 @@ import villageCrystalLabLv3Png from './assets/village/crystal-lab-lv3.png'
 import villageStorageLv1Png from './assets/village/storage-lv1.png'
 import villageStorageLv2Png from './assets/village/storage-lv2.png'
 import villageStorageLv3Png from './assets/village/storage-lv3.png'
+import minersLogoPng from './assets/miners/miners-logo.png'
+import shibaMinerPng from './assets/miners/shiba-miner.png'
+import pepeMinerPng from './assets/miners/pepe-miner.png'
+import trumpMinerPng from './assets/miners/trump-miner.png'
 import landingBanner1Png from './assets/landing-banners/banner-1.png'
 import landingBanner2Png from './assets/landing-banners/banner-2.png'
 import landingBanner3Png from './assets/landing-banners/banner-3.png'
@@ -142,6 +146,10 @@ const villageCrystalLabLv3Image = villageCrystalLabLv3Png
 const villageStorageLv1Image = villageStorageLv1Png
 const villageStorageLv2Image = villageStorageLv2Png
 const villageStorageLv3Image = villageStorageLv3Png
+const minersLogoImage = minersLogoPng
+const shibaMinerImage = shibaMinerPng
+const pepeMinerImage = pepeMinerPng
+const trumpMinerImage = trumpMinerPng
 const LANDING_BANNERS = [
   { src: landingBanner1Png, alt: 'Doge Quest banner 1' },
   { src: landingBanner2Png, alt: 'Doge Quest banner 2' },
@@ -398,6 +406,16 @@ type VillageState = {
   buildings: Record<VillageBuildingId, VillageBuildingState>
 }
 
+type MinerId = 'shiba' | 'pepe' | 'trump'
+
+type MinerLease = {
+  id: number
+  minerId: MinerId
+  startedAt: number
+  endsAt: number
+  claimedAt: number
+}
+
 type PersistedPlayerState = {
   level: number
   xp: number
@@ -435,6 +453,9 @@ type PersistedState = {
   bossMarkCycleStart: string
   crystalFlaskRuns: number
   village?: VillageState
+  miners?: MinerLease[]
+  minerLeaseId?: number
+  minerCarryCrystals?: number
   stake: StakeEntry[] | { active: boolean; amount: number; endsAt: number }
   stakeId: number
 }
@@ -563,7 +584,7 @@ type DungeonSecureResponse = {
 
 type TelegramStarsOrder = {
   id: string
-  kind: 'buy_gold' | 'starter_pack_buy' | 'premium_buy' | 'fortune_buy'
+  kind: 'buy_gold' | 'starter_pack_buy' | 'premium_buy' | 'fortune_buy' | 'miner_buy'
   productRef: string
   starsAmount: number
   status: 'pending' | 'paid' | 'claiming' | 'claimed' | 'expired' | 'canceled' | 'failed'
@@ -581,7 +602,7 @@ type TelegramTonTxMessage = {
 
 type TelegramTonOrder = {
   id: string
-  kind: 'buy_gold' | 'starter_pack_buy' | 'premium_buy' | 'fortune_buy'
+  kind: 'buy_gold' | 'starter_pack_buy' | 'premium_buy' | 'fortune_buy' | 'miner_buy'
   productRef: string
   rail: 'ton' | 'usdt'
   asset: 'TON' | 'USDT'
@@ -618,6 +639,10 @@ type GameSecureResponse = {
   buyGoldAlreadyProcessed?: boolean
   starterPackAlreadyProcessed?: boolean
   starterPackPurchased?: boolean
+  miners?: MinerLease[]
+  minerLeaseId?: number
+  minerCarryCrystals?: number
+  minerClaimedCrystals?: number
   profile?: {
     state?: PersistedState
     updated_at?: string
@@ -926,6 +951,9 @@ type GameState = {
   bossMarkCycleStart: string
   crystalFlaskRuns: number
   village: VillageState
+  miners: MinerLease[]
+  minerLeaseId: number
+  minerCarryCrystals: number
   stake: StakeEntry[]
   stakeId: number
 }
@@ -966,6 +994,8 @@ type HudState = {
   bossMarkCycleStart: string
   crystalFlaskRuns: number
   village: VillageState
+  miners: MinerLease[]
+  minerCarryCrystals: number
   stake: StakeEntry[]
 }
 
@@ -1290,6 +1320,43 @@ const STARTER_PACK_PRICE_USDT = 11
 const STARTER_PACK_PRICE = 0.13
 const STARTER_PACK_GOLD = 300000
 const STARTER_PACK_WORLD_BOSS_TICKETS = 5
+const MINER_LEASE_DURATION_DAYS = 30
+const MINER_DAY_MS = 24 * 60 * 60 * 1000
+const MINERS = [
+  {
+    id: 'shiba',
+    name: 'Shiba Miner',
+    crystalsPerDay: 200,
+    sol: 0.4,
+    stars: 1500,
+    ton: 25,
+    usdt: 32,
+    image: shibaMinerImage,
+    summary: 'Reliable tunnel scout that keeps a steady crystal stream flowing every day.',
+  },
+  {
+    id: 'pepe',
+    name: 'Pepe Miner',
+    crystalsPerDay: 400,
+    sol: 0.7,
+    stars: 2600,
+    ton: 43,
+    usdt: 56,
+    image: pepeMinerImage,
+    summary: 'Cunning cave specialist built for heavier crystal extraction and steady scaling.',
+  },
+  {
+    id: 'trump',
+    name: 'Trump Miner',
+    crystalsPerDay: 800,
+    sol: 1.2,
+    stars: 4500,
+    ton: 75,
+    usdt: 95,
+    image: trumpMinerImage,
+    summary: 'Elite headline miner that delivers the biggest 30-day crystal haul in the roster.',
+  },
+] as const
 const SHOP_DUNGEON_KEY_COST = 50000
 const SHOP_DUNGEON_KEY_DAILY_LIMIT = 10
 const SHOP_BOSS_MARK_COST = 20000
@@ -1707,6 +1774,66 @@ const getCastleUpgradeRequirement = (village: VillageState, playerLevel: number,
   }
 }
 
+const normalizeLoadedMiners = (value: unknown, nowMs = Date.now()): MinerLease[] => {
+  if (!Array.isArray(value)) return []
+  const usedIds = new Set<number>()
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null
+      const row = entry as Partial<MinerLease>
+      const minerId = typeof row.minerId === 'string' ? row.minerId : ''
+      if (!getMinerDefinition(minerId)) return null
+      const id = Math.max(1, Math.floor(Number(row.id ?? 0)))
+      if (!id || usedIds.has(id)) return null
+      const startedAt = Math.max(0, Math.floor(Number(row.startedAt ?? 0)))
+      const endsAt = Math.max(startedAt, Math.floor(Number(row.endsAt ?? startedAt)))
+      const claimedAt = clamp(Math.floor(Number(row.claimedAt ?? startedAt)), startedAt, endsAt)
+      usedIds.add(id)
+      return {
+        id,
+        minerId: minerId as MinerId,
+        startedAt,
+        endsAt,
+        claimedAt,
+      }
+    })
+    .filter((entry): entry is MinerLease => Boolean(entry))
+    .filter((entry) => entry.endsAt > nowMs || entry.claimedAt < entry.endsAt)
+    .sort((a, b) => a.endsAt - b.endsAt || a.id - b.id)
+}
+
+const getMinerClaimPreview = (miners: MinerLease[], carryCrystals = 0, nowMs = Date.now()) => {
+  const safeCarry = Number.isFinite(carryCrystals) ? Math.max(0, Math.min(carryCrystals, 0.999999)) : 0
+  let exactCrystals = safeCarry
+  let activeCount = 0
+  let totalPerDay = 0
+
+  for (const lease of miners) {
+    const def = getMinerDefinition(lease.minerId)
+    if (!def) continue
+    if (lease.endsAt > nowMs) {
+      activeCount += 1
+      totalPerDay += def.crystalsPerDay
+    }
+    const claimStart = clamp(lease.claimedAt, lease.startedAt, lease.endsAt)
+    const claimEnd = clamp(nowMs, lease.startedAt, lease.endsAt)
+    if (claimEnd <= claimStart) continue
+    exactCrystals += (def.crystalsPerDay * (claimEnd - claimStart)) / MINER_DAY_MS
+  }
+
+  const claimableCrystals = Math.max(0, Math.floor(exactCrystals))
+  return {
+    claimableCrystals,
+    carryCrystals: Math.max(0, exactCrystals - claimableCrystals),
+    exactCrystals,
+    activeCount,
+    totalPerDay,
+  }
+}
+
+const getMinerActiveCount = (miners: MinerLease[], minerId: MinerId, nowMs = Date.now()) =>
+  miners.filter((lease) => lease.minerId === minerId && lease.endsAt > nowMs).length
+
 const MONSTER_HP_BASE_MULTIPLIER = 0.85
 const ITEM_TIER_SCORE_MULTIPLIER = 0.5
 const PERSIST_VERSION = 1
@@ -1775,6 +1902,9 @@ const buildPersistedState = (state: GameState): PersistedState => ({
   bossMarkCycleStart: state.bossMarkCycleStart,
   crystalFlaskRuns: state.crystalFlaskRuns,
   village: state.village,
+  miners: state.miners,
+  minerLeaseId: state.minerLeaseId,
+  minerCarryCrystals: state.minerCarryCrystals,
   stake: state.stake,
   stakeId: state.stakeId,
 })
@@ -1834,6 +1964,11 @@ const applyPersistedState = (state: GameState, saved: PersistedState, _savedUpda
   state.crystalFlaskRuns = Math.max(0, Math.floor(Number(saved.crystalFlaskRuns ?? state.crystalFlaskRuns ?? 0)))
   state.village = normalizeVillageState(saved.village, Date.now())
   applyVillageUpgradeCompletions(state.village, Date.now())
+  state.miners = normalizeLoadedMiners(saved.miners, Date.now())
+  state.minerLeaseId = Math.max(0, Math.floor(Number(saved.minerLeaseId ?? state.minerLeaseId ?? 0)), ...state.miners.map((entry) => entry.id))
+  state.minerCarryCrystals = Number.isFinite(Number(saved.minerCarryCrystals))
+    ? Math.max(0, Math.min(Number(saved.minerCarryCrystals), 0.999999))
+    : 0
   if (saved.stake) {
     if (Array.isArray(saved.stake)) {
       state.stake = saved.stake
@@ -2395,6 +2530,16 @@ const getTelegramStarterPackPriceByRail = (rail: TelegramPaymentRail) => {
   if (rail === 'stars') return STARTER_PACK_PRICE_STARS
   if (rail === 'ton') return STARTER_PACK_PRICE_TON
   return STARTER_PACK_PRICE_USDT
+}
+
+const getMinerDefinition = (minerId: string) => MINERS.find((entry) => entry.id === minerId) ?? null
+
+const getTelegramMinerPriceByRail = (minerId: MinerId, rail: TelegramPaymentRail) => {
+  const miner = getMinerDefinition(minerId)
+  if (!miner) return 0
+  if (rail === 'stars') return miner.stars
+  if (rail === 'ton') return miner.ton
+  return miner.usdt
 }
 
 const getTelegramPremiumPriceByRail = (planId: PremiumPlanId, rail: TelegramPaymentRail) => {
@@ -3061,6 +3206,8 @@ const buildHud = (state: GameState): HudState => {
   bossMarkCycleStart: state.bossMarkCycleStart,
   crystalFlaskRuns: state.crystalFlaskRuns,
   village: state.village,
+  miners: state.miners,
+  minerCarryCrystals: state.minerCarryCrystals,
   stake: state.stake,
   }
 }
@@ -3139,6 +3286,9 @@ const initGameState = (chosenClass: CharacterClass, name: string): GameState => 
     bossMarkCycleStart: '',
     crystalFlaskRuns: 0,
     village: createVillageState(),
+    miners: [],
+    minerLeaseId: 0,
+    minerCarryCrystals: 0,
     stake: [],
     stakeId: 0,
     questStates: QUESTS.reduce((acc, quest) => {
@@ -3713,6 +3863,7 @@ function App() {
     | 'stake'
     | 'buygold'
     | 'starterpack'
+    | 'miners'
     | 'premium'
     | 'referrals'
     | 'fortune'
@@ -3753,6 +3904,9 @@ function App() {
   const [buyGoldLoading, setBuyGoldLoading] = useState<string | null>(null)
   const [starterPackError, setStarterPackError] = useState('')
   const [starterPackLoading, setStarterPackLoading] = useState(false)
+  const [minersError, setMinersError] = useState('')
+  const [minerLoading, setMinerLoading] = useState<MinerId | null>(null)
+  const [minerClaimLoading, setMinerClaimLoading] = useState(false)
   const [dungeonKeyBuyLoading, setDungeonKeyBuyLoading] = useState(false)
   const [worldBossTicketBuyLoading, setWorldBossTicketBuyLoading] = useState(false)
   const [shopDungeonKeyDailyLimit, setShopDungeonKeyDailyLimit] = useState(SHOP_DUNGEON_KEY_DAILY_LIMIT)
@@ -3795,6 +3949,7 @@ function App() {
   const [fortuneWheelSpinning, setFortuneWheelSpinning] = useState(false)
   const [fortuneSpinResult, setFortuneSpinResult] = useState<FortuneReward | null>(null)
   const [fortuneSpinUsed, setFortuneSpinUsed] = useState<'free' | 'paid' | null>(null)
+  const [minersNowMs, setMinersNowMs] = useState(() => Date.now())
   const [questClaimLoadingId, setQuestClaimLoadingId] = useState<string | null>(null)
   const [questPanelTab, setQuestPanelTab] = useState<QuestPanelTab>('achievements')
   const [crystalTasks, setCrystalTasks] = useState<CrystalTaskStatus[]>([])
@@ -3822,7 +3977,7 @@ function App() {
   const secureSessionInitRef = useRef(false)
   const isNewProfileRef = useRef(false)
   const referralProcessedRef = useRef(false)
-  const fortuneAutoOpenRef = useRef(false)
+  const starterPackAutoOpenRef = useRef(false)
   const fortuneSpinTimeoutRef = useRef<number | null>(null)
   const adsgramLoadPromiseRef = useRef<Promise<AdsgramSdk | null> | null>(null)
   const partnerTaskHostRef = useRef<HTMLDivElement | null>(null)
@@ -4564,6 +4719,10 @@ function App() {
           state.starterPackPurchased = result.starterPackPurchased
           applied = true
         }
+        if (Array.isArray(result.miners) || typeof result.minerLeaseId === 'number' || typeof result.minerCarryCrystals === 'number') {
+          applyMinerStateFromResult(state, result)
+          applied = true
+        }
         if (result.consumables) {
           state.consumables = normalizeLoadedConsumables(result.consumables)
           applied = true
@@ -4581,7 +4740,9 @@ function App() {
                 ? 'Premium ' + order.productRef
                 : order.kind === 'starter_pack_buy'
                   ? 'Starter Pack'
-                  : 'Fortune ' + order.productRef
+                  : order.kind === 'miner_buy'
+                    ? 'Miner ' + order.productRef
+                    : 'Fortune ' + order.productRef
           pushLog(state.eventLog, 'Telegram Stars credited: ' + label + '.')
         }
 
@@ -4960,6 +5121,94 @@ function App() {
     }
   }
 
+  const buyMiner = async (minerId: MinerId) => {
+    const state = gameStateRef.current
+    if (!state) return
+    const miner = getMinerDefinition(minerId)
+    if (!miner) {
+      setMinersError('Unknown miner.')
+      return
+    }
+
+    setMinerLoading(minerId)
+    setMinersError('')
+    try {
+      if (usingTelegramAuth) {
+        const claimResult = activeTelegramPaymentRail === 'stars'
+          ? await createAndClaimTelegramStarsOrder(
+            { kind: 'miner_buy', minerId },
+            setMinersError,
+            'Payment confirmed. Activating miner lease...',
+          )
+          : await createAndClaimTelegramTonOrder(
+            { kind: 'miner_buy', minerId },
+            setMinersError,
+            'Payment sent. Verifying on-chain transaction...',
+          )
+        if (!claimResult) return
+
+        applyMinerStateFromResult(state, claimResult)
+        pushLog(state.eventLog, `${miner.name} activated for ${MINER_LEASE_DURATION_DAYS} days.`)
+        syncHud()
+        setMinersError('')
+        return
+      }
+
+      const signature = await submitTreasuryPayment(miner.sol)
+      setMinersError('Payment confirmed. Activating miner lease...')
+      const result = await finalizePaymentCredit('miner_buy', { minerId, txSignature: signature }, 7, 1200)
+      if (!result.ok) {
+        setMinersError(`Payment sent (${signature.slice(0, 8)}...), but miner lease activation failed: ${result.error || 'unknown error'}.`)
+        return
+      }
+      applyMinerStateFromResult(state, result)
+      pushLog(state.eventLog, `${miner.name} activated for ${MINER_LEASE_DURATION_DAYS} days.`)
+      syncHud()
+      setMinersError('')
+    } catch (error) {
+      console.warn('Miner purchase failed', error)
+      const message = error instanceof Error ? error.message : String(error)
+      setMinersError(`Transaction failed: ${message}`)
+    } finally {
+      setMinerLoading(null)
+    }
+  }
+
+  const claimMinerRewards = async () => {
+    const state = gameStateRef.current
+    if (!state) return
+
+    setMinerClaimLoading(true)
+    setMinersError('')
+    try {
+      const result = await callGameSecureAuthed('miners_claim', {}, true)
+      if (!result.ok) {
+        setMinersError(result.error || 'Failed to claim miner rewards.')
+        return
+      }
+
+      if (typeof result.crystals === 'number') {
+        state.crystals = Math.max(0, Math.floor(Number(result.crystals)))
+      }
+      if (typeof result.crystalsEarned === 'number') {
+        state.crystalsEarned = Math.max(0, Math.floor(Number(result.crystalsEarned)))
+      }
+      applyMinerStateFromResult(state, result)
+      const claimed = Math.max(0, Math.floor(Number(result.minerClaimedCrystals ?? 0)))
+      if (claimed > 0) {
+        pushLog(state.eventLog, `Miners delivered ${formatNumber(claimed)} crystals.`)
+      }
+      syncHud()
+      setMinersError('')
+    } catch (error) {
+      console.warn('Miner claim failed', error)
+      const message = error instanceof Error ? error.message : String(error)
+      setMinersError(`Claim failed: ${message}`)
+    } finally {
+      setMinerClaimLoading(false)
+    }
+  }
+
   const buyPremiumPlan = async (planId: PremiumPlanId) => {
     const state = gameStateRef.current
     if (!state) return
@@ -5131,6 +5380,20 @@ function App() {
     }
   }
 
+  function applyMinerStateFromResult(state: GameState, result: GameSecureResponse) {
+    if (Array.isArray(result.miners)) {
+      state.miners = normalizeLoadedMiners(result.miners, Date.now())
+    }
+    state.minerLeaseId = Math.max(
+      0,
+      typeof result.minerLeaseId === 'number' ? Math.floor(result.minerLeaseId) : state.minerLeaseId,
+      ...state.miners.map((entry) => entry.id),
+    )
+    if (typeof result.minerCarryCrystals === 'number') {
+      state.minerCarryCrystals = Math.max(0, Math.min(Number(result.minerCarryCrystals), 0.999999))
+    }
+  }
+
   function parseServerStakeEntries(value: unknown): StakeEntry[] {
     if (!Array.isArray(value)) return []
     return value
@@ -5185,6 +5448,22 @@ function App() {
     }
 
     applyVillageFromServer(state, result)
+    syncHud()
+  }
+
+  const syncMinersStateFromServer = async (interactive = false) => {
+    const state = gameStateRef.current
+    if (!state || !accountIdentity) return
+
+    const result = await callGameSecureAuthed('miners_status', {}, interactive)
+    if (!result.ok) {
+      if (result.error && result.error !== 'Sign-in required for secure actions.') {
+        console.warn('Miner state sync skipped:', result.error)
+      }
+      return
+    }
+
+    applyMinerStateFromResult(state, result)
     syncHud()
   }
 
@@ -5915,7 +6194,7 @@ function App() {
       secureSessionInitRef.current = false
       isNewProfileRef.current = false
       referralProcessedRef.current = false
-      fortuneAutoOpenRef.current = false
+      starterPackAutoOpenRef.current = false
       if (fortuneSpinTimeoutRef.current) {
         window.clearTimeout(fortuneSpinTimeoutRef.current)
         fortuneSpinTimeoutRef.current = null
@@ -6207,7 +6486,7 @@ function App() {
     if (stage !== 'game') return
     if (!usingTelegramAuth) return
     void loadPayoutWalletStatus(false)
-  }, [stage, accountIdentity, usingTelegramAuth])
+  }, [stage, accountIdentity, hud?.starterPackPurchased])
 
   useEffect(() => {
     if (stage !== 'game') return
@@ -6241,11 +6520,12 @@ function App() {
   useEffect(() => {
     if (stage !== 'game') return
     void loadFortuneStatus(false, true)
-    if (usingTelegramAuth) return
-    if (fortuneAutoOpenRef.current) return
-    fortuneAutoOpenRef.current = true
-    setActivePanel('fortune')
-  }, [stage, accountIdentity, usingTelegramAuth])
+    if (!hud) return
+    if (hud.starterPackPurchased) return
+    if (starterPackAutoOpenRef.current) return
+    starterPackAutoOpenRef.current = true
+    setActivePanel('starterpack')
+  }, [stage, accountIdentity, hud?.starterPackPurchased])
 
   useEffect(() => {
     return () => {
@@ -6344,7 +6624,7 @@ function App() {
       return
     }
 
-    if (activePanel === 'shop' || activePanel === 'buygold' || activePanel === 'premium' || activePanel === 'starterpack') {
+    if (activePanel === 'shop' || activePanel === 'buygold' || activePanel === 'premium' || activePanel === 'starterpack' || activePanel === 'miners') {
       setMobileGameTab('shop')
       return
     }
@@ -6419,6 +6699,11 @@ function App() {
       setStarterPackError('')
       setStarterPackLoading(false)
     }
+    if (activePanel !== 'miners') {
+      setMinersError('')
+      setMinerLoading(null)
+      setMinerClaimLoading(false)
+    }
     if (activePanel !== 'shop') {
       setDungeonKeyBuyLoading(false)
       setWorldBossTicketBuyLoading(false)
@@ -6456,7 +6741,7 @@ function App() {
     }
     if (!usingTelegramAuth) {
       setTelegramPaymentRail('stars')
-    } else if (activePanel !== 'buygold' && activePanel !== 'starterpack' && activePanel !== 'premium' && activePanel !== 'fortune') {
+    } else if (activePanel !== 'buygold' && activePanel !== 'starterpack' && activePanel !== 'premium' && activePanel !== 'fortune' && activePanel !== 'miners') {
       setTelegramPaymentRail('stars')
     }
   }, [activePanel, isMobile, usingTelegramAuth])
@@ -6490,13 +6775,21 @@ function App() {
   }, [activePanel, accountIdentity])
 
   useEffect(() => {
+    if (activePanel !== 'miners') return
+    setMinersNowMs(Date.now())
+    void syncMinersStateFromServer(false)
+    const interval = window.setInterval(() => setMinersNowMs(Date.now()), 1000)
+    return () => window.clearInterval(interval)
+  }, [activePanel, accountIdentity])
+
+  useEffect(() => {
     if (activePanel !== 'admin') return
     if (!isAdmin) return
     void loadAdminData()
   }, [activePanel, isAdmin])
 
   useEffect(() => {
-    if (activePanel !== 'buygold' && activePanel !== 'premium' && activePanel !== 'starterpack' && activePanel !== 'fortune') return
+    if (activePanel !== 'buygold' && activePanel !== 'premium' && activePanel !== 'starterpack' && activePanel !== 'fortune' && activePanel !== 'miners') return
     if (!publicKey) {
       setSolBalance(0)
       return
@@ -8127,6 +8420,36 @@ function App() {
   const premiumActive = Boolean(hud && isPremiumActiveAt(hud.premiumEndsAt))
   const premiumDaysLeft = hud ? getPremiumDaysLeft(hud.premiumEndsAt) : 0
   const premiumClaimReady = Boolean(hud && premiumActive && hud.premiumClaimDay !== currentDayKey)
+  const minerPreview = hud ? getMinerClaimPreview(hud.miners, hud.minerCarryCrystals, minersNowMs) : null
+  const activeMinerCount = minerPreview?.activeCount ?? 0
+  const activeMinerLeaseRows = (() => {
+    if (!hud) return [] as Array<{ key: string; title: string; endsAtLabel: string; remainingLabel: string }>
+    const activeLeases = hud.miners
+      .filter((lease) => lease.endsAt > minersNowMs)
+      .slice()
+      .sort((a, b) => a.endsAt - b.endsAt || a.startedAt - b.startedAt || a.id - b.id)
+
+    const grouped = new Map<MinerId, MinerLease[]>()
+    for (const lease of activeLeases) {
+      const rows = grouped.get(lease.minerId) ?? []
+      rows.push(lease)
+      grouped.set(lease.minerId, rows)
+    }
+
+    return activeLeases.map((lease) => {
+      const def = getMinerDefinition(lease.minerId)
+      const sameType = grouped.get(lease.minerId) ?? []
+      const ordinal = sameType.findIndex((entry) => entry.id === lease.id) + 1
+      const title = sameType.length > 1 ? `${def?.name ?? 'Miner'} #${ordinal}` : (def?.name ?? 'Miner')
+      const remainingSec = Math.max(0, Math.floor((lease.endsAt - minersNowMs) / 1000))
+      return {
+        key: `${lease.minerId}-${lease.id}`,
+        title,
+        endsAtLabel: new Date(lease.endsAt).toLocaleString('en-US'),
+        remainingLabel: formatLongTimer(remainingSec),
+      }
+    })
+  })()
   const seasonRemainingSec = seasonInfo ? Math.max(0, Math.floor((new Date(seasonInfo.endAt).getTime() - Date.now()) / 1000)) : 0
   const referralContestNowMs = Date.now()
   const useReferralContestFallback = (() => {
@@ -8865,33 +9188,30 @@ function App() {
             <div className="game-main">
               <div className="canvas-wrap">
                 <div className="canvas-special-menu">
-                  {!hud?.starterPackPurchased && (
-                    <button
-                      type="button"
-                      className="starter-pack-btn starter-pack-float"
-                      onClick={() => setActivePanel('starterpack')}
-                    >
-                      <img className="starter-pack-icon" src={iconStarterPack} alt="" />
-                      <div className="starter-pack-text">
-                        <span>Starter Pack</span>
-                        <strong>One-time offer</strong>
-                      </div>
-                    </button>
-                  )}
                   <button
                     type="button"
-                    className={`starter-pack-btn starter-pack-float premium-float ${!hud?.starterPackPurchased ? 'with-starterpack' : ''}`}
+                    className="starter-pack-btn starter-pack-float"
+                    onClick={() => setActivePanel('miners')}
+                  >
+                    <img className="starter-pack-icon" src={minersLogoImage} alt="" />
+                    <div className="starter-pack-text starter-pack-text-single">
+                      <span>Miners</span>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    className="starter-pack-btn starter-pack-float premium-float with-starterpack"
                     onClick={() => setActivePanel('premium')}
                   >
                     <img className="starter-pack-icon" src={iconPremium} alt="" />
                     <div className="starter-pack-text">
                       <strong>Premium</strong>
-                      <span>{premiumActive ? `${premiumDaysLeft}d left` : 'Subscription'}</span>
+                      <span>{premiumActive ? `${premiumDaysLeft}d left` : "Subscription"}</span>
                     </div>
                   </button>
                   <button
                     type="button"
-                    className={`starter-pack-btn starter-pack-float referral-float ${!hud?.starterPackPurchased ? 'with-starterpack' : ''}`}
+                    className="starter-pack-btn starter-pack-float referral-float with-starterpack"
                     onClick={() => setActivePanel('referrals')}
                   >
                     <img className="starter-pack-icon" src={iconReferrals} alt="" />
@@ -8902,7 +9222,7 @@ function App() {
                   {isMobile ? (
                     <button
                       type="button"
-                      className={`starter-pack-btn starter-pack-float village-float ${!hud?.starterPackPurchased ? 'with-starterpack' : ''}`}
+                      className="starter-pack-btn starter-pack-float village-float with-starterpack"
                       onClick={() => setActivePanel('fortune')}
                     >
                       <img className="starter-pack-icon" src={iconFortuneWheel} alt="" />
@@ -8913,7 +9233,7 @@ function App() {
                   ) : VILLAGE_FEATURE_ENABLED ? (
                     <button
                       type="button"
-                      className={`starter-pack-btn starter-pack-float village-float ${!hud?.starterPackPurchased ? 'with-starterpack' : ''}`}
+                      className="starter-pack-btn starter-pack-float village-float with-starterpack"
                       onClick={() => setActivePanel('village')}
                     >
                       <img className="starter-pack-icon" src={villageCastleLv1Image} alt="" />
@@ -9576,6 +9896,127 @@ function App() {
                     : 'Gold is added right after TON transaction confirmation.'
                   : 'Gold is added instantly after the SOL transaction confirms.'}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activePanel === 'miners' && hud && (
+        <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Miners</h3>
+              <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
+                Close
+              </button>
+            </div>
+            <div className="withdraw-body starterpack-body miners-body">
+              <div className="starterpack-hero miners-hero">
+                <img className="starterpack-image miners-hero-image" src={minersLogoImage} alt="" />
+                <div className="starterpack-meta">
+                  <div className="starterpack-title">Crystal Miners</div>
+                  <div className="withdraw-note">Lease miners for 30 days and claim their crystal output whenever you want. You can lease multiple miners to increase your earnings.</div>
+                  <div className="miners-hero-stats">
+                    <div className="miners-hero-chip">{activeMinerCount} active</div>
+                    <div className="miners-hero-chip">{formatNumber(minerPreview?.totalPerDay ?? 0)} crystals/day</div>
+                  </div>
+                </div>
+              </div>
+              {!usingTelegramAuth && (
+                <div className="withdraw-info">
+                  <span className="withdraw-info-label">
+                    <img className="icon-img small" src={iconSolana} alt="" />
+                    Wallet balance
+                  </span>
+                  <strong>{solBalanceLoading ? 'Loading...' : `${solBalance.toFixed(4)} SOL`}</strong>
+                </div>
+              )}
+              {usingTelegramAuth && renderTelegramPaymentRailControls(setMinersError)}
+              <div className="buygold-grid miners-grid">
+                {MINERS.map((miner) => {
+                  const activeCount = getMinerActiveCount(hud.miners, miner.id, minersNowMs)
+                  return (
+                    <div key={miner.id} className="shop-card buygold-card miner-card">
+                      <div className="miner-card-art">
+                        <img className="miner-card-image" src={miner.image} alt={miner.name} />
+                      </div>
+                      <div className="shop-title">{miner.name}</div>
+                      <div className="shop-desc">{miner.summary}</div>
+                      <div className="miner-card-stats">
+                        <div className="miner-card-stat"><img className="icon-img small" src={iconCrystals} alt="" /> {formatNumber(miner.crystalsPerDay)} / day</div>
+                        <div className="miner-card-stat">Lease: {MINER_LEASE_DURATION_DAYS} days</div>
+                        <div className="miner-card-stat">Active leases: {activeCount}</div>
+                      </div>
+                      <div className="shop-meta">
+                        {!usingTelegramAuth && <img className="icon-img small" src={iconSolana} alt="" />}
+                        {usingTelegramAuth && activeTelegramPaymentRail === 'stars' && <span className="tg-stars-inline">⭐</span>}
+                        {usingTelegramAuth && activeTelegramPaymentRail === 'ton' && <img className="icon-img small tg-currency-icon" src={iconTon} alt="TON" />}
+                        {usingTelegramAuth && activeTelegramPaymentRail === 'usdt' && <img className="icon-img small tg-currency-icon" src={iconUsdt} alt="USDT" />}
+                        {usingTelegramAuth
+                          ? `Price: ${formatPaymentAmount(getTelegramMinerPriceByRail(miner.id, activeTelegramPaymentRail))} ${getTelegramRailCurrencyLabel(activeTelegramPaymentRail)}`
+                          : `Price: ${miner.sol} SOL`}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={minerLoading === miner.id}
+                        onClick={() => {
+                          void buyMiner(miner.id)
+                        }}>
+                        {minerLoading === miner.id
+                          ? 'Processing...'
+                          : usingTelegramAuth
+                            ? `${activeTelegramPaymentRail === 'stars' ? '⭐' : getTelegramRailCurrencyLabel(activeTelegramPaymentRail)} Lease • ${formatPaymentAmount(getTelegramMinerPriceByRail(miner.id, activeTelegramPaymentRail))} ${getTelegramRailCurrencyLabel(activeTelegramPaymentRail)}`
+                            : 'Lease with SOL'}
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="miners-claim-box">
+                <div className="miners-claim-copy">
+                  <div className="miners-claim-label">Claimable now</div>
+                  <div className="miners-claim-value">
+                    <img className="icon-img" src={iconCrystals} alt="" />
+                    <strong>{formatNumber(minerPreview?.claimableCrystals ?? 0)}</strong>
+                    <span>Crystals</span>
+                  </div>
+                  <div className="withdraw-note">Fractional crystal progress is saved until the next claim.</div>
+                </div>
+                <button
+                  type="button"
+                  className="withdraw-submit miners-claim-submit"
+                  disabled={minerClaimLoading || !minerPreview || minerPreview.claimableCrystals <= 0}
+                  onClick={() => {
+                    void claimMinerRewards()
+                  }}>
+                  {minerClaimLoading ? 'Claiming...' : 'Claim Crystals'}
+                </button>
+              </div>
+              <div className="miners-active-leases">
+                <div className="miners-active-header">
+                  <div className="starterpack-title">Active leases</div>
+                  <div className="miners-active-count">{activeMinerLeaseRows.length} running</div>
+                </div>
+                {activeMinerLeaseRows.length > 0 ? (
+                  <div className="miners-active-list">
+                    {activeMinerLeaseRows.map((lease) => (
+                      <div key={lease.key} className="miners-active-row">
+                        <div className="miners-active-copy">
+                          <strong>{lease.title}</strong>
+                          <span>Ends: {lease.endsAtLabel}</span>
+                        </div>
+                        <div className="miners-active-timer">
+                          <small>Time left</small>
+                          <strong>{lease.remainingLabel}</strong>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="miners-empty-state">No active miner leases yet. Buy a miner to start passive crystal income.</div>
+                )}
+              </div>
+              {minersError && <div className="withdraw-error">{minersError}</div>}
             </div>
           </div>
         </div>
@@ -11421,6 +11862,7 @@ function App() {
   )
 }
 export default App
+
 
 
 

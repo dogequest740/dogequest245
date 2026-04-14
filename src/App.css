@@ -1466,6 +1466,324 @@
   color: #f5e6c8;
 }
 
+
+.miners-body {
+  gap: 16px;
+}
+
+.miners-hero {
+  background:
+    radial-gradient(circle at top left, rgba(98, 238, 255, 0.18), transparent 42%),
+    linear-gradient(135deg, rgba(16, 44, 54, 0.96), rgba(9, 16, 24, 0.96));
+  border-color: rgba(112, 233, 255, 0.38);
+  box-shadow:
+    inset 0 0 18px rgba(102, 240, 255, 0.12),
+    0 14px 24px rgba(5, 12, 18, 0.32);
+}
+
+.miners-hero-image {
+  width: 88px;
+  height: 88px;
+  image-rendering: auto;
+  filter: drop-shadow(0 0 16px rgba(102, 240, 255, 0.24));
+}
+
+.miners-hero-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.miners-hero-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(120, 235, 255, 0.26);
+  background: rgba(8, 20, 28, 0.68);
+  color: #d8fbff;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.miners-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.starter-pack-text-single {
+  align-items: center;
+}
+
+.starter-pack-text-single span {
+  font-size: 15px;
+  color: #ffd890;
+  letter-spacing: 0.9px;
+}
+
+.miner-card {
+  gap: 10px;
+  align-content: start;
+}
+
+.miner-card-art {
+  width: 100%;
+  height: 176px;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at top center, rgba(113, 236, 255, 0.16), transparent 48%),
+    linear-gradient(180deg, rgba(7, 14, 18, 0.92), rgba(14, 24, 32, 0.72));
+  border: 1px solid rgba(116, 233, 255, 0.16);
+  overflow: hidden;
+}
+
+.miner-card-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center 58%;
+  image-rendering: auto;
+  transform: scale(1.24);
+  transform-origin: center 58%;
+  filter: drop-shadow(0 12px 18px rgba(0, 0, 0, 0.28));
+}
+
+.miner-card-stats {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+}
+
+.miner-card-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(8, 14, 20, 0.54);
+  border: 1px solid rgba(214, 178, 95, 0.18);
+  color: #e7f8ff;
+  font-size: 12px;
+}
+
+.miners-claim-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(111, 232, 255, 0.28);
+  background:
+    radial-gradient(circle at top left, rgba(89, 227, 255, 0.14), transparent 38%),
+    linear-gradient(160deg, rgba(7, 16, 24, 0.94), rgba(11, 20, 30, 0.9));
+}
+
+.miners-claim-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.miners-claim-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: rgba(213, 248, 255, 0.72);
+}
+
+.miners-claim-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
+  color: #9ff3ff;
+}
+
+.miners-claim-value strong {
+  font-size: 24px;
+  color: #dfffff;
+}
+
+.miners-claim-value span {
+  font-size: 12px;
+  color: rgba(223, 255, 255, 0.8);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.miners-claim-submit {
+  min-width: 172px;
+}
+
+.miners-active-leases {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(111, 232, 255, 0.18);
+  background:
+    radial-gradient(circle at top left, rgba(89, 227, 255, 0.08), transparent 38%),
+    linear-gradient(160deg, rgba(8, 16, 24, 0.94), rgba(11, 18, 28, 0.92));
+}
+
+.miners-active-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.miners-active-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(120, 235, 255, 0.22);
+  background: rgba(8, 20, 28, 0.6);
+  color: #d8fbff;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.miners-active-list {
+  display: grid;
+  gap: 10px;
+}
+
+.miners-active-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(214, 178, 95, 0.16);
+  background: rgba(8, 14, 20, 0.56);
+}
+
+.miners-active-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.miners-active-copy strong {
+  color: #f6d488;
+  font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
+  font-size: 14px;
+}
+
+.miners-active-copy span {
+  color: rgba(231, 240, 245, 0.72);
+  font-size: 11px;
+}
+
+.miners-active-timer {
+  display: grid;
+  gap: 3px;
+  justify-items: end;
+  text-align: right;
+}
+
+.miners-active-timer small {
+  color: rgba(160, 244, 255, 0.7);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.45px;
+}
+
+.miners-active-timer strong {
+  color: #dfffff;
+  font-family: 'Cinzel', 'Manrope', system-ui, sans-serif;
+  font-size: 16px;
+}
+
+.miners-empty-state {
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px dashed rgba(214, 178, 95, 0.18);
+  background: rgba(8, 14, 20, 0.4);
+  color: rgba(231, 240, 245, 0.74);
+  font-size: 12px;
+  text-align: center;
+}
+
+.app.mobile .miners-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.app.mobile .miner-card {
+  padding: 10px 8px;
+  gap: 7px;
+}
+
+.app.mobile .miner-card-art {
+  height: 124px;
+}
+
+.app.mobile .miner-card .shop-title {
+  font-size: 12px;
+  line-height: 1.12;
+}
+
+.app.mobile .miner-card .shop-desc {
+  min-height: 52px;
+  font-size: 10px;
+  line-height: 1.24;
+}
+
+.app.mobile .miner-card-stat {
+  min-height: 28px;
+  padding: 5px 8px;
+  font-size: 10px;
+}
+
+.app.mobile .miner-card .shop-meta {
+  min-height: 28px;
+  font-size: 10px;
+  line-height: 1.2;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.app.mobile .miner-card button {
+  min-height: 44px;
+  padding: 8px 6px;
+  font-size: 11px;
+  line-height: 1.15;
+  width: 100%;
+}
+
+.app.mobile .miners-claim-box {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.app.mobile .miners-active-header,
+.app.mobile .miners-active-row {
+  grid-template-columns: 1fr;
+  display: grid;
+}
+
+.app.mobile .miners-active-timer {
+  justify-items: start;
+  text-align: left;
+}
+
+.app.mobile .miners-claim-submit {
+  width: 100%;
+  min-width: 0;
+}
+
 .resource-action:hover {
   box-shadow: 0 0 12px rgba(214, 178, 95, 0.35);
 }
