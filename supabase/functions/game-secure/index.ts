@@ -4776,10 +4776,6 @@ serve(async (req) => {
     let claimedCrystals = 0;
     const creditResult = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
       claimedCrystals = claimMinerRewardsOnState(state, now.getTime());
-      if (claimedCrystals > 0) {
-        state.crystals = Math.max(0, asInt(state.crystals, 0)) + claimedCrystals;
-        state.crystalsEarned = Math.max(0, asInt(state.crystalsEarned, 0)) + claimedCrystals;
-      }
     });
 
     if (!creditResult.ok || !creditResult.state) {

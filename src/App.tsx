@@ -8446,7 +8446,7 @@ function App() {
         key: `${lease.minerId}-${lease.id}`,
         title,
         endsAtLabel: new Date(lease.endsAt).toLocaleString('en-US'),
-        remainingLabel: formatLongTimer(remainingSec),
+        remainingLabel: formatSeasonCountdown(remainingSec),
       }
     })
   })()
