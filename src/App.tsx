@@ -158,9 +158,7 @@ const LANDING_BANNERS = [
   { src: landingBanner5Png, alt: 'Doge Quest banner 5' },
 ] as const
 const EDGE_BASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || ''
-const EDGE_FUNCTIONS_BASE_URL =
-  (import.meta.env.VITE_EDGE_FUNCTIONS_BASE_URL as string | undefined)?.trim().replace(/\/+$/, '') ||
-  (EDGE_BASE_URL ? `${EDGE_BASE_URL.replace(/\/+$/, '')}/functions/v1` : '')
+const EDGE_FUNCTIONS_BASE_URL = EDGE_BASE_URL ? `${EDGE_BASE_URL.replace(/\/+$/, '')}/functions/v1` : ''
 const EDGE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() || ''
 const TELEGRAM_TON_TX_VALID_SECONDS = 900
 const TELEGRAM_BOT_USERNAME = String(import.meta.env.VITE_TELEGRAM_BOT_USERNAME ?? 'dogemmorpgbot').trim().replace(/^@+/, '')
