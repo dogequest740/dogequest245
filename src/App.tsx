@@ -177,9 +177,11 @@ const REFERRAL_CONTEST_FALLBACK: ReferralContestInfo = {
   basePoints: 5,
   premiumPoints: 100,
   prizes: {
-    first: 3000,
-    second: 2000,
-    third: 1000,
+    first: 5000,
+    second: 3000,
+    third: 2000,
+    fourth: 1000,
+    fifth: 500,
   },
 }
 
@@ -750,6 +752,8 @@ type ReferralContestInfo = {
     first: number
     second: number
     third: number
+    fourth: number
+    fifth: number
   }
 }
 
@@ -1274,7 +1278,7 @@ const DUNGEON_BASE_REQUIREMENTS = [
 ]
 const DUNGEON_REQUIREMENTS = DUNGEON_BASE_REQUIREMENTS.map((value) => Math.round(value * 2.5))
 
-const DUNGEON_CRYSTAL_REWARD_MULTIPLIER = 3
+const DUNGEON_CRYSTAL_REWARD_MULTIPLIER = 3.9
 
 
 const DUNGEONS = DUNGEON_REQUIREMENTS.map((tierScore, index) => ({
@@ -1285,7 +1289,7 @@ const DUNGEONS = DUNGEON_REQUIREMENTS.map((tierScore, index) => ({
 }))
 
 const WORLD_BOSS_DURATION = 12 * 60 * 60
-const WORLD_BOSS_REWARD = 1000
+const WORLD_BOSS_REWARD = 2000
 const STAKE_BONUS = 0.05
 const STAKE_MIN = 50
 const STAKE_LOCK_HOURS = 24
@@ -1357,11 +1361,11 @@ const MINERS = [
     summary: 'Elite headline miner that delivers the biggest 30-day crystal haul in the roster.',
   },
 ] as const
-const SHOP_DUNGEON_KEY_COST = 50000
+const SHOP_DUNGEON_KEY_COST = 25000
 const SHOP_DUNGEON_KEY_DAILY_LIMIT = 10
 const SHOP_BOSS_MARK_COST = 20000
 const SHOP_CRYSTAL_FLASK_COST = 7500
-const WORLD_BOSS_TICKET_COST = 18000
+const WORLD_BOSS_TICKET_COST = 25000
 const SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT = 2
 const PREMIUM_PLANS = [
   { id: 'premium-30', days: 30, sol: 0.15 },
@@ -5501,6 +5505,8 @@ function App() {
           first: Math.max(0, Math.floor(Number(contest.prizes?.first ?? 0))),
           second: Math.max(0, Math.floor(Number(contest.prizes?.second ?? 0))),
           third: Math.max(0, Math.floor(Number(contest.prizes?.third ?? 0))),
+          fourth: Math.max(0, Math.floor(Number(contest.prizes?.fourth ?? 0))),
+          fifth: Math.max(0, Math.floor(Number(contest.prizes?.fifth ?? 0))),
         },
       })
     } else {
@@ -10425,6 +10431,20 @@ function App() {
                                 <div className="referral-contest-prize-value">
                                   <img className="icon-img tiny" src={iconCrystals} alt="" />
                                   <strong>{formatNumber(referralContestDisplayInfo.prizes.third)}</strong><span>Crystals</span>
+                                </div>
+                              </div>
+                              <div className="referral-contest-prize-item">
+                                <span>4th</span>
+                                <div className="referral-contest-prize-value">
+                                  <img className="icon-img tiny" src={iconCrystals} alt="" />
+                                  <strong>{formatNumber(referralContestDisplayInfo.prizes.fourth)}</strong><span>Crystals</span>
+                                </div>
+                              </div>
+                              <div className="referral-contest-prize-item">
+                                <span>5th</span>
+                                <div className="referral-contest-prize-value">
+                                  <img className="icon-img tiny" src={iconCrystals} alt="" />
+                                  <strong>{formatNumber(referralContestDisplayInfo.prizes.fifth)}</strong><span>Crystals</span>
                                 </div>
                               </div>
                             </div>
