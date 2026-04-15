@@ -58,14 +58,14 @@ const PREMIUM_DAILY_SMALL_POTIONS = 5;
 const PREMIUM_DAILY_BIG_POTIONS = 3;
 const SOL_LAMPORTS = 1_000_000_000;
 const STARTER_PACK_GOLD = 300000;
-const STARTER_PACK_PRICE_LAMPORTS = Math.round(0.13 * SOL_LAMPORTS);
+const STARTER_PACK_PRICE_LAMPORTS = Math.round(0.09 * SOL_LAMPORTS);
 const MINER_LEASE_DURATION_DAYS = 30;
 const MINER_LEASE_DURATION_MS = MINER_LEASE_DURATION_DAYS * 24 * 60 * 60 * 1000;
 const MINER_DAY_MS = 24 * 60 * 60 * 1000;
 const MINERS = [
-  { id: "shiba", title: "Shiba Miner", crystalsPerDay: 200, lamports: Math.round(0.4 * SOL_LAMPORTS), starsAmount: 1500, tonAmount: 25, usdtAmount: 32 },
-  { id: "pepe", title: "Pepe Miner", crystalsPerDay: 400, lamports: Math.round(0.7 * SOL_LAMPORTS), starsAmount: 2600, tonAmount: 43, usdtAmount: 56 },
-  { id: "trump", title: "Trump Miner", crystalsPerDay: 800, lamports: Math.round(1.2 * SOL_LAMPORTS), starsAmount: 4500, tonAmount: 75, usdtAmount: 95 },
+  { id: "shiba", title: "Shiba Miner", crystalsPerDay: 200, lamports: Math.round(0.25 * SOL_LAMPORTS), starsAmount: 1500, tonAmount: 15, usdtAmount: 20.5 },
+  { id: "pepe", title: "Pepe Miner", crystalsPerDay: 400, lamports: Math.round(0.43 * SOL_LAMPORTS), starsAmount: 2600, tonAmount: 25.5, usdtAmount: 35.1 },
+  { id: "trump", title: "Trump Miner", crystalsPerDay: 800, lamports: Math.round(0.75 * SOL_LAMPORTS), starsAmount: 4500, tonAmount: 44, usdtAmount: 61 },
 ] as const;
 const STARTER_PACK_ITEMS: Array<{ type: ConsumableType; qty: number }> = [
   { type: "energy-small", qty: 20 },
@@ -82,21 +82,21 @@ const PROFILE_UPDATE_RETRY_ATTEMPTS = 10;
 const PROFILE_STALE_WRITE_TOLERANCE_MS = 1000;
 const BLOCKED_ERROR_MESSAGE = "You have been banned for cheating.";
 const GOLD_PACKS_SOL = [
-  { id: "gold-50k", gold: 50000, lamports: Math.round(0.04 * SOL_LAMPORTS) },
-  { id: "gold-100k", gold: 100000, lamports: Math.round(0.07 * SOL_LAMPORTS) },
-  { id: "gold-500k", gold: 500000, lamports: Math.round(0.28 * SOL_LAMPORTS) },
-  { id: "gold-1200k", gold: 1200000, lamports: Math.round(0.5 * SOL_LAMPORTS) },
+  { id: "gold-50k", gold: 50000, lamports: Math.round(0.025 * SOL_LAMPORTS) },
+  { id: "gold-100k", gold: 100000, lamports: Math.round(0.045 * SOL_LAMPORTS) },
+  { id: "gold-500k", gold: 500000, lamports: Math.round(0.18 * SOL_LAMPORTS) },
+  { id: "gold-1200k", gold: 1200000, lamports: Math.round(0.28 * SOL_LAMPORTS) },
 ] as const;
 const FORTUNE_SPIN_PACKS_SOL = [1, 10] as const;
 const FORTUNE_SPIN_PRICES_LAMPORTS: Record<(typeof FORTUNE_SPIN_PACKS_SOL)[number], number> = {
-  1: Math.round(0.005 * SOL_LAMPORTS),
-  10: Math.round(0.04 * SOL_LAMPORTS),
+  1: Math.round(0.0035 * SOL_LAMPORTS),
+  10: Math.round(0.025 * SOL_LAMPORTS),
 };
 const MIN_SEASON_SNAPSHOT_CRYSTALS = 1000;
 const ENERGY_REGEN_SECONDS = 420;
 const PREMIUM_PLANS = [
-  { id: "premium-30", days: 30, lamports: Math.round(0.2 * SOL_LAMPORTS) },
-  { id: "premium-90", days: 90, lamports: Math.round(0.48 * SOL_LAMPORTS) },
+  { id: "premium-30", days: 30, lamports: Math.round(0.15 * SOL_LAMPORTS) },
+  { id: "premium-90", days: 90, lamports: Math.round(0.3 * SOL_LAMPORTS) },
 ] as const;
 const TELEGRAM_STARS_STARTER_PACK = 500;
 const TELEGRAM_STARS_GOLD_PACKS: Record<(typeof GOLD_PACKS_SOL)[number]["id"], number> = {
@@ -130,45 +130,45 @@ const TELEGRAM_TON_USDT_GAS_NANOTON = 60_000_000n;
 const TELEGRAM_TON_USDT_FORWARD_NANOTON = 20_000_000n;
 const TELEGRAM_TON_TRANSFER_LOOKUP_WINDOW_SECONDS = 3 * 60 * 60;
 const TELEGRAM_TON_TX_VALID_SECONDS = 15 * 60;
-const TELEGRAM_TON_STARTER_PACK = 8.5;
-const TELEGRAM_USDT_STARTER_PACK = 11;
+const TELEGRAM_TON_STARTER_PACK = 5;
+const TELEGRAM_USDT_STARTER_PACK = 6.75;
 const TELEGRAM_TON_GOLD_PACKS: Record<(typeof GOLD_PACKS_SOL)[number]["id"], number> = {
-  "gold-50k": 2.6,
-  "gold-100k": 4.5,
-  "gold-500k": 18,
-  "gold-1200k": 32,
+  "gold-50k": 1.37,
+  "gold-100k": 2.55,
+  "gold-500k": 10.3,
+  "gold-1200k": 16.2,
 };
 const TELEGRAM_USDT_GOLD_PACKS: Record<(typeof GOLD_PACKS_SOL)[number]["id"], number> = {
-  "gold-50k": 3.4,
-  "gold-100k": 5.8,
-  "gold-500k": 23,
-  "gold-1200k": 41,
+  "gold-50k": 1.89,
+  "gold-100k": 3.51,
+  "gold-500k": 14.1,
+  "gold-1200k": 22,
 };
 const TELEGRAM_TON_MINERS: Record<MinerId, number> = {
-  shiba: 25,
-  pepe: 43,
-  trump: 75,
+  shiba: 15,
+  pepe: 25.5,
+  trump: 44,
 };
 const TELEGRAM_USDT_MINERS: Record<MinerId, number> = {
-  shiba: 32,
-  pepe: 56,
-  trump: 95,
+  shiba: 20.5,
+  pepe: 35.1,
+  trump: 61,
 };
 const TELEGRAM_TON_PREMIUM_PLANS: Record<(typeof PREMIUM_PLANS)[number]["id"], number> = {
-  "premium-30": 13,
-  "premium-90": 31,
+  "premium-30": 7.35,
+  "premium-90": 16.8,
 };
 const TELEGRAM_USDT_PREMIUM_PLANS: Record<(typeof PREMIUM_PLANS)[number]["id"], number> = {
-  "premium-30": 16,
-  "premium-90": 40,
+  "premium-30": 10.1,
+  "premium-90": 23,
 };
 const TELEGRAM_TON_FORTUNE_PACKS: Record<(typeof FORTUNE_SPIN_PACKS_SOL)[number], number> = {
-  1: 0.32,
-  10: 2.6,
+  1: 0.2,
+  10: 1.5,
 };
 const TELEGRAM_USDT_FORTUNE_PACKS: Record<(typeof FORTUNE_SPIN_PACKS_SOL)[number], number> = {
-  1: 0.4,
-  10: 3.4,
+  1: 0.27,
+  10: 2,
 };
 const TELEGRAM_STARS_PENDING_REUSE_MS = 20 * 60 * 1000;
 const TELEGRAM_STARS_ORDER_STATUSES = [

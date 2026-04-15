@@ -1291,10 +1291,10 @@ const STAKE_MIN = 50
 const STAKE_LOCK_HOURS = 24
 const GOLD_STORE_WALLET = new PublicKey('6tsXjdYxaqKBf83wHM5ps5rMGvZ6wq4Fc7N1QtSQGPrg')
 const GOLD_PACKAGES_SOL = [
-  { id: 'gold-50k', gold: 50000, sol: 0.04, image: goldSmallImage },
-  { id: 'gold-100k', gold: 100000, sol: 0.07, image: goldMiddleImage },
-  { id: 'gold-500k', gold: 500000, sol: 0.28, image: goldLargeImage },
-  { id: 'gold-1200k', gold: 1200000, sol: 0.5, image: gold1200kImage },
+  { id: 'gold-50k', gold: 50000, sol: 0.025, image: goldSmallImage },
+  { id: 'gold-100k', gold: 100000, sol: 0.045, image: goldMiddleImage },
+  { id: 'gold-500k', gold: 500000, sol: 0.18, image: goldLargeImage },
+  { id: 'gold-1200k', gold: 1200000, sol: 0.28, image: gold1200kImage },
 ] as const
 const GOLD_PACKAGES_STARS: Record<(typeof GOLD_PACKAGES_SOL)[number]['id'], number> = {
   'gold-50k': 140,
@@ -1303,21 +1303,21 @@ const GOLD_PACKAGES_STARS: Record<(typeof GOLD_PACKAGES_SOL)[number]['id'], numb
   'gold-1200k': 1650,
 }
 const GOLD_PACKAGES_TON: Record<(typeof GOLD_PACKAGES_SOL)[number]['id'], number> = {
-  'gold-50k': 2.6,
-  'gold-100k': 4.5,
-  'gold-500k': 18,
-  'gold-1200k': 32,
+  'gold-50k': 1.37,
+  'gold-100k': 2.55,
+  'gold-500k': 10.3,
+  'gold-1200k': 16.2,
 }
 const GOLD_PACKAGES_USDT: Record<(typeof GOLD_PACKAGES_SOL)[number]['id'], number> = {
-  'gold-50k': 3.4,
-  'gold-100k': 5.8,
-  'gold-500k': 23,
-  'gold-1200k': 41,
+  'gold-50k': 1.89,
+  'gold-100k': 3.51,
+  'gold-500k': 14.1,
+  'gold-1200k': 22,
 }
 const STARTER_PACK_PRICE_STARS = 500
-const STARTER_PACK_PRICE_TON = 8.5
-const STARTER_PACK_PRICE_USDT = 11
-const STARTER_PACK_PRICE = 0.13
+const STARTER_PACK_PRICE_TON = 5
+const STARTER_PACK_PRICE_USDT = 6.75
+const STARTER_PACK_PRICE = 0.09
 const STARTER_PACK_GOLD = 300000
 const STARTER_PACK_WORLD_BOSS_TICKETS = 5
 const MINER_LEASE_DURATION_DAYS = 30
@@ -1327,10 +1327,10 @@ const MINERS = [
     id: 'shiba',
     name: 'Shiba Miner',
     crystalsPerDay: 200,
-    sol: 0.4,
+    sol: 0.25,
     stars: 1500,
-    ton: 25,
-    usdt: 32,
+    ton: 15,
+    usdt: 20.5,
     image: shibaMinerImage,
     summary: 'Reliable tunnel scout that keeps a steady crystal stream flowing every day.',
   },
@@ -1338,10 +1338,10 @@ const MINERS = [
     id: 'pepe',
     name: 'Pepe Miner',
     crystalsPerDay: 400,
-    sol: 0.7,
+    sol: 0.43,
     stars: 2600,
-    ton: 43,
-    usdt: 56,
+    ton: 25.5,
+    usdt: 35.1,
     image: pepeMinerImage,
     summary: 'Cunning cave specialist built for heavier crystal extraction and steady scaling.',
   },
@@ -1349,10 +1349,10 @@ const MINERS = [
     id: 'trump',
     name: 'Trump Miner',
     crystalsPerDay: 800,
-    sol: 1.2,
+    sol: 0.75,
     stars: 4500,
-    ton: 75,
-    usdt: 95,
+    ton: 44,
+    usdt: 61,
     image: trumpMinerImage,
     summary: 'Elite headline miner that delivers the biggest 30-day crystal haul in the roster.',
   },
@@ -1364,8 +1364,8 @@ const SHOP_CRYSTAL_FLASK_COST = 7500
 const WORLD_BOSS_TICKET_COST = 18000
 const SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT = 2
 const PREMIUM_PLANS = [
-  { id: 'premium-30', days: 30, sol: 0.2 },
-  { id: 'premium-90', days: 90, sol: 0.48 },
+  { id: 'premium-30', days: 30, sol: 0.15 },
+  { id: 'premium-90', days: 90, sol: 0.3 },
 ] as const
 const PREMIUM_SALE_START_MS = Date.parse('2026-02-28T00:00:00Z')
 const PREMIUM_SALE_END_MS = Date.parse('2026-03-02T00:00:00Z')
@@ -1376,12 +1376,12 @@ const PREMIUM_PLAN_PRICES_STARS: Record<PremiumPlanId, number> = {
   'premium-90': 1700,
 }
 const PREMIUM_PLAN_PRICES_TON: Record<PremiumPlanId, number> = {
-  'premium-30': 13,
-  'premium-90': 31,
+  'premium-30': 7.35,
+  'premium-90': 16.8,
 }
 const PREMIUM_PLAN_PRICES_USDT: Record<PremiumPlanId, number> = {
-  'premium-30': 16,
-  'premium-90': 40,
+  'premium-30': 10.1,
+  'premium-90': 23,
 }
 const PREMIUM_DAILY_KEYS = 5
 const PREMIUM_DAILY_GOLD = 50000
@@ -1393,8 +1393,8 @@ const REFERRAL_LEVEL_TARGET = 15
 const REFERRAL_KEY_BONUS = 7
 const REFERRAL_CRYSTAL_RATE = 0.05
 const FORTUNE_SPIN_PRICES = {
-  1: 0.005,
-  10: 0.04,
+  1: 0.0035,
+  10: 0.025,
 } as const
 const FORTUNE_SPIN_PACKS_SOL = [1, 10] as const
 type FortunePackId = keyof typeof FORTUNE_SPIN_PRICES
@@ -1403,12 +1403,12 @@ const FORTUNE_SPIN_PRICES_STARS: Record<FortunePackId, number> = {
   10: 150,
 }
 const FORTUNE_SPIN_PRICES_TON: Record<FortunePackId, number> = {
-  1: 0.32,
-  10: 2.6,
+  1: 0.2,
+  10: 1.5,
 }
 const FORTUNE_SPIN_PRICES_USDT: Record<FortunePackId, number> = {
-  1: 0.4,
-  10: 3.4,
+  1: 0.27,
+  10: 2,
 }
 const FORTUNE_REWARDS: FortuneReward[] = [
   { id: 'energy_tonic', label: 'Energy Tonic', kind: 'consumable', consumableType: 'energy-small', amount: 1, chance: 22 },
