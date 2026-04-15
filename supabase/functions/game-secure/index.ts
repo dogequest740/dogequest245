@@ -7483,6 +7483,46 @@ serve(async (req) => {
     });
   }
 
+  if (action === "use_energy_consumable") {
+    const consumableId = Math.max(0, asInt(body.consumableId, 0));
+    const consumableTypeRaw = String(body.type ?? "").trim();
+    const consumableType = consumableTypeRaw === "energy-small" || consumableTypeRaw === "energy-full"
+      ? consumableTypeRaw as ConsumableType
+      : null;
+    if (!consumableType) {
+      return json({ ok: false, error: "Invalid energy consumable." });
+    }
+    const updated = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
+      if (!removeConsumableFromState(state, consumableType, consumableId || null)) {
+        throw new Error(consumableType === "energy-full" ? "Grand Energy Elixir not found." : "Energy Tonic not found.");
+      }
+      const energyMax = Math.max(1, asInt(state.energyMax, 50));
+      const nextEnergy = consumableType === "energy-full"
+        ? energyMax
+        : Math.min(energyMax, Math.max(0, asInt(state.energy, 0)) + 10);
+      state.energy = nextEnergy;
+      state.energyTimer = nextEnergy >= energyMax
+        ? ENERGY_REGEN_SECONDS
+        : Math.max(1, asInt(state.energyTimer, ENERGY_REGEN_SECONDS));
+      state.energyUpdatedAt = now.getTime();
+    });
+    if (!updated.ok || !updated.state) {
+      return json({ ok: false, error: updated.error || "Failed to use energy consumable." });
+    }
+    await auditEvent(supabase, auth.wallet, "use_energy_consumable", {
+      consumableType,
+      energy: Math.max(0, asInt(updated.state.energy, 0)),
+      energyTimer: Math.max(1, asInt(updated.state.energyTimer, ENERGY_REGEN_SECONDS)),
+    });
+    return json({
+      ok: true,
+      savedAt: updated.updatedAt,
+      energy: Math.max(0, asInt(updated.state.energy, 0)),
+      energyTimer: Math.max(1, asInt(updated.state.energyTimer, ENERGY_REGEN_SECONDS)),
+      consumables: normalizeConsumables(updated.state.consumables).rows,
+    });
+  }
+
   if (action === "shop_buy_dungeon_key") {
     for (let attempt = 0; attempt < 6; attempt += 1) {
       const nowIso = new Date().toISOString();

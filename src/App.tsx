@@ -4399,9 +4399,6 @@ function App() {
     if (!result.ok && result.error) {
       handleSecurityAuthFailure(result.error, interactive)
     }
-    if (result.ok && typeof result.savedAt === 'string' && result.savedAt.trim()) {
-      profileUpdatedAtRef.current = result.savedAt
-    }
     return result
   }
 
@@ -4451,7 +4448,7 @@ function App() {
     action: string,
     payload: Record<string, unknown> = {},
     interactive = true,
-    options?: { keepalive?: boolean },
+    options?: { keepalive?: boolean; deferSavedAt?: boolean },
   ): Promise<GameSecureResponse> => {
     let token = await ensureDungeonSession(interactive)
     if (!token) {
@@ -4483,7 +4480,7 @@ function App() {
     if (!result.ok && result.error) {
       handleSecurityAuthFailure(result.error, interactive)
     }
-    if (result.ok && typeof result.savedAt === 'string' && result.savedAt.trim()) {
+    if (!options?.deferSavedAt && result.ok && typeof result.savedAt === 'string' && result.savedAt.trim()) {
       profileUpdatedAtRef.current = result.savedAt
     }
     if (result.ok && result.profile && typeof result.profile.updated_at === 'string' && result.profile.updated_at.trim()) {
@@ -5595,15 +5592,21 @@ function App() {
     setSeasonTotalEffectiveCrystals(Math.max(0, Number(result.seasonTotalEffectiveCrystals ?? 0)))
   }
 
+  const markServerStateApplied = (state: GameState, savedAt?: string | null) => {
+    if (typeof savedAt === 'string' && savedAt.trim()) {
+      profileUpdatedAtRef.current = savedAt
+    }
+    lastPersistedSnapshotRef.current = buildPersistedSnapshot(state)
+  }
+
   const refreshProfileFromServer = async () => {
     const current = gameStateRef.current
     if (!current || !accountIdentity) return
     const freshResult = await loadProfileStateSecure(false)
     if (freshResult.status !== 'ok' || !freshResult.profile || !gameStateRef.current) return
     const fresh = freshResult.profile
-    profileUpdatedAtRef.current = fresh.updatedAt || profileUpdatedAtRef.current
     applyPersistedState(gameStateRef.current, fresh.state, fresh.updatedAt)
-    lastPersistedSnapshotRef.current = buildPersistedSnapshot(gameStateRef.current)
+    markServerStateApplied(gameStateRef.current, fresh.updatedAt)
     syncHud()
   }
 
@@ -7197,7 +7200,7 @@ function App() {
     setPremiumClaimLoading(true)
     setPremiumError('')
     try {
-      const result = await callGameSecureAuthed('premium_claim_daily', {}, true)
+      const result = await callGameSecureAuthed('premium_claim_daily', {}, true, { deferSavedAt: true })
       if (!result.ok) {
         setPremiumError(result.error || 'Claim failed.')
         return
@@ -7215,6 +7218,7 @@ function App() {
         state.premiumClaimDay = result.premiumClaimDay
       }
       applyServerConsumables(state, result.consumables)
+      markServerStateApplied(state, result.savedAt)
       pushLog(
         state.eventLog,
         `Premium claim: +${PREMIUM_DAILY_KEYS} keys, +2 World Boss tickets, +${formatNumber(PREMIUM_DAILY_GOLD)} gold, +${PREMIUM_DAILY_SMALL_POTIONS} Energy Tonic, +${PREMIUM_DAILY_BIG_POTIONS} Grand Energy Elixir.`,
@@ -7563,16 +7567,34 @@ function App() {
     try {
       switch (item.type) {
         case 'energy-small':
-          state.energy = clamp(state.energy + 10, 0, state.energyMax)
-          message = 'Energy restored by 10.'
-          break
         case 'energy-full':
-          state.energy = state.energyMax
-          message = 'Energy fully restored.'
+        {
+          const result = await callGameSecureAuthed(
+            'use_energy_consumable',
+            { consumableId: item.id, type: item.type },
+            true,
+            { deferSavedAt: true },
+          )
+          if (!result.ok) {
+            applied = false
+            message = result.error || (item.type === 'energy-full' ? 'Failed to use Grand Energy Elixir.' : 'Failed to use Energy Tonic.')
+            break
+          }
+          if (typeof result.energy === 'number') {
+            state.energy = clamp(Math.floor(Number(result.energy)), 0, state.energyMax)
+          }
+          if (typeof result.energyTimer === 'number') {
+            state.energyTimer = Math.max(1, Math.floor(Number(result.energyTimer)))
+          }
+          applyServerConsumables(state, result.consumables)
+          markServerStateApplied(state, result.savedAt)
+          message = item.type === 'energy-full' ? 'Energy fully restored.' : 'Energy restored by 10.'
+          applied = false
           break
+        }
         case 'boss-mark':
         {
-          const result = await callGameSecureAuthed('use_boss_mark', { consumableId: item.id }, true)
+          const result = await callGameSecureAuthed('use_boss_mark', { consumableId: item.id }, true, { deferSavedAt: true })
           if (!result.ok) {
             applied = false
             message = result.error || 'Failed to use Boss Mark.'
@@ -7580,13 +7602,14 @@ function App() {
           }
           applyServerConsumables(state, result.consumables)
           applyConsumableEffectsFromServer(state, result)
+          markServerStateApplied(state, result.savedAt)
           message = 'Boss Mark activated for the current World Boss cycle.'
           applied = false
           break
         }
         case 'crystal-flask':
         {
-          const result = await callGameSecureAuthed('use_crystal_flask', { consumableId: item.id }, true)
+          const result = await callGameSecureAuthed('use_crystal_flask', { consumableId: item.id }, true, { deferSavedAt: true })
           if (!result.ok) {
             applied = false
             message = result.error || 'Failed to use Crystal Flask.'
@@ -7594,6 +7617,7 @@ function App() {
           }
           applyServerConsumables(state, result.consumables)
           applyConsumableEffectsFromServer(state, result)
+          markServerStateApplied(state, result.savedAt)
           message = `Crystal Flask activated for ${Math.max(0, Math.floor(Number(result.crystalFlaskRuns ?? state.crystalFlaskRuns)))} dungeon runs.`
           applied = false
           break
