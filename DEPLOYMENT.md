@@ -2,40 +2,40 @@
 
 ## Production Overview
 
-- Frontend domain: https://dogequest.fun
-- Frontend hosting: Vercel
-- Backend runtime: Supabase Edge Functions
-- Database and player progress: Supabase Postgres
-- Telegram bot webhook: https://ybnheuyaddwtqevelsck.supabase.co/functions/v1/telegram-stars-webhook
+- Frontend domain: `https://dogequest.fun`
+- Frontend hosting: `Vercel`
+- Backend runtime: `Supabase Edge Functions`
+- Database and player progress: `Supabase Postgres`
+- Telegram bot webhook: `https://ybnheuyaddwtqevelsck.supabase.co/functions/v1/telegram-stars-webhook`
 
 ## Live Services
 
-- game-secure
-- dungeon-secure
-- 	elegram-stars-webhook
-- world-boss-tick
+- `game-secure`
+- `dungeon-secure`
+- `telegram-stars-webhook`
+- `world-boss-tick`
 
 All production gameplay requests must go through:
 
-- https://ybnheuyaddwtqevelsck.supabase.co/functions/v1
+- `https://ybnheuyaddwtqevelsck.supabase.co/functions/v1`
 
 ## Payments
 
 ### Web
 
-- SOL
+- `SOL`
 
 ### Telegram Mini App
 
-- Stars
-- TON
-- USDT on TON
+- `Stars`
+- `TON`
+- `USDT on TON`
 
-Payment creation and crediting are handled by game-secure.
+Payment creation and crediting are handled by `game-secure`.
 
 ## What Stores Player Progress
 
-Player progress lives in Supabase, not in Vercel or Telegram.
+Player progress lives in `Supabase`, not in `Vercel` or `Telegram`.
 
 This includes:
 
@@ -54,8 +54,8 @@ This includes:
 
 If you change UI, client logic, or assets:
 
-1. Commit and push to main
-2. Vercel deploys the site
+1. Commit and push to `main`
+2. `Vercel` deploys the site
 3. Hard refresh the site or reopen the Telegram mini app to test
 
 ### Supabase function changes
@@ -68,11 +68,11 @@ If you change server gameplay logic:
 
 Typical commands:
 
-`powershell
+```powershell
 npx supabase functions deploy game-secure --project-ref ybnheuyaddwtqevelsck --no-verify-jwt
 npx supabase functions deploy dungeon-secure --project-ref ybnheuyaddwtqevelsck --no-verify-jwt
 npx supabase functions deploy telegram-stars-webhook --project-ref ybnheuyaddwtqevelsck --no-verify-jwt
-`
+```
 
 ## Environment Expectations
 
@@ -80,11 +80,11 @@ npx supabase functions deploy telegram-stars-webhook --project-ref ybnheuyaddwtq
 
 Expected important env vars:
 
-- VITE_SUPABASE_URL
-- VITE_SUPABASE_ANON_KEY
-- VITE_SOLANA_RPC
-- VITE_ADMIN_WALLETS
-- VITE_ENABLE_VILLAGE
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+- `VITE_SOLANA_RPC`
+- `VITE_ADMIN_WALLETS`
+- `VITE_ENABLE_VILLAGE`
 - Telegram analytics vars if Apps Center tracking is needed
 
 Do not point production to any external edge runtime override.
@@ -93,14 +93,14 @@ Do not point production to any external edge runtime override.
 
 Important production secrets include:
 
-- SUPABASE_URL
-- SUPABASE_SERVICE_ROLE_KEY
-- SUPABASE_ANON_KEY
-- SOLANA_RPC_URL
-- ADMIN_WALLETS
-- TELEGRAM_BOT_TOKEN
-- TELEGRAM_STARS_WEBHOOK_SECRET
-- TONCENTER_API_KEY
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `SUPABASE_ANON_KEY`
+- `SOLANA_RPC_URL`
+- `ADMIN_WALLETS`
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_STARS_WEBHOOK_SECRET`
+- `TONCENTER_API_KEY`
 - payment provider secrets used by the active flows
 
 ## Telegram Notes
@@ -111,5 +111,5 @@ Important production secrets include:
 
 ## Current Infrastructure Rule
 
-- Production uses Supabase
-- Railway is not part of the live stack anymore
+- Production uses `Supabase`
+- `Railway` is not part of the live stack anymore
