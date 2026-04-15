@@ -4565,6 +4565,56 @@ function App() {
     )
   }
 
+  const isVillageClaimRetryableError = (errorText: string) => {
+    const normalized = errorText.toLowerCase()
+    return (
+      normalized.includes('secure service unavailable') ||
+      normalized.includes('empty secure service response') ||
+      normalized.includes('failed to fetch') ||
+      normalized.includes('network') ||
+      normalized.includes('timeout') ||
+      normalized.includes('fetch') ||
+      normalized.includes('retry')
+    )
+  }
+
+  const confirmVillageClaimAfterTransientError = async (
+    state: GameState,
+    previousVillage: VillageState,
+    previousGold: number,
+    previousCrystals: number,
+  ) => {
+    const result = await callGameSecureAuthed('village_status', {}, true)
+    if (!result.ok) {
+      return {
+        ok: false as const,
+        error: result.error || 'Failed to refresh village state.',
+      }
+    }
+
+    applyVillageFromServer(state, result)
+    const nextVillage = normalizeVillageState(state.village, Date.now())
+    const previousPending = getVillagePendingRewards(previousVillage, Date.now())
+    const nextPending = getVillagePendingRewards(nextVillage, Date.now())
+    const claimedGold = Math.max(0, state.gold - previousGold)
+    const claimedCrystals = Math.max(0, state.crystals - previousCrystals)
+    const claimAdvanced = nextVillage.lastClaimAt > previousVillage.lastClaimAt
+    const pendingDropped =
+      nextPending.gold < previousPending.gold || nextPending.crystals < previousPending.crystals
+
+    if (claimedGold > 0 || claimedCrystals > 0 || claimAdvanced || pendingDropped) {
+      return {
+        ok: true as const,
+        claimedGold,
+        claimedCrystals,
+      }
+    }
+
+    return {
+      ok: false as const,
+      error: 'Village claim could not be confirmed. Please try again.',
+    }
+  }
   const finalizePartnerTaskClaim = async (
     rewardKey: string,
     attempts = 5,
@@ -7511,8 +7561,28 @@ function App() {
 
     setVillageActionLoading(true)
     try {
+      const previousVillage = normalizeVillageState(state.village, Date.now())
+      const previousGold = state.gold
+      const previousCrystals = state.crystals
       const result = await callGameSecureAuthed('village_claim', {}, true)
       if (!result.ok) {
+        if (result.error && isVillageClaimRetryableError(result.error)) {
+          const confirmation = await confirmVillageClaimAfterTransientError(
+            state,
+            previousVillage,
+            previousGold,
+            previousCrystals,
+          )
+          if (confirmation.ok) {
+            setVillageError('')
+            pushLog(
+              state.eventLog,
+              `Village claim: +${formatNumber(confirmation.claimedGold)} gold, +${formatNumber(confirmation.claimedCrystals)} crystals.`,
+            )
+            syncHud()
+            return
+          }
+        }
         setVillageError(result.error || 'Failed to claim village income.')
         return
       }
@@ -7526,7 +7596,6 @@ function App() {
       setVillageActionLoading(false)
     }
   }
-
   const startVillageUpgrade = async (buildingId: VillageBuildingId) => {
     const state = gameStateRef.current
     if (!state || !accountIdentity) return
