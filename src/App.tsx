@@ -3847,7 +3847,7 @@ function App() {
   const [tonConnectUI] = useTonConnectUI()
   const tonWallet = useTonWallet()
   const tonAddressFriendly = useTonAddress()
-  const [telegramPaymentRail, setTelegramPaymentRail] = useState<TelegramPaymentRail>('stars')
+  const [telegramPaymentRail, setTelegramPaymentRail] = useState<TelegramPaymentRail>('ton')
   const [stage, setStage] = useState<'auth' | 'select' | 'game'>('auth')
   const [selectedId, setSelectedId] = useState(CHARACTER_CLASSES[0].id)
   const [playerName, setPlayerName] = useState('')
@@ -4079,7 +4079,7 @@ function App() {
   const usingTelegramAuth = telegramInitData.length > 0
   const telegramTonAddress = useMemo(() => String(tonAddressFriendly || '').trim(), [tonAddressFriendly])
   const telegramTonWalletConnected = Boolean(tonWallet && telegramTonAddress)
-  const activeTelegramPaymentRail: TelegramPaymentRail = usingTelegramAuth ? telegramPaymentRail : 'stars'
+  const activeTelegramPaymentRail: TelegramPaymentRail = usingTelegramAuth ? telegramPaymentRail : 'ton'
 
   useEffect(() => {
     if (!crystalTasksError) return
@@ -4973,6 +4973,10 @@ function App() {
   }
 
   const selectTelegramPaymentRail = (rail: TelegramPaymentRail, setError: (value: string) => void) => {
+    if (rail === 'stars') {
+      setError('Telegram Stars payments are no longer available.')
+      return
+    }
     setTelegramPaymentRail(rail)
     setError('')
   }
@@ -4983,13 +4987,6 @@ function App() {
     return (
       <div className="tg-pay-rail-wrap">
         <div className="tg-pay-rail-tabs">
-          <button
-            type="button"
-            className={activeTelegramPaymentRail === 'stars' ? 'active' : ''}
-            onClick={() => selectTelegramPaymentRail('stars', setError)}
-          >
-            ⭐ Stars
-          </button>
           <button
             type="button"
             className={activeTelegramPaymentRail === 'ton' ? 'active' : ''}
@@ -5007,24 +5004,22 @@ function App() {
             USDT
           </button>
         </div>
-        {activeTelegramPaymentRail !== 'stars' && (
-          <div className="tg-pay-wallet-box">
-            <div className="tg-pay-wallet-info">
-              {telegramTonWalletConnected
-                ? `Connected: ${telegramTonAddress.slice(0, 6)}...${telegramTonAddress.slice(-6)}`
-                : 'Connect Telegram Wallet to pay with TON/USDT.'}
-            </div>
-            <button
-              type="button"
-              className="tg-pay-wallet-connect"
-              onClick={() => {
-                void openTelegramTonWalletModal(setError)
-              }}
-            >
-              {telegramTonWalletConnected ? 'Change TG Wallet' : 'Connect TG Wallet'}
-            </button>
+        <div className="tg-pay-wallet-box">
+          <div className="tg-pay-wallet-info">
+            {telegramTonWalletConnected
+              ? `Connected: ${telegramTonAddress.slice(0, 6)}...${telegramTonAddress.slice(-6)}`
+              : 'Connect Telegram Wallet to pay with TON/USDT.'}
           </div>
-        )}
+          <button
+            type="button"
+            className="tg-pay-wallet-connect"
+            onClick={() => {
+              void openTelegramTonWalletModal(setError)
+            }}
+          >
+            {telegramTonWalletConnected ? 'Change TG Wallet' : 'Connect TG Wallet'}
+          </button>
+        </div>
       </div>
     )
   }
@@ -6797,9 +6792,9 @@ function App() {
       setSeasonError('')
     }
     if (!usingTelegramAuth) {
-      setTelegramPaymentRail('stars')
+      setTelegramPaymentRail('ton')
     } else if (activePanel !== 'buygold' && activePanel !== 'starterpack' && activePanel !== 'premium' && activePanel !== 'fortune' && activePanel !== 'miners') {
-      setTelegramPaymentRail('stars')
+      setTelegramPaymentRail('ton')
     }
   }, [activePanel, isMobile, usingTelegramAuth])
 
@@ -11973,7 +11968,6 @@ function App() {
   )
 }
 export default App
-
 
 
 

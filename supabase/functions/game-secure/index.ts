@@ -81,7 +81,6 @@ const PREMIUM_TX_MAX_AGE_SECONDS = 2 * 60 * 60;
 const PAYMENT_TX_LOOKUP_ATTEMPTS = 22;
 const PAYMENT_TX_LOOKUP_BASE_DELAY_MS = 1200;
 const PROFILE_UPDATE_RETRY_ATTEMPTS = 10;
-const PROFILE_STALE_WRITE_TOLERANCE_MS = 1000;
 const BLOCKED_ERROR_MESSAGE = "You have been banned for cheating.";
 const GOLD_PACKS_SOL = [
   { id: "gold-50k", gold: 50000, lamports: Math.round(0.025 * SOL_LAMPORTS) },
@@ -120,6 +119,7 @@ const TELEGRAM_STARS_FORTUNE_PACKS: Record<(typeof FORTUNE_SPIN_PACKS_SOL)[numbe
   1: 20,
   10: 150,
 };
+const TELEGRAM_STARS_PAYMENTS_ENABLED = false;
 
 const TELEGRAM_TON_TREASURY_WALLET = String(Deno.env.get("TON_TREASURY_WALLET") ?? "UQBquMaMtbGIbDKL5W0bwl0nDCVdg5joq5mbp7jLSaM3hp0i").trim();
 const TELEGRAM_TON_USDT_MASTER = String(Deno.env.get("TON_USDT_MASTER_ADDRESS") ?? "0:b113a994b5024a16719f69139328eb759596c38a25f59028b146fecdc3621dfe").trim();
@@ -2562,13 +2562,19 @@ const SEASON_PROFILE_BATCH_SIZE = 1000;
 
 const loadSeasonProfileRows = async (supabase: ReturnType<typeof createClient>) => {
   const rows: Array<Record<string, unknown>> = [];
+  let lastWallet = "";
+  let pageCount = 0;
 
-  for (let offset = 0; offset < 1_000_000; offset += SEASON_PROFILE_BATCH_SIZE) {
-    const { data, error } = await supabase
+  for (; pageCount < 10_000; pageCount += 1) {
+    let query = supabase
       .from("profiles")
       .select("wallet, state, updated_at")
       .order("wallet", { ascending: true })
-      .range(offset, offset + SEASON_PROFILE_BATCH_SIZE - 1);
+      .limit(SEASON_PROFILE_BATCH_SIZE);
+    if (lastWallet) {
+      query = query.gt("wallet", lastWallet);
+    }
+    const { data, error } = await query;
 
     if (error) {
       return { ok: false as const, error: "Failed to load season profiles." };
@@ -2576,6 +2582,17 @@ const loadSeasonProfileRows = async (supabase: ReturnType<typeof createClient>) 
 
     const batch = ((data as Array<Record<string, unknown>> | null) ?? []);
     rows.push(...batch);
+
+    if (batch.length > 0) {
+      const nextLastWallet = String(batch[batch.length - 1]?.wallet ?? "").trim();
+      if (!nextLastWallet) {
+        return { ok: false as const, error: "Invalid season profile pagination cursor." };
+      }
+      if (nextLastWallet === lastWallet) {
+        return { ok: false as const, error: "Season profile pagination cursor did not advance." };
+      }
+      lastWallet = nextLastWallet;
+    }
 
     if (batch.length < SEASON_PROFILE_BATCH_SIZE) {
       return { ok: true as const, rows };
@@ -4610,11 +4627,12 @@ serve(async (req) => {
           });
           return json({ ok: false, error: "Invalid profile version. Reload game state and retry." });
         }
-        if (clientUpdatedAtMs + PROFILE_STALE_WRITE_TOLERANCE_MS < serverUpdatedAtMs) {
+        if (clientUpdatedAtMs !== serverUpdatedAtMs) {
           await auditEvent(supabase, auth.wallet, "profile_save_rejected", {
-            reason: "Profile is outdated.",
+            reason: "Profile version mismatch.",
             serverUpdatedAt: existing.updated_at,
             clientUpdatedAt,
+            driftMs: clientUpdatedAtMs - serverUpdatedAtMs,
           });
           return json({ ok: false, error: "Profile is outdated. Reload game state and retry." });
         }
@@ -4913,6 +4931,10 @@ serve(async (req) => {
   if (action === "tg_stars_create") {
     if (!isTelegramIdentity(auth.wallet)) {
       return json({ ok: false, error: "Telegram Stars are available only in Telegram Mini App." });
+    }
+
+    if (!TELEGRAM_STARS_PAYMENTS_ENABLED) {
+      return json({ ok: false, error: "Telegram Stars payments are disabled." });
     }
 
     const telegramUserId = getTelegramUserIdFromIdentity(auth.wallet);
@@ -6535,11 +6557,16 @@ serve(async (req) => {
       state.premiumEndsAt = nextPremiumEndsAt;
 
       const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+      const expectedUpdatedAtMs = expectedUpdatedAt ? new Date(expectedUpdatedAt).getTime() : Number.NaN;
+      const nextUpdatedAtMs = Number.isFinite(expectedUpdatedAtMs)
+        ? Math.max(now.getTime(), expectedUpdatedAtMs + 1)
+        : now.getTime();
+      const nextUpdatedAtIso = new Date(nextUpdatedAtMs).toISOString();
       const { data: updated, error: updateError } = await supabase
         .from("profiles")
         .update({
           state,
-          updated_at: now.toISOString(),
+          updated_at: nextUpdatedAtIso,
         })
         .eq("wallet", auth.wallet)
         .eq("updated_at", expectedUpdatedAt)
@@ -6560,7 +6587,7 @@ serve(async (req) => {
         });
         return json({
           ok: true,
-          savedAt: now.toISOString(),
+          savedAt: nextUpdatedAtIso,
           premiumEndsAt: nextPremiumEndsAt,
           premiumDaysAdded: plan.days,
           premiumAlreadyProcessed: false,
@@ -6611,11 +6638,16 @@ serve(async (req) => {
       state.premiumClaimDay = dayKey;
 
       const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+      const expectedUpdatedAtMs = expectedUpdatedAt ? new Date(expectedUpdatedAt).getTime() : Number.NaN;
+      const nextUpdatedAtMs = Number.isFinite(expectedUpdatedAtMs)
+        ? Math.max(now.getTime(), expectedUpdatedAtMs + 1)
+        : now.getTime();
+      const nextUpdatedAtIso = new Date(nextUpdatedAtMs).toISOString();
       const { data: updated, error: updateError } = await supabase
         .from("profiles")
         .update({
           state,
-          updated_at: now.toISOString(),
+          updated_at: nextUpdatedAtIso,
         })
         .eq("wallet", auth.wallet)
         .eq("updated_at", expectedUpdatedAt)
@@ -6655,7 +6687,7 @@ serve(async (req) => {
         });
         return json({
           ok: true,
-          savedAt: now.toISOString(),
+          savedAt: nextUpdatedAtIso,
           tickets: syncedTickets,
           ticketDay: syncedTicketDay,
           worldBossTickets: syncedWorldBossTickets,
