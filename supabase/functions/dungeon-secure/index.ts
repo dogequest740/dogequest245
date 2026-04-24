@@ -235,6 +235,68 @@ const asInt = (value: unknown, fallback = 0) => {
   return Math.floor(parsed);
 };
 
+type ConsumableType = "energy-small" | "energy-full" | "boss-mark" | "crystal-flask" | "key";
+type ConsumableProfileRow = {
+  id: number;
+  type: ConsumableType;
+  qty: number;
+  name: string;
+  description: string;
+  icon: string;
+};
+
+const CONSUMABLE_DEFS: Record<ConsumableType, { name: string; description: string }> = {
+  "energy-small": { name: "Energy Tonic", description: "Restore 10 energy." },
+  "energy-full": { name: "Grand Energy Elixir", description: "Restore energy to full." },
+  "boss-mark": { name: "Boss Mark", description: "+25% World Boss damage for the current cycle." },
+  "crystal-flask": { name: "Crystal Flask", description: "+25% dungeon crystals for the next 3 runs." },
+  key: { name: "Dungeon Key", description: "+1 dungeon entry." },
+};
+
+const isConsumableType = (value: string): value is ConsumableType =>
+  Object.prototype.hasOwnProperty.call(CONSUMABLE_DEFS, value);
+
+const normalizeProfileConsumables = (raw: unknown) => {
+  if (!Array.isArray(raw)) return { rows: [] as ConsumableProfileRow[], maxId: 0 };
+  const byType = new Map<ConsumableType, ConsumableProfileRow>();
+  let maxId = 0;
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const row = entry as Record<string, unknown>;
+    const id = Math.max(1, asInt(row.id, 0));
+    const qty = Math.max(1, asInt(row.qty, 1));
+    const rawType = String(row.type ?? "");
+    const typeRaw = rawType === "speed" ? "boss-mark" : rawType === "attack" ? "crystal-flask" : rawType;
+    if (!id || !isConsumableType(typeRaw)) continue;
+    const def = CONSUMABLE_DEFS[typeRaw];
+    maxId = Math.max(maxId, id);
+    const existing = byType.get(typeRaw);
+    if (existing) {
+      existing.qty += qty;
+      existing.id = Math.min(existing.id, id);
+      continue;
+    }
+    byType.set(typeRaw, {
+      id,
+      type: typeRaw,
+      qty,
+      name: def.name,
+      description: def.description,
+      icon: "",
+    });
+  }
+  return {
+    rows: [...byType.values()].sort((left, right) => left.id - right.id),
+    maxId,
+  };
+};
+
+const normalizeProfileConsumableState = (state: Record<string, unknown>) => {
+  const normalized = normalizeProfileConsumables(state.consumables);
+  state.consumables = normalized.rows;
+  state.consumableId = Math.max(asInt(state.consumableId, 0), normalized.maxId, ...normalized.rows.map((entry) => entry.id), 0);
+};
+
 type DungeonStateRow = {
   wallet: string;
   tickets: number;
@@ -416,6 +478,8 @@ const creditDungeonRewardToProfile = async (
   supabase: ReturnType<typeof createClient>,
   wallet: string,
   reward: number,
+  tickets: number,
+  ticketDay: string,
   dungeonRuns: number,
   now: Date,
   consumeCrystalFlask: boolean,
@@ -431,12 +495,15 @@ const creditDungeonRewardToProfile = async (
     }
 
     const nextState = structuredClone(profileRow.state) as Record<string, unknown>;
+    normalizeProfileConsumableState(nextState);
     const currentCrystals = Math.max(0, asInt(nextState.crystals, 0));
     const currentCrystalsEarned = Math.max(0, asInt(nextState.crystalsEarned ?? nextState.crystals, 0));
     const currentDungeonRuns = Math.max(0, asInt(nextState.dungeonRuns, 0));
     nextState.crystals = currentCrystals + reward;
     nextState.crystalsEarned = currentCrystalsEarned + reward;
     nextState.dungeonRuns = Math.max(currentDungeonRuns, Math.max(0, asInt(dungeonRuns, 0)));
+    nextState.tickets = Math.max(0, asInt(tickets, 0));
+    nextState.ticketDay = String(ticketDay ?? "");
     const currentCrystalFlaskRuns = Math.max(0, asInt(nextState.crystalFlaskRuns, 0));
     nextState.crystalFlaskRuns = consumeCrystalFlask ? Math.max(0, currentCrystalFlaskRuns - 1) : currentCrystalFlaskRuns;
 
@@ -482,34 +549,29 @@ const consumeDungeonKeyFromProfile = async (
     }
 
     const nextState = structuredClone(profileRow.state) as Record<string, unknown>;
-    const rawConsumables = Array.isArray(nextState.consumables) ? [...nextState.consumables] : [];
+    normalizeProfileConsumableState(nextState);
+    const normalizedConsumables = normalizeProfileConsumables(nextState.consumables);
     let removed = false;
-    const nextConsumables: unknown[] = [];
-    let maxId = 0;
-
-    for (const entry of rawConsumables) {
-      if (!entry || typeof entry !== "object") {
-        nextConsumables.push(entry);
-        continue;
-      }
-      const row = entry as Record<string, unknown>;
-      const entryId = Math.max(0, asInt(row.id, 0));
-      maxId = Math.max(maxId, entryId);
-      const entryType = String(row.type ?? "");
-      const matchesTarget = hasTargetId ? entryId === consumableId : true;
-      if (!removed && entryType === "key" && matchesTarget) {
-        removed = true;
-        continue;
-      }
-      nextConsumables.push(row);
-    }
+    const nextConsumables = normalizedConsumables.rows
+      .map((entry) => {
+        const entryId = Math.max(1, asInt(entry.id, 0));
+        const matchesTarget = hasTargetId ? entryId === consumableId : true;
+        if (!removed && entry.type === "key" && matchesTarget) {
+          removed = true;
+          const qty = Math.max(1, asInt(entry.qty, 1));
+          if (qty <= 1) return null;
+          return { ...entry, qty: qty - 1 };
+        }
+        return entry;
+      })
+      .filter((entry): entry is ConsumableProfileRow => Boolean(entry));
 
     if (!removed) {
       return { ok: false as const, error: "Dungeon key item not found." };
     }
 
     nextState.consumables = nextConsumables;
-    nextState.consumableId = Math.max(asInt(nextState.consumableId, 0), maxId);
+    nextState.consumableId = Math.max(asInt(nextState.consumableId, 0), normalizedConsumables.maxId);
 
     const expectedUpdatedAt = String(profileRow.updated_at ?? "");
     const { data: updated, error: updateError } = await supabase
@@ -524,10 +586,55 @@ const consumeDungeonKeyFromProfile = async (
       .maybeSingle();
 
     if (!updateError && updated) {
-      return { ok: true as const };
+      return {
+        ok: true as const,
+        consumables: nextConsumables,
+        updatedAt: now.toISOString(),
+      };
     }
   }
 
+  return { ok: false as const, error: "Profile changed concurrently, retry." };
+};
+
+const syncDungeonTicketsToProfile = async (
+  supabase: ReturnType<typeof createClient>,
+  wallet: string,
+  tickets: number,
+  ticketDay: string,
+  now: Date,
+) => {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const { data: profileRow, error: profileError } = await supabase
+      .from("profiles")
+      .select("state, updated_at")
+      .eq("wallet", wallet)
+      .maybeSingle();
+    if (profileError || !profileRow || !profileRow.state || typeof profileRow.state !== "object") {
+      return { ok: false as const, error: "Profile not found." };
+    }
+
+    const nextState = structuredClone(profileRow.state) as Record<string, unknown>;
+    normalizeProfileConsumableState(nextState);
+    nextState.tickets = Math.max(0, asInt(tickets, 0));
+    nextState.ticketDay = String(ticketDay ?? "");
+
+    const expectedUpdatedAt = String(profileRow.updated_at ?? "");
+    const { data: updated, error: updateError } = await supabase
+      .from("profiles")
+      .update({
+        state: nextState,
+        updated_at: now.toISOString(),
+      })
+      .eq("wallet", wallet)
+      .eq("updated_at", expectedUpdatedAt)
+      .select("wallet")
+      .maybeSingle();
+
+    if (!updateError && updated) {
+      return { ok: true as const, updatedAt: now.toISOString() };
+    }
+  }
   return { ok: false as const, error: "Profile changed concurrently, retry." };
 };
 
@@ -547,25 +654,33 @@ const refundDungeonKeyToProfile = async (
     }
 
     const nextState = structuredClone(profileRow.state) as Record<string, unknown>;
-    const rawConsumables = Array.isArray(nextState.consumables) ? [...nextState.consumables] : [];
-    let maxId = Math.max(0, asInt(nextState.consumableId, 0));
-    for (const entry of rawConsumables) {
-      if (!entry || typeof entry !== "object") continue;
-      const row = entry as Record<string, unknown>;
-      maxId = Math.max(maxId, Math.max(0, asInt(row.id, 0)));
+    normalizeProfileConsumableState(nextState);
+    const normalizedConsumables = normalizeProfileConsumables(nextState.consumables);
+    const existingKey = normalizedConsumables.rows.find((entry) => entry.type === "key");
+    const maxId = Math.max(asInt(nextState.consumableId, 0), normalizedConsumables.maxId, ...normalizedConsumables.rows.map((entry) => entry.id), 0);
+
+    if (existingKey) {
+      nextState.consumables = normalizedConsumables.rows.map((entry) =>
+        entry.type === "key"
+          ? { ...entry, qty: Math.max(1, asInt(entry.qty, 1)) + 1 }
+          : entry
+      );
+      nextState.consumableId = maxId;
+    } else {
+      const nextId = maxId + 1;
+      nextState.consumables = [
+        {
+          id: nextId,
+          type: "key",
+          qty: 1,
+          name: "Dungeon Key",
+          description: "+1 dungeon entry.",
+          icon: "",
+        },
+        ...normalizedConsumables.rows,
+      ];
+      nextState.consumableId = nextId;
     }
-
-    const nextId = maxId + 1;
-    const keyItem = {
-      id: nextId,
-      type: "key",
-      name: "Dungeon Key",
-      description: "+1 dungeon entry.",
-      icon: "",
-    };
-
-    nextState.consumables = [keyItem, ...rawConsumables];
-    nextState.consumableId = nextId;
 
     const expectedUpdatedAt = String(profileRow.updated_at ?? "");
     const { data: updated, error: updateError } = await supabase
@@ -887,11 +1002,29 @@ serve(async (req) => {
       tickets: ticketResult.state.tickets,
       ticketDay: ticketResult.state.ticket_day,
     });
+    const profileSyncResult = await syncDungeonTicketsToProfile(
+      supabase,
+      auth.wallet,
+      ticketResult.state.tickets,
+      ticketResult.state.ticket_day,
+      now,
+    );
+    if (!profileSyncResult.ok) {
+      await auditEvent(supabase, auth.wallet, "dungeon_key_profile_sync_failed", {
+        tickets: ticketResult.state.tickets,
+        ticketDay: ticketResult.state.ticket_day,
+        reason: profileSyncResult.error || "sync_failed",
+      });
+    }
     return json({
       ok: true,
+      savedAt: ("updatedAt" in profileSyncResult && typeof profileSyncResult.updatedAt === "string" && profileSyncResult.updatedAt) ||
+        ("updatedAt" in consumeResult && typeof consumeResult.updatedAt === "string" && consumeResult.updatedAt) ||
+        now.toISOString(),
       tickets: ticketResult.state.tickets,
       ticketDay: ticketResult.state.ticket_day,
       dungeonRuns: ticketResult.state.dungeon_runs,
+      consumables: consumeResult.ok && "consumables" in consumeResult ? consumeResult.consumables : undefined,
     });
   }
 
@@ -939,6 +1072,8 @@ serve(async (req) => {
       supabase,
       auth.wallet,
       reward,
+      ticketSpend.state.tickets,
+      ticketSpend.state.ticket_day,
       ticketSpend.state.dungeon_runs,
       now,
       crystalFlaskActive,
