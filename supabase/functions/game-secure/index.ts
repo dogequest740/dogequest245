@@ -13,6 +13,8 @@ const WORLD_BOSS_TICKET_COST_GOLD = 25000;
 const WORLD_BOSS_PREMIUM_DAILY_TICKETS = 2;
 const WORLD_BOSS_STARTER_TICKETS = 5;
 const SHOP_DUNGEON_KEY_COST_GOLD = 25000;
+const SHOP_ENERGY_TONIC_COST_GOLD = 4500;
+const SHOP_GRAND_ENERGY_ELIXIR_COST_GOLD = 15000;
 const SHOP_DUNGEON_KEY_DAILY_LIMIT = 10;
 const SHOP_WORLD_BOSS_TICKET_DAILY_LIMIT = 2;
 const REFERRAL_LEVEL_TARGET = 15;
@@ -59,8 +61,10 @@ const PREMIUM_DAILY_GOLD = 50000;
 const PREMIUM_DAILY_SMALL_POTIONS = 5;
 const PREMIUM_DAILY_BIG_POTIONS = 3;
 const SOL_LAMPORTS = 1_000_000_000;
+const STARTER_PACK_TARGET_LEVEL = 60;
 const STARTER_PACK_GOLD = 300000;
-const STARTER_PACK_PRICE_LAMPORTS = Math.round(0.09 * SOL_LAMPORTS);
+const STARTER_PACK_PRICE_LAMPORTS = Math.round(0.35 * SOL_LAMPORTS);
+const STARTER_PACK_WORLD_BOSS_TICKETS = 15;
 const MINER_LEASE_DURATION_DAYS = 30;
 const MINER_LEASE_DURATION_MS = MINER_LEASE_DURATION_DAYS * 24 * 60 * 60 * 1000;
 const MINER_DAY_MS = 24 * 60 * 60 * 1000;
@@ -70,11 +74,11 @@ const MINERS = [
   { id: "trump", title: "Trump Miner", crystalsPerDay: 800, lamports: Math.round(0.75 * SOL_LAMPORTS), starsAmount: 4500, tonAmount: 44, usdtAmount: 61 },
 ] as const;
 const STARTER_PACK_ITEMS: Array<{ type: ConsumableType; qty: number }> = [
-  { type: "energy-small", qty: 20 },
-  { type: "energy-full", qty: 5 },
-  { type: "boss-mark", qty: 3 },
-  { type: "crystal-flask", qty: 5 },
-  { type: "key", qty: 20 },
+  { type: "key", qty: 50 },
+  { type: "energy-small", qty: 50 },
+  { type: "energy-full", qty: 20 },
+  { type: "boss-mark", qty: 10 },
+  { type: "crystal-flask", qty: 10 },
 ];
 const PREMIUM_PAYMENT_WALLET = "6tsXjdYxaqKBf83wHM5ps5rMGvZ6wq4Fc7N1QtSQGPrg";
 const PREMIUM_TX_MAX_AGE_SECONDS = 2 * 60 * 60;
@@ -132,8 +136,8 @@ const TELEGRAM_TON_USDT_GAS_NANOTON = 60_000_000n;
 const TELEGRAM_TON_USDT_FORWARD_NANOTON = 20_000_000n;
 const TELEGRAM_TON_TRANSFER_LOOKUP_WINDOW_SECONDS = 3 * 60 * 60;
 const TELEGRAM_TON_TX_VALID_SECONDS = 15 * 60;
-const TELEGRAM_TON_STARTER_PACK = 5;
-const TELEGRAM_USDT_STARTER_PACK = 6.75;
+const TELEGRAM_TON_STARTER_PACK = 23;
+const TELEGRAM_USDT_STARTER_PACK = 30;
 const TELEGRAM_TON_GOLD_PACKS: Record<(typeof GOLD_PACKS_SOL)[number]["id"], number> = {
   "gold-50k": 1.37,
   "gold-100k": 2.55,
@@ -333,6 +337,7 @@ type EquipmentEffectState = { kind: EquipmentEffectKind; value: number };
 type ConsumableRow = {
   id: number;
   type: ConsumableType;
+  qty: number;
   name: string;
   description: string;
   icon: string;
@@ -950,14 +955,15 @@ const prepareTelegramStarsPurchase = (
       ok: true,
       purchase: {
         kind: "starter_pack_buy",
-        productRef: "starter-pack-v1",
+        productRef: "catchup-pack-v1",
         starsAmount: TELEGRAM_STARS_STARTER_PACK,
-        title: "Starter Pack",
-        description: "One-time bundle with gold, consumables, and World Boss tickets.",
+        title: "Season Catch-up Pack",
+        description: "One-time boost for heroes below level 60: instant level 60 and progression bundle.",
         reward: {
+          targetLevel: STARTER_PACK_TARGET_LEVEL,
           gold: STARTER_PACK_GOLD,
           items: STARTER_PACK_ITEMS,
-          worldBossTickets: WORLD_BOSS_STARTER_TICKETS,
+          worldBossTickets: STARTER_PACK_WORLD_BOSS_TICKETS,
         },
       },
     };
@@ -1307,7 +1313,7 @@ const prepareTelegramTonPurchase = (
   }
 
   if (kind === "starter_pack_buy") {
-    const price = getTelegramTonPrice(kind, "starter-pack-v1", rail);
+    const price = getTelegramTonPrice(kind, "catchup-pack-v1", rail);
     if (!price) return { ok: false, error: "Payment pricing is not configured." };
     return {
       ok: true,
@@ -1315,14 +1321,15 @@ const prepareTelegramTonPurchase = (
         kind,
         rail,
         asset: rail === "ton" ? "TON" : "USDT",
-        productRef: "starter-pack-v1",
+        productRef: "catchup-pack-v1",
         amountUnits: price.units,
         amountDisplay: paymentAmountToDisplay(price.numeric),
-        title: "Starter Pack",
+        title: "Season Catch-up Pack",
         reward: {
+          targetLevel: STARTER_PACK_TARGET_LEVEL,
           gold: STARTER_PACK_GOLD,
           items: STARTER_PACK_ITEMS,
-          worldBossTickets: WORLD_BOSS_STARTER_TICKETS,
+          worldBossTickets: STARTER_PACK_WORLD_BOSS_TICKETS,
         },
       },
     };
@@ -1691,29 +1698,41 @@ const verifyMinerPaymentTx = async (
 const normalizeConsumables = (raw: unknown) => {
   if (!Array.isArray(raw)) return { rows: [] as ConsumableRow[], maxId: 0 };
 
-  const rows: ConsumableRow[] = [];
-  const seenIds = new Set<number>();
+  const byType = new Map<ConsumableType, ConsumableRow>();
   let maxId = 0;
   for (const entry of raw) {
     if (!entry || typeof entry !== "object") continue;
     const row = entry as Record<string, unknown>;
     const id = Math.max(1, asInt(row.id, 0));
+    const qty = Math.max(1, asInt(row.qty, 1));
     const rawType = String(row.type ?? "");
     const typeRaw = rawType === "speed" ? "boss-mark" : rawType === "attack" ? "crystal-flask" : rawType;
-    if (!id || seenIds.has(id) || !isConsumableType(typeRaw)) continue;
+    if (!id || !isConsumableType(typeRaw)) continue;
     const def = CONSUMABLE_DEFS[typeRaw];
-    seenIds.add(id);
     maxId = Math.max(maxId, id);
-    rows.push({
+    const existing = byType.get(typeRaw);
+    if (existing) {
+      existing.qty += qty;
+      existing.id = Math.min(existing.id, id);
+      continue;
+    }
+    byType.set(typeRaw, {
       id,
       type: typeRaw,
+      qty,
       name: def.name,
       description: def.description,
       icon: "",
     });
   }
 
+  const rows = [...byType.values()].sort((left, right) => left.id - right.id);
   return { rows, maxId };
+};
+
+const cloneNormalizedConsumables = (raw: unknown) => {
+  const normalized = normalizeConsumables(raw);
+  return normalized.rows.map((entry) => ({ ...entry }));
 };
 
 const getXpForLevel = (levelRaw: number) => {
@@ -1952,6 +1971,7 @@ const createStarterProfileState = (seed: Record<string, unknown>, nowMs: number)
     monsterKills: 0,
     dungeonRuns: 0,
     starterPackPurchased: false,
+    seasonCatchupPackPurchased: false,
     premiumEndsAt: 0,
     premiumClaimDay: "",
     worldBossTickets: 0,
@@ -1964,15 +1984,119 @@ const createStarterProfileState = (seed: Record<string, unknown>, nowMs: number)
   } as Record<string, unknown>;
 };
 
+const getMaxEquipmentItemIdFromState = (state: Record<string, unknown>) => {
+  let maxId = 0;
+  const scan = (row: unknown) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return;
+    maxId = Math.max(maxId, Math.max(0, asInt((row as Record<string, unknown>).id, 0)));
+  };
+
+  if (Array.isArray(state.inventory)) {
+    for (const item of state.inventory) scan(item);
+  }
+
+  const equipment = state.equipment;
+  if (equipment && typeof equipment === "object" && !Array.isArray(equipment)) {
+    for (const slot of EQUIPMENT_SLOT_IDS) {
+      scan((equipment as Record<string, unknown>)[slot]);
+    }
+  }
+
+  scan(state.pendingLoot);
+  return maxId;
+};
+
+const buildStarterPackLegendaryItem = (slot: EquipmentSlot, id: number) => {
+  const rarity = EQUIPMENT_RARITIES.find((entry) => entry.name === "Legendary");
+  if (!rarity) {
+    throw new Error("Legendary rarity config is missing.");
+  }
+  const slotIndex = Math.max(0, EQUIPMENT_SLOT_IDS.indexOf(slot));
+  const baseNames = EQUIPMENT_BASE_NAMES[slot];
+  const prefix = EQUIPMENT_PREFIXES[(slotIndex + 3) % EQUIPMENT_PREFIXES.length];
+  const baseName = baseNames[(slotIndex + 1) % baseNames.length];
+  return {
+    id,
+    name: `${prefix} ${baseName}`,
+    slot,
+    level: STARTER_PACK_TARGET_LEVEL,
+    rarity: rarity.name,
+    color: rarity.color,
+    bonuses: buildEquipmentStats(slot, rarity, STARTER_PACK_TARGET_LEVEL, {
+      power: 0.62,
+      fortune: 0.58,
+      prosperity: 0.6,
+    }),
+    effect: buildEquipmentEffect(slot, rarity, STARTER_PACK_TARGET_LEVEL, 0.55),
+    tierScore: computeItemTierScore(STARTER_PACK_TARGET_LEVEL, rarity),
+    sellValue: computeSellValue(STARTER_PACK_TARGET_LEVEL, rarity),
+  };
+};
+
+const applyStarterPackRewards = (state: Record<string, unknown>) => {
+  if (Boolean(state.seasonCatchupPackPurchased)) {
+    throw new Error("Catch-up pack is already activated on this account.");
+  }
+
+  const playerRaw = (state.player as Record<string, unknown> | undefined) ?? {};
+  const currentLevel = clampInt(playerRaw.level, 1, MAX_LEVEL);
+  if (currentLevel >= STARTER_PACK_TARGET_LEVEL) {
+    throw new Error(`Catch-up pack is available only below level ${STARTER_PACK_TARGET_LEVEL}.`);
+  }
+
+  state.player = {
+    ...playerRaw,
+    level: STARTER_PACK_TARGET_LEVEL,
+    xp: 0,
+    xpNext: getXpForLevel(STARTER_PACK_TARGET_LEVEL),
+  };
+  state.gold = Math.max(0, asInt(state.gold, 0)) + STARTER_PACK_GOLD;
+  for (const entry of STARTER_PACK_ITEMS) {
+    for (let i = 0; i < entry.qty; i += 1) addConsumableToState(state, entry.type);
+  }
+
+  const nextEquipment = Object.fromEntries(EQUIPMENT_SLOT_IDS.map((slot) => [slot, null])) as Record<EquipmentSlot, Record<string, unknown> | null>;
+  const existingInventory = Array.isArray(state.inventory) ? [...state.inventory] : [];
+  const currentEquipment = state.equipment && typeof state.equipment === "object" && !Array.isArray(state.equipment)
+    ? state.equipment as Record<string, unknown>
+    : {};
+
+  for (const slot of EQUIPMENT_SLOT_IDS) {
+    const equipped = currentEquipment[slot];
+    if (equipped && typeof equipped === "object" && !Array.isArray(equipped) && existingInventory.length < INVENTORY_ITEM_CAP) {
+      existingInventory.push(equipped);
+    }
+  }
+
+  let nextId = getMaxEquipmentItemIdFromState(state);
+  for (const slot of EQUIPMENT_SLOT_IDS) {
+    nextId += 1;
+    nextEquipment[slot] = buildStarterPackLegendaryItem(slot, nextId);
+  }
+
+  state.inventory = existingInventory.slice(0, INVENTORY_ITEM_CAP);
+  state.equipment = nextEquipment;
+  state.seasonCatchupPackPurchased = true;
+};
+
 const addConsumableToState = (state: Record<string, unknown>, type: ConsumableType) => {
   const normalized = normalizeConsumables(state.consumables);
-  const currentId = Math.max(asInt(state.consumableId, 0), normalized.maxId);
+  const existing = normalized.rows.find((entry) => entry.type === type);
+  if (existing) {
+    state.consumables = normalized.rows.map((entry) =>
+      entry.type === type ? { ...entry, qty: Math.max(1, asInt(entry.qty, 1)) + 1 } : entry
+    );
+    state.consumableId = Math.max(asInt(state.consumableId, 0), normalized.maxId);
+    return;
+  }
+  const currentId = Math.max(asInt(state.consumableId, 0), normalized.maxId, ...normalized.rows.map((entry) => entry.id), 0);
   const nextId = currentId + 1;
   const def = CONSUMABLE_DEFS[type];
   const nextRows = [
     {
       id: nextId,
       type,
+      qty: 1,
       name: def.name,
       description: def.description,
       icon: "",
@@ -1984,7 +2108,9 @@ const addConsumableToState = (state: Record<string, unknown>, type: ConsumableTy
 };
 
 const countConsumablesByType = (state: Record<string, unknown>, type: ConsumableType) =>
-  normalizeConsumables(state.consumables).rows.filter((entry) => entry.type === type).length;
+  normalizeConsumables(state.consumables).rows
+    .filter((entry) => entry.type === type)
+    .reduce((sum, entry) => sum + Math.max(1, asInt(entry.qty, 1)), 0);
 
 const removeConsumableFromState = (
   state: Record<string, unknown>,
@@ -1993,12 +2119,16 @@ const removeConsumableFromState = (
 ) => {
   const normalized = normalizeConsumables(state.consumables);
   let removed = false;
-  const nextRows = normalized.rows.filter((entry) => {
-    if (removed || entry.type != type) return true;
-    if (consumableId && entry.id != consumableId) return true;
-    removed = true;
-    return false;
-  });
+  const nextRows = normalized.rows
+    .map((entry) => {
+      if (removed || entry.type != type) return entry;
+      if (consumableId && entry.id != consumableId) return entry;
+      removed = true;
+      const qty = Math.max(1, asInt(entry.qty, 1));
+      if (qty <= 1) return null;
+      return { ...entry, qty: qty - 1 };
+    })
+    .filter((entry): entry is ConsumableRow => Boolean(entry));
   if (!removed) return false;
   state.consumables = nextRows;
   state.consumableId = Math.max(asInt(state.consumableId, 0), normalized.maxId);
@@ -2492,6 +2622,7 @@ const normalizeState = (raw: unknown) => {
   state.tickets = clampInt(state.tickets, 0, 30);
   state.worldBossTickets = Math.max(0, asInt(state.worldBossTickets, 0));
   state.starterPackPurchased = Boolean(state.starterPackPurchased);
+  state.seasonCatchupPackPurchased = Boolean(state.seasonCatchupPackPurchased);
   state.premiumEndsAt = Math.max(0, asInt(state.premiumEndsAt, 0));
   state.premiumClaimDay = String(state.premiumClaimDay ?? "").slice(0, 10);
   state.bossMarkCycleStart = String(state.bossMarkCycleStart ?? "").slice(0, 40);
@@ -2711,6 +2842,9 @@ const validateStateTransition = (
   const prevStarter = Boolean(prevState.starterPackPurchased);
   const nextStarter = Boolean(nextState.starterPackPurchased);
   if (prevStarter && !nextStarter) return "Starter pack rollback is not allowed.";
+  const prevCatchup = Boolean(prevState.seasonCatchupPackPurchased);
+  const nextCatchup = Boolean(nextState.seasonCatchupPackPurchased);
+  if (prevCatchup && !nextCatchup) return "Catch-up pack rollback is not allowed.";
 
   const prevStake = stakeStats(prevState);
   const stakeIncrease = Math.max(0, nextStake.total - prevStake.total);
@@ -3232,6 +3366,7 @@ const getWorldBossTicketProfileFlags = async (
     return {
       ok: true as const,
       starterPackPurchased: false,
+      seasonCatchupPackPurchased: false,
       premiumActive: false,
     };
   }
@@ -3241,6 +3376,7 @@ const getWorldBossTicketProfileFlags = async (
     return {
       ok: true as const,
       starterPackPurchased: false,
+      seasonCatchupPackPurchased: false,
       premiumActive: false,
     };
   }
@@ -3248,6 +3384,7 @@ const getWorldBossTicketProfileFlags = async (
   return {
     ok: true as const,
     starterPackPurchased: Boolean(profile.starterPackPurchased),
+    seasonCatchupPackPurchased: Boolean(profile.seasonCatchupPackPurchased),
     premiumActive: Math.max(0, asInt(profile.premiumEndsAt, 0)) > now.getTime(),
   };
 };
@@ -3295,8 +3432,8 @@ const ensureWorldBossTicketState = async (
     let nextStarterGranted = current.starter_ticket_granted;
     let changed = false;
 
-    if (flags.starterPackPurchased && !nextStarterGranted) {
-      nextTickets += WORLD_BOSS_STARTER_TICKETS;
+    if (!nextStarterGranted && (flags.seasonCatchupPackPurchased || flags.starterPackPurchased)) {
+      nextTickets += flags.seasonCatchupPackPurchased ? STARTER_PACK_WORLD_BOSS_TICKETS : WORLD_BOSS_STARTER_TICKETS;
       nextStarterGranted = true;
       changed = true;
     }
@@ -4508,6 +4645,10 @@ serve(async (req) => {
     for (let attempt = 0; attempt < 4; attempt += 1) {
       const attemptNow = new Date();
       const attemptNowIso = attemptNow.toISOString();
+      const dungeonStateResult = await ensureDungeonTicketState(supabase, auth.wallet, attemptNow);
+      if (!dungeonStateResult.ok || !dungeonStateResult.state) {
+        return json({ ok: false, error: dungeonStateResult.error || "Failed to load dungeon state." });
+      }
       const { data: profileRow, error: profileError } = await supabase
         .from("profiles")
         .select("state, updated_at")
@@ -4525,6 +4666,8 @@ serve(async (req) => {
       if (!state) {
         return json({ ok: false, error: "Invalid profile state." });
       }
+      state.tickets = Math.max(0, asInt(dungeonStateResult.state.tickets, 0));
+      state.ticketDay = String(dungeonStateResult.state.ticket_day ?? "");
 
       const energyUpdatedAtMs = Math.max(0, asInt(state.energyUpdatedAt, 0));
       const fallbackUpdatedAtMs = profileRow.updated_at ? new Date(String(profileRow.updated_at)).getTime() : Number.NaN;
@@ -4680,6 +4823,18 @@ serve(async (req) => {
         if (Math.max(0, asInt(normalizedState.energyUpdatedAt, 0)) <= 0) {
           normalizedState.energyUpdatedAt = attemptNow.getTime();
         }
+        normalizedState.tickets = Math.max(0, asInt(prevState.tickets, 0));
+        normalizedState.ticketDay = String(prevState.ticketDay ?? normalizedState.ticketDay ?? "");
+        normalizedState.worldBossTickets = Math.max(0, asInt(prevState.worldBossTickets, 0));
+        normalizedState.bossMarkCycleStart = String(prevState.bossMarkCycleStart ?? "");
+        normalizedState.crystalFlaskRuns = Math.max(0, asInt(prevState.crystalFlaskRuns, 0));
+        normalizedState.consumables = cloneNormalizedConsumables(prevState.consumables);
+        normalizedState.consumableId = Math.max(
+          asInt(normalizedState.consumableId, 0),
+          asInt(prevState.consumableId, 0),
+          ...((normalizedState.consumables as ConsumableRow[]).map((entry) => entry.id)),
+          0,
+        );
         const minerState = getMinerLeaseState(prevState, attemptNow.getTime());
         normalizedState.miners = minerState.leases;
         normalizedState.minerLeaseId = minerState.leaseId;
@@ -4965,8 +5120,12 @@ serve(async (req) => {
       if (!state) {
         return json({ ok: false, error: "Profile not found." });
       }
-      if (Boolean(state.starterPackPurchased)) {
-        return json({ ok: false, error: "Starter pack already purchased." });
+      if (Boolean(state.seasonCatchupPackPurchased)) {
+        return json({ ok: false, error: "Season Catch-up Pack already purchased." });
+      }
+      const level = clampInt((state.player as Record<string, unknown> | undefined)?.level, 1, MAX_LEVEL);
+      if (level >= STARTER_PACK_TARGET_LEVEL) {
+        return json({ ok: false, error: `Season Catch-up Pack is available only below level ${STARTER_PACK_TARGET_LEVEL}.` });
       }
     }
 
@@ -5182,16 +5341,7 @@ serve(async (req) => {
       };
     } else if (orderKind === "starter_pack_buy") {
       const creditResult = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
-        if (Boolean(state.starterPackPurchased)) {
-          throw new Error("Starter pack is already activated on this account.");
-        }
-        state.gold = Math.max(0, asInt(state.gold, 0)) + STARTER_PACK_GOLD;
-        for (const entry of STARTER_PACK_ITEMS) {
-          for (let i = 0; i < entry.qty; i += 1) {
-            addConsumableToState(state, entry.type);
-          }
-        }
-        state.starterPackPurchased = true;
+        applyStarterPackRewards(state);
       });
 
       if (!creditResult.ok || !creditResult.state) {
@@ -5201,13 +5351,27 @@ serve(async (req) => {
           .eq("id", orderId)
           .eq("wallet", auth.wallet)
           .eq("status", "claiming");
-        return json({ ok: false, error: creditResult.error || "Failed to activate starter pack." });
+        return json({ ok: false, error: creditResult.error || "Failed to activate Season Catch-up Pack." });
+      }
+
+      const ticketSync = await ensureWorldBossTicketState(supabase, auth.wallet, now);
+      if (!ticketSync.ok || !ticketSync.state) {
+        await supabase
+          .from("telegram_stars_orders")
+          .update({ status: "paid", updated_at: new Date().toISOString() })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: ticketSync.error || "Failed to sync World Boss tickets." });
       }
 
       payload = {
-        starterPackPurchased: true,
+        seasonCatchupPackPurchased: true,
         gold: Math.max(0, asInt(creditResult.state.gold, 0)),
+        worldBossTickets: Math.max(0, asInt(ticketSync.state.tickets, 0)),
         consumables: normalizeConsumables(creditResult.state.consumables).rows,
+        equipment: creditResult.state.equipment,
+        player: creditResult.state.player,
         savedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
       };
     } else if (orderKind === "premium_buy") {
@@ -5413,8 +5577,12 @@ serve(async (req) => {
       if (!state) {
         return json({ ok: false, error: "Profile not found." });
       }
-      if (Boolean(state.starterPackPurchased)) {
-        return json({ ok: false, error: "Starter pack already purchased." });
+      if (Boolean(state.seasonCatchupPackPurchased)) {
+        return json({ ok: false, error: "Season Catch-up Pack already purchased." });
+      }
+      const level = clampInt((state.player as Record<string, unknown> | undefined)?.level, 1, MAX_LEVEL);
+      if (level >= STARTER_PACK_TARGET_LEVEL) {
+        return json({ ok: false, error: `Season Catch-up Pack is available only below level ${STARTER_PACK_TARGET_LEVEL}.` });
       }
     }
 
@@ -5757,14 +5925,7 @@ serve(async (req) => {
       };
     } else if (orderKind === "starter_pack_buy") {
       const creditResult = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
-        if (Boolean(state.starterPackPurchased)) {
-          throw new Error("Starter pack is already activated on this account.");
-        }
-        state.gold = Math.max(0, asInt(state.gold, 0)) + STARTER_PACK_GOLD;
-        for (const entry of STARTER_PACK_ITEMS) {
-          for (let i = 0; i < entry.qty; i += 1) addConsumableToState(state, entry.type);
-        }
-        state.starterPackPurchased = true;
+        applyStarterPackRewards(state);
       });
 
       if (!creditResult.ok || !creditResult.state) {
@@ -5774,13 +5935,27 @@ serve(async (req) => {
           .eq("id", orderId)
           .eq("wallet", auth.wallet)
           .eq("status", "claiming");
-        return json({ ok: false, error: creditResult.error || "Failed to activate starter pack." });
+        return json({ ok: false, error: creditResult.error || "Failed to activate Season Catch-up Pack." });
+      }
+
+      const ticketSync = await ensureWorldBossTicketState(supabase, auth.wallet, now);
+      if (!ticketSync.ok || !ticketSync.state) {
+        await supabase
+          .from("telegram_ton_orders")
+          .update({ status: "pending", updated_at: new Date().toISOString(), claim_error: ticketSync.error || "World Boss ticket sync failed." })
+          .eq("id", orderId)
+          .eq("wallet", auth.wallet)
+          .eq("status", "claiming");
+        return json({ ok: false, error: ticketSync.error || "Failed to sync World Boss tickets." });
       }
 
       payload = {
-        starterPackPurchased: true,
+        seasonCatchupPackPurchased: true,
         gold: Math.max(0, asInt(creditResult.state.gold, 0)),
+        worldBossTickets: Math.max(0, asInt(ticketSync.state.tickets, 0)),
         consumables: normalizeConsumables(creditResult.state.consumables).rows,
+        equipment: creditResult.state.equipment,
+        player: creditResult.state.player,
         savedAt: typeof creditResult.updatedAt === "string" ? creditResult.updatedAt : undefined,
       };
     } else if (orderKind === "premium_buy") {
@@ -6249,8 +6424,11 @@ serve(async (req) => {
     }
 
     const creditResult = await updateProfileWithRetry(supabase, auth.wallet, (state) => {
-      state.tickets = Math.min(MAX_TICKETS, Math.max(0, asInt(state.tickets, 0)) + claimedKeys);
+      for (let i = 0; i < claimedKeys; i += 1) {
+        addConsumableToState(state, "key");
+      }
       state.crystals = Math.max(0, asInt(state.crystals, 0)) + claimedCrystals;
+      state.crystalsEarned = Math.max(0, asInt(state.crystalsEarned, 0)) + claimedCrystals;
     });
 
     if (!creditResult.ok || !creditResult.state) {
@@ -6273,6 +6451,7 @@ serve(async (req) => {
       claimedCrystals,
       tickets: Math.max(0, asInt(creditResult.state.tickets, 0)),
       crystals: Math.max(0, asInt(creditResult.state.crystals, 0)),
+      consumables: normalizeConsumables(creditResult.state.consumables).rows,
     });
   }
 
@@ -6348,12 +6527,18 @@ serve(async (req) => {
         .maybeSingle();
       const state = normalizeState(profileRow?.state ?? null);
       if (!state) return json({ ok: false, error: "Profile not found." });
+      const ticketSync = await ensureWorldBossTicketState(supabase, auth.wallet, now);
       return json({
         ok: true,
         starterPackAlreadyProcessed: true,
-        starterPackPurchased: Boolean(state.starterPackPurchased),
+        seasonCatchupPackPurchased: Boolean(state.seasonCatchupPackPurchased),
         gold: Math.max(0, asInt(state.gold, 0)),
+        worldBossTickets: ticketSync.ok && ticketSync.state
+          ? Math.max(0, asInt(ticketSync.state.tickets, 0))
+          : Math.max(0, asInt(state.worldBossTickets, 0)),
         consumables: normalizeConsumables(state.consumables).rows,
+        equipment: state.equipment,
+        player: state.player,
         savedAt: String(profileRow?.updated_at ?? ""),
       });
     }
@@ -6376,24 +6561,28 @@ serve(async (req) => {
 
       const state = normalizeState(profileRow.state as unknown);
       if (!state) return json({ ok: false, error: "Invalid profile state." });
-      if (Boolean(state.starterPackPurchased)) {
+      if (Boolean(state.seasonCatchupPackPurchased)) {
+        const ticketSync = await ensureWorldBossTicketState(supabase, auth.wallet, now);
         return json({
           ok: true,
           starterPackAlreadyProcessed: true,
-          starterPackPurchased: true,
+          seasonCatchupPackPurchased: true,
           gold: Math.max(0, asInt(state.gold, 0)),
+          worldBossTickets: ticketSync.ok && ticketSync.state
+            ? Math.max(0, asInt(ticketSync.state.tickets, 0))
+            : Math.max(0, asInt(state.worldBossTickets, 0)),
           consumables: normalizeConsumables(state.consumables).rows,
+          equipment: state.equipment,
+          player: state.player,
           savedAt: String(profileRow.updated_at ?? ""),
         });
       }
-
-      state.gold = Math.max(0, asInt(state.gold, 0)) + STARTER_PACK_GOLD;
-      for (const entry of STARTER_PACK_ITEMS) {
-        for (let i = 0; i < entry.qty; i += 1) {
-          addConsumableToState(state, entry.type);
-        }
+      const level = clampInt((state.player as Record<string, unknown> | undefined)?.level, 1, MAX_LEVEL);
+      if (level >= STARTER_PACK_TARGET_LEVEL) {
+        return json({ ok: false, error: `Season Catch-up Pack is available only below level ${STARTER_PACK_TARGET_LEVEL}.` });
       }
-      state.starterPackPurchased = true;
+
+      applyStarterPackRewards(state);
 
       const nowIso = new Date().toISOString();
       const expectedUpdatedAt = String(profileRow.updated_at ?? "");
@@ -6420,20 +6609,29 @@ serve(async (req) => {
         lamports: STARTER_PACK_PRICE_LAMPORTS,
         txBlockTime: txCheck.blockTime,
         txSlot: txCheck.slot,
+        targetLevel: STARTER_PACK_TARGET_LEVEL,
         gold: Math.max(0, asInt(state.gold, 0)),
       });
+
+      const ticketSync = await ensureWorldBossTicketState(supabase, auth.wallet, now);
+      if (!ticketSync.ok || !ticketSync.state) {
+        return json({ ok: false, error: ticketSync.error || "Failed to sync World Boss tickets." });
+      }
 
       return json({
         ok: true,
         starterPackAlreadyProcessed: false,
-        starterPackPurchased: true,
+        seasonCatchupPackPurchased: true,
         gold: Math.max(0, asInt(state.gold, 0)),
+        worldBossTickets: Math.max(0, asInt(ticketSync.state.tickets, 0)),
         consumables: normalizeConsumables(state.consumables).rows,
+        equipment: state.equipment,
+        player: state.player,
         savedAt: nowIso,
       });
     }
 
-    return json({ ok: false, error: "Profile changed concurrently, retry starter pack activation." });
+    return json({ ok: false, error: "Profile changed concurrently, retry catch-up pack activation." });
   }
 
   if (action === "miner_buy") {
@@ -6626,7 +6824,9 @@ serve(async (req) => {
         return json({ ok: false, error: "Daily Premium rewards already claimed today." });
       }
 
-      state.tickets = Math.min(MAX_TICKETS, Math.max(0, asInt(state.tickets, 0)) + PREMIUM_DAILY_KEYS);
+      for (let i = 0; i < PREMIUM_DAILY_KEYS; i += 1) {
+        addConsumableToState(state, "key");
+      }
       state.worldBossTickets = Math.max(0, asInt(state.worldBossTickets, 0)) + WORLD_BOSS_PREMIUM_DAILY_TICKETS;
       state.gold = Math.max(0, asInt(state.gold, 0)) + PREMIUM_DAILY_GOLD;
       for (let i = 0; i < PREMIUM_DAILY_SMALL_POTIONS; i += 1) {
@@ -6655,27 +6855,26 @@ serve(async (req) => {
         .maybeSingle();
 
       if (!updateError && updated) {
-        const dungeonGrant = await adjustDungeonTickets(supabase, auth.wallet, PREMIUM_DAILY_KEYS, now);
+        const dungeonState = await ensureDungeonTicketState(supabase, auth.wallet, now);
         const worldBossGrant = await adjustWorldBossTickets(
           supabase,
           auth.wallet,
           WORLD_BOSS_PREMIUM_DAILY_TICKETS,
           now,
         );
-        const syncedTickets = dungeonGrant.ok && dungeonGrant.state
-          ? Math.max(0, asInt(dungeonGrant.state.tickets, 0))
+        const syncedTickets = dungeonState.ok && dungeonState.state
+          ? Math.max(0, asInt(dungeonState.state.tickets, 0))
           : Math.max(0, asInt(state.tickets, 0));
-        const syncedTicketDay = dungeonGrant.ok && dungeonGrant.state
-          ? String(dungeonGrant.state.ticket_day ?? dayKey)
+        const syncedTicketDay = dungeonState.ok && dungeonState.state
+          ? String(dungeonState.state.ticket_day ?? dayKey)
           : String(state.ticketDay ?? dayKey);
         const syncedWorldBossTickets = worldBossGrant.ok && worldBossGrant.state
           ? Math.max(0, asInt(worldBossGrant.state.tickets, 0))
           : Math.max(0, asInt(state.worldBossTickets, 0));
-        const hasTicketGrantFailure = !dungeonGrant.ok || !worldBossGrant.ok;
-        if (hasTicketGrantFailure) {
+        if (!worldBossGrant.ok) {
           await auditEvent(supabase, auth.wallet, "premium_claim_daily_ticket_grant_partial", {
             dayKey,
-            dungeonGrantError: dungeonGrant.ok ? "" : dungeonGrant.error,
+            dungeonGrantError: "",
             worldBossGrantError: worldBossGrant.ok ? "" : worldBossGrant.error,
           });
         }
@@ -6693,7 +6892,7 @@ serve(async (req) => {
           worldBossTickets: syncedWorldBossTickets,
           gold: Math.max(0, asInt(state.gold, 0)),
           premiumClaimDay: dayKey,
-          consumables: state.consumables,
+          consumables: normalizeConsumables(state.consumables).rows,
         });
       }
     }
@@ -7419,14 +7618,23 @@ serve(async (req) => {
 
   if (action === "shop_buy_consumable") {
     const consumableTypeRaw = String(body.type ?? "").trim();
-    const consumableType = consumableTypeRaw === "boss-mark" || consumableTypeRaw === "crystal-flask"
+    const consumableType = consumableTypeRaw === "boss-mark" ||
+        consumableTypeRaw === "crystal-flask" ||
+        consumableTypeRaw === "energy-small" ||
+        consumableTypeRaw === "energy-full"
       ? consumableTypeRaw as ConsumableType
       : null;
     if (!consumableType) {
       return json({ ok: false, error: "Invalid consumable type." });
     }
 
-    const cost = consumableType === "boss-mark" ? 20000 : 7500;
+    const cost = consumableType === "boss-mark"
+      ? 20000
+      : consumableType === "crystal-flask"
+        ? 7500
+        : consumableType === "energy-small"
+          ? SHOP_ENERGY_TONIC_COST_GOLD
+          : SHOP_GRAND_ENERGY_ELIXIR_COST_GOLD;
     for (let attempt = 0; attempt < 4; attempt += 1) {
       const { data: profileRow, error: profileError } = await supabase
         .from("profiles")
@@ -7603,13 +7811,7 @@ serve(async (req) => {
       const limitUpdate = await incrementDungeonShopKeyBuys(supabase, auth.wallet, now);
       if (!limitUpdate.ok || !limitUpdate.state) {
         await updateProfileWithRetry(supabase, auth.wallet, (rollbackState) => {
-          const normalized = normalizeConsumables(rollbackState.consumables);
-          const hadAdded = normalized.rows.some((entry) => entry.id === addedConsumableId);
-          rollbackState.consumables = hadAdded
-            ? normalized.rows.filter((entry) => entry.id !== addedConsumableId)
-            : normalized.rows;
-          const maxId = normalized.rows.reduce((max, entry) => Math.max(max, entry.id), 0);
-          rollbackState.consumableId = Math.max(asInt(rollbackState.consumableId, 0), maxId);
+          const hadAdded = removeConsumableFromState(rollbackState, "key", addedConsumableId || null);
           if (hadAdded) {
             rollbackState.gold = Math.max(0, asInt(rollbackState.gold, 0)) + SHOP_DUNGEON_KEY_COST_GOLD;
           }

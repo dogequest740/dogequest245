@@ -346,6 +346,7 @@ type EquipmentItem = {
 type ConsumableItem = {
   id: number
   type: ConsumableType
+  qty: number
   name: string
   description: string
   icon: string
@@ -447,6 +448,7 @@ type PersistedState = {
   monsterKills: number
   dungeonRuns: number
   starterPackPurchased: boolean
+  seasonCatchupPackPurchased: boolean
   premiumEndsAt: number
   premiumClaimDay: string
   worldBossTickets: number
@@ -576,6 +578,7 @@ type DungeonSecureResponse = {
   tickets?: number
   ticketDay?: string
   dungeonRuns?: number
+  consumables?: Array<{ id?: number; type?: string; qty?: number }>
   reward?: number
   crystals?: number
   crystalsEarned?: number
@@ -639,6 +642,9 @@ type GameSecureResponse = {
   buyGoldAlreadyProcessed?: boolean
   starterPackAlreadyProcessed?: boolean
   starterPackPurchased?: boolean
+  seasonCatchupPackPurchased?: boolean
+  player?: Record<string, unknown>
+  equipment?: Record<string, unknown>
   miners?: MinerLease[]
   minerLeaseId?: number
   minerCarryCrystals?: number
@@ -663,7 +669,7 @@ type GameSecureResponse = {
   premiumDaysAdded?: number
   premiumAlreadyProcessed?: boolean
   premiumClaimDay?: string
-  consumables?: Array<{ id?: number; type?: string }>
+  consumables?: Array<{ id?: number; type?: string; qty?: number }>
   questStates?: Record<string, QuestState>
   crystalTasks?: CrystalTaskStatus[]
   adBlockId?: string
@@ -947,6 +953,7 @@ type GameState = {
   worldBoss: WorldBossState
   questStates: Record<string, QuestState>
   starterPackPurchased: boolean
+  seasonCatchupPackPurchased: boolean
   premiumEndsAt: number
   premiumClaimDay: string
   worldBossTickets: number
@@ -990,6 +997,7 @@ type HudState = {
   worldBoss: WorldBossState
   questStates: Record<string, QuestState>
   starterPackPurchased: boolean
+  seasonCatchupPackPurchased: boolean
   premiumEndsAt: number
   premiumClaimDay: string
   worldBossTickets: number
@@ -1164,11 +1172,12 @@ const CONSUMABLE_DEFS: Record<ConsumableType, { name: string; description: strin
   key: { name: 'Dungeon Key', description: '+1 dungeon entry.', icon: iconKey },
 }
 
-const createConsumable = (id: number, type: ConsumableType): ConsumableItem => {
+const createConsumable = (id: number, type: ConsumableType, qty = 1): ConsumableItem => {
   const def = CONSUMABLE_DEFS[type]
   return {
     id,
     type,
+    qty: Math.max(1, Math.floor(qty)),
     name: def.name,
     description: def.description,
     icon: def.icon,
@@ -1177,19 +1186,26 @@ const createConsumable = (id: number, type: ConsumableType): ConsumableItem => {
 
 const normalizeLoadedConsumables = (value: unknown): ConsumableItem[] => {
   if (!Array.isArray(value)) return []
-  const normalized: ConsumableItem[] = []
+  const byType = new Map<ConsumableType, ConsumableItem>()
   for (const entry of value) {
     if (!entry || typeof entry !== 'object') continue
-    const row = entry as Partial<ConsumableItem>
+    const row = entry as Partial<ConsumableItem> & { qty?: unknown }
     const id = Math.max(1, Math.floor(Number(row.id ?? 0)))
+    const qty = Math.max(1, Math.floor(Number(row.qty ?? 1)))
     const rawType = String(row.type ?? '')
     const typeRaw = rawType === 'speed' ? 'boss-mark' : rawType === 'attack' ? 'crystal-flask' : rawType
     if (!Number.isFinite(id) || id <= 0) continue
     if (!(typeRaw in CONSUMABLE_DEFS)) continue
     const type = typeRaw as ConsumableType
-    normalized.push(createConsumable(id, type))
+    const existing = byType.get(type)
+    if (existing) {
+      existing.qty += qty
+      existing.id = Math.min(existing.id, id)
+      continue
+    }
+    byType.set(type, createConsumable(id, type, qty))
   }
-  return normalized
+  return [...byType.values()].sort((left, right) => left.id - right.id)
 }
 
 const scaleRewardGold = (index: number, total: number, min: number, max: number) => {
@@ -1317,11 +1333,12 @@ const GOLD_PACKAGES_USDT: Record<(typeof GOLD_PACKAGES_SOL)[number]['id'], numbe
   'gold-1200k': 22,
 }
 const STARTER_PACK_PRICE_STARS = 500
-const STARTER_PACK_PRICE_TON = 5
-const STARTER_PACK_PRICE_USDT = 6.75
-const STARTER_PACK_PRICE = 0.09
+const STARTER_PACK_PRICE_TON = 23
+const STARTER_PACK_PRICE_USDT = 30
+const STARTER_PACK_PRICE = 0.35
+const STARTER_PACK_TARGET_LEVEL = 60
 const STARTER_PACK_GOLD = 300000
-const STARTER_PACK_WORLD_BOSS_TICKETS = 5
+const STARTER_PACK_WORLD_BOSS_TICKETS = 15
 const MINER_LEASE_DURATION_DAYS = 30
 const MINER_DAY_MS = 24 * 60 * 60 * 1000
 const MINERS = [
@@ -1361,6 +1378,8 @@ const MINERS = [
 ] as const
 const SHOP_DUNGEON_KEY_COST = 25000
 const SHOP_DUNGEON_KEY_DAILY_LIMIT = 10
+const SHOP_ENERGY_TONIC_COST = 4500
+const SHOP_GRAND_ENERGY_ELIXIR_COST = 15000
 const SHOP_BOSS_MARK_COST = 20000
 const SHOP_CRYSTAL_FLASK_COST = 7500
 const WORLD_BOSS_TICKET_COST = 25000
@@ -1898,6 +1917,7 @@ const buildPersistedState = (state: GameState): PersistedState => ({
   monsterKills: state.monsterKills,
   dungeonRuns: state.dungeonRuns,
   starterPackPurchased: state.starterPackPurchased,
+  seasonCatchupPackPurchased: state.seasonCatchupPackPurchased,
   premiumEndsAt: state.premiumEndsAt,
   premiumClaimDay: state.premiumClaimDay,
   worldBossTickets: state.worldBossTickets,
@@ -1959,6 +1979,7 @@ const applyPersistedState = (state: GameState, saved: PersistedState, _savedUpda
   state.monsterKills = Math.max(0, saved.monsterKills ?? state.monsterKills)
   state.dungeonRuns = Math.max(0, saved.dungeonRuns ?? state.dungeonRuns)
   state.starterPackPurchased = Boolean(saved.starterPackPurchased)
+  state.seasonCatchupPackPurchased = Boolean(saved.seasonCatchupPackPurchased)
   state.premiumEndsAt = Math.max(0, Number(saved.premiumEndsAt ?? state.premiumEndsAt))
   state.premiumClaimDay = saved.premiumClaimDay || state.premiumClaimDay
   state.worldBossTickets = Math.max(0, saved.worldBossTickets ?? state.worldBossTickets)
@@ -3202,6 +3223,7 @@ const buildHud = (state: GameState): HudState => {
   worldBoss: state.worldBoss,
   questStates: state.questStates,
   starterPackPurchased: state.starterPackPurchased,
+  seasonCatchupPackPurchased: state.seasonCatchupPackPurchased,
   premiumEndsAt: state.premiumEndsAt,
   premiumClaimDay: state.premiumClaimDay,
   worldBossTickets: state.worldBossTickets,
@@ -3282,6 +3304,7 @@ const initGameState = (chosenClass: CharacterClass, name: string): GameState => 
     monsterHpScale: getMonsterHpMultiplier(player),
     worldBoss: createWorldBossState(name),
     starterPackPurchased: false,
+    seasonCatchupPackPurchased: false,
     premiumEndsAt: 0,
     premiumClaimDay: '',
     worldBossTickets: 0,
@@ -4482,11 +4505,11 @@ function App() {
     if (!result.ok && result.error) {
       handleSecurityAuthFailure(result.error, interactive)
     }
-    if (!options?.deferSavedAt && result.ok && typeof result.savedAt === 'string' && result.savedAt.trim()) {
-      profileUpdatedAtRef.current = result.savedAt
+    if (!options?.deferSavedAt && result.ok) {
+      acceptProfileVersion(result.savedAt)
     }
     if (result.ok && result.profile && typeof result.profile.updated_at === 'string' && result.profile.updated_at.trim()) {
-      profileUpdatedAtRef.current = result.profile.updated_at
+      acceptProfileVersion(result.profile.updated_at)
     }
     return result
   }
@@ -4746,6 +4769,9 @@ function App() {
         }
 
         if (result.tgStarsNoPending) break
+        if (isOlderProfileVersion(result.savedAt)) {
+          continue
+        }
 
         let applied = false
         if (typeof result.gold === 'number') {
@@ -4768,16 +4794,22 @@ function App() {
           state.starterPackPurchased = result.starterPackPurchased
           applied = true
         }
+        if (typeof result.seasonCatchupPackPurchased === 'boolean') {
+          state.seasonCatchupPackPurchased = result.seasonCatchupPackPurchased
+          applied = true
+        }
         if (Array.isArray(result.miners) || typeof result.minerLeaseId === 'number' || typeof result.minerCarryCrystals === 'number') {
           applyMinerStateFromResult(state, result)
           applied = true
         }
         if (result.consumables) {
-          state.consumables = normalizeLoadedConsumables(result.consumables)
+          applyServerConsumables(state, result.consumables)
           applied = true
         }
-        if (typeof result.savedAt === 'string' && result.savedAt) {
-          profileUpdatedAtRef.current = result.savedAt
+        if (applied) {
+          markServerStateApplied(state, result.savedAt)
+        } else {
+          acceptProfileVersion(result.savedAt)
         }
 
         if (result.tgStarsClaimed && result.tgStarsOrder) {
@@ -4785,10 +4817,10 @@ function App() {
           const label =
             order.kind === 'buy_gold'
               ? 'Gold ' + order.productRef
-              : order.kind === 'premium_buy'
-                ? 'Premium ' + order.productRef
+                : order.kind === 'premium_buy'
+                  ? 'Premium ' + order.productRef
                 : order.kind === 'starter_pack_buy'
-                  ? 'Starter Pack'
+                  ? 'Season Catch-up Pack'
                   : order.kind === 'miner_buy'
                     ? 'Miner ' + order.productRef
                     : 'Fortune ' + order.productRef
@@ -5112,8 +5144,12 @@ function App() {
   const buyStarterPack = async () => {
     const state = gameStateRef.current
     if (!state) return
-    if (state.starterPackPurchased) {
-      setStarterPackError('Starter pack already purchased.')
+    if (state.seasonCatchupPackPurchased) {
+      setStarterPackError('Season Catch-up Pack already purchased.')
+      return
+    }
+    if (state.player.level >= STARTER_PACK_TARGET_LEVEL) {
+      setStarterPackError(`Season Catch-up Pack is available only below level ${STARTER_PACK_TARGET_LEVEL}.`)
       return
     }
 
@@ -5125,7 +5161,7 @@ function App() {
           ? await createAndClaimTelegramStarsOrder(
             { kind: 'starter_pack_buy' },
             setStarterPackError,
-            'Payment confirmed. Activating starter pack...',
+            'Payment confirmed. Activating catch-up pack...',
           )
           : await createAndClaimTelegramTonOrder(
             { kind: 'starter_pack_buy' },
@@ -5133,27 +5169,65 @@ function App() {
             'Payment sent. Verifying on-chain transaction...',
           )
         if (!claimResult) return
+        if (isOlderProfileVersion(claimResult.savedAt)) return
 
         state.gold = Math.max(0, Math.floor(Number(claimResult.gold ?? state.gold)))
+        if (typeof claimResult.worldBossTickets === 'number') {
+          state.worldBossTickets = Math.max(0, Math.floor(Number(claimResult.worldBossTickets)))
+        }
         applyServerConsumables(state, claimResult.consumables)
-        state.starterPackPurchased = Boolean(claimResult.starterPackPurchased ?? true)
-        pushLog(state.eventLog, 'Starter Pack activated.')
+        if (claimResult.player && typeof claimResult.player === 'object') {
+          const player = claimResult.player as Record<string, unknown>
+          state.player.level = clamp(Number(player.level ?? state.player.level), 1, MAX_LEVEL)
+          state.player.xp = Math.max(0, Math.floor(Number(player.xp ?? state.player.xp)))
+          state.player.xpNext = Math.max(getXpForLevel(state.player.level), Math.floor(Number(player.xpNext ?? state.player.xpNext)))
+        }
+        if (claimResult.equipment && typeof claimResult.equipment === 'object') {
+          const rawEquipment = claimResult.equipment as Record<string, unknown>
+          const nextEquipment: Record<EquipmentSlot, EquipmentItem | null> = { ...state.equipment }
+          for (const slot of ['weapon', 'armor', 'head', 'legs', 'boots', 'artifact'] as EquipmentSlot[]) {
+            nextEquipment[slot] = normalizeLoadedEquipmentItem(rawEquipment[slot])
+          }
+          state.equipment = nextEquipment
+        }
+        state.seasonCatchupPackPurchased = Boolean(claimResult.seasonCatchupPackPurchased ?? true)
+        markServerStateApplied(state, claimResult.savedAt)
+        pushLog(state.eventLog, 'Season Catch-up Pack activated.')
         syncHud()
         setStarterPackError('')
         return
       }
 
       const signature = await submitTreasuryPayment(STARTER_PACK_PRICE)
-      setStarterPackError('Payment confirmed. Activating starter pack...')
+      setStarterPackError('Payment confirmed. Activating catch-up pack...')
       const result = await finalizePaymentCredit('starter_pack_buy', { txSignature: signature }, 7, 1200)
       if (!result.ok) {
-        setStarterPackError(`Payment sent (${signature.slice(0, 8)}...), but starter pack credit failed: ${result.error || 'unknown error'}.`)
+        setStarterPackError(`Payment sent (${signature.slice(0, 8)}...), but catch-up pack credit failed: ${result.error || 'unknown error'}.`)
         return
       }
+      if (isOlderProfileVersion(result.savedAt)) return
       state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
+      if (typeof result.worldBossTickets === 'number') {
+        state.worldBossTickets = Math.max(0, Math.floor(Number(result.worldBossTickets)))
+      }
       applyServerConsumables(state, result.consumables)
-      state.starterPackPurchased = Boolean(result.starterPackPurchased ?? true)
-      pushLog(state.eventLog, 'Starter Pack activated.')
+      if (result.player && typeof result.player === 'object') {
+        const player = result.player as Record<string, unknown>
+        state.player.level = clamp(Number(player.level ?? state.player.level), 1, MAX_LEVEL)
+        state.player.xp = Math.max(0, Math.floor(Number(player.xp ?? state.player.xp)))
+        state.player.xpNext = Math.max(getXpForLevel(state.player.level), Math.floor(Number(player.xpNext ?? state.player.xpNext)))
+      }
+      if (result.equipment && typeof result.equipment === 'object') {
+        const rawEquipment = result.equipment as Record<string, unknown>
+        const nextEquipment: Record<EquipmentSlot, EquipmentItem | null> = { ...state.equipment }
+        for (const slot of ['weapon', 'armor', 'head', 'legs', 'boots', 'artifact'] as EquipmentSlot[]) {
+          nextEquipment[slot] = normalizeLoadedEquipmentItem(rawEquipment[slot])
+        }
+        state.equipment = nextEquipment
+      }
+      state.seasonCatchupPackPurchased = Boolean(result.seasonCatchupPackPurchased ?? true)
+      markServerStateApplied(state, result.savedAt)
+      pushLog(state.eventLog, 'Season Catch-up Pack activated.')
       syncHud()
       setStarterPackError('')
     } catch (error) {
@@ -5641,10 +5715,26 @@ function App() {
     setSeasonTotalEffectiveCrystals(Math.max(0, Number(result.seasonTotalEffectiveCrystals ?? 0)))
   }
 
+  const parseProfileVersionMs = (value?: string | null) => {
+    if (typeof value !== 'string' || !value.trim()) return Number.NaN
+    return new Date(value).getTime()
+  }
+
+  const isOlderProfileVersion = (candidate?: string | null) => {
+    const candidateMs = parseProfileVersionMs(candidate)
+    const currentMs = parseProfileVersionMs(profileUpdatedAtRef.current)
+    return Number.isFinite(candidateMs) && Number.isFinite(currentMs) && candidateMs < currentMs
+  }
+
+  const acceptProfileVersion = (candidate?: string | null) => {
+    if (typeof candidate !== 'string' || !candidate.trim()) return false
+    if (isOlderProfileVersion(candidate)) return false
+    profileUpdatedAtRef.current = candidate
+    return true
+  }
+
   const markServerStateApplied = (state: GameState, savedAt?: string | null) => {
-    if (typeof savedAt === 'string' && savedAt.trim()) {
-      profileUpdatedAtRef.current = savedAt
-    }
+    acceptProfileVersion(savedAt)
     lastPersistedSnapshotRef.current = buildPersistedSnapshot(state)
   }
 
@@ -5654,6 +5744,7 @@ function App() {
     const freshResult = await loadProfileStateSecure(false)
     if (freshResult.status !== 'ok' || !freshResult.profile || !gameStateRef.current) return
     const fresh = freshResult.profile
+    if (isOlderProfileVersion(fresh.updatedAt)) return
     applyPersistedState(gameStateRef.current, fresh.state, fresh.updatedAt)
     markServerStateApplied(gameStateRef.current, fresh.updatedAt)
     syncHud()
@@ -5986,12 +6077,14 @@ function App() {
         return
       }
 
+      if (isOlderProfileVersion(result.savedAt)) return
       applyFortuneStatus(result)
       state.tickets = Math.max(0, Math.floor(Number(result.tickets ?? state.tickets)))
       state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
       state.crystals = Math.max(0, Math.floor(Number(result.crystals ?? state.crystals)))
       state.crystalsEarned = Math.max(0, Math.floor(Number(result.crystalsEarned ?? state.crystalsEarned)))
       applyServerConsumables(state, result.consumables)
+      markServerStateApplied(state, result.savedAt)
 
       const rewardFromServer = result.fortuneReward
       const rewardDef = getFortuneRewardById(String(rewardFromServer.id))
@@ -6117,14 +6210,12 @@ function App() {
         return
       }
 
-      state.tickets = Math.max(
-        0,
-        Math.floor(Number(result.tickets ?? Math.min(SHOP_TICKET_CAP, Math.max(0, Math.floor(state.tickets)) + claimKeys))),
-      )
+      state.tickets = Math.max(0, Math.floor(Number(result.tickets ?? state.tickets)))
       state.crystals = Math.max(0, Math.floor(Number(result.crystals ?? Math.max(0, Math.floor(state.crystals)) + claimCrystals)))
+      applyServerConsumables(state, result.consumables)
+      markServerStateApplied(state, result.savedAt)
       pushLog(state.eventLog, `Referral claim: +${claimKeys} keys, +${claimCrystals} crystals.`)
       syncHud()
-      void saveGameState()
       void loadReferralEntries(accountIdentity)
     } finally {
       setReferralClaimLoading(false)
@@ -6462,6 +6553,11 @@ function App() {
         if (!gameStateRef.current) return
         if (savedResult.status === 'ok' && savedResult.profile) {
           const saved = savedResult.profile
+          if (isOlderProfileVersion(saved.updatedAt)) {
+            serverLoadedRef.current = true
+            syncHud()
+            return
+          }
           isNewProfileRef.current = false
           referralProcessedRef.current = false
           profileUpdatedAtRef.current = saved.updatedAt || ''
@@ -6538,7 +6634,7 @@ function App() {
     if (stage !== 'game') return
     if (!usingTelegramAuth) return
     void loadPayoutWalletStatus(false)
-  }, [stage, accountIdentity, hud?.starterPackPurchased])
+  }, [stage, accountIdentity, hud?.seasonCatchupPackPurchased])
 
   useEffect(() => {
     if (stage !== 'game') return
@@ -6573,11 +6669,12 @@ function App() {
     if (stage !== 'game') return
     void loadFortuneStatus(false, true)
     if (!hud) return
-    if (hud.starterPackPurchased) return
+    if (hud.seasonCatchupPackPurchased) return
+    if (hud.level >= STARTER_PACK_TARGET_LEVEL) return
     if (starterPackAutoOpenRef.current) return
     starterPackAutoOpenRef.current = true
     setActivePanel('starterpack')
-  }, [stage, accountIdentity, hud?.starterPackPurchased])
+  }, [stage, accountIdentity, hud?.seasonCatchupPackPurchased, hud?.level])
 
   useEffect(() => {
     return () => {
@@ -6928,8 +7025,11 @@ function App() {
           const freshResult = await loadProfileStateSecure(false)
           if (freshResult.status === 'ok' && freshResult.profile) {
             const fresh = freshResult.profile
+            if (isOlderProfileVersion(fresh.updatedAt)) {
+              return
+            }
             if (fresh.updatedAt) {
-              profileUpdatedAtRef.current = fresh.updatedAt
+              acceptProfileVersion(fresh.updatedAt)
             }
             const current = gameStateRef.current
             if (current) {
@@ -7343,40 +7443,66 @@ function App() {
     syncHud()
   }
 
-  const addConsumable = (state: GameState, type: ConsumableType) => {
-    const consumable = createConsumable(++state.consumableId, type)
-    state.consumables = [consumable, ...state.consumables]
-    return consumable
-  }
-
-  const buyEnergyPotion = (cost: number) => {
+  const buyEnergyPotion = async (cost: number) => {
     const state = gameStateRef.current
     if (!state) return
+    if (!accountIdentity) {
+      pushLog(state.eventLog, 'Sign in to buy Energy Tonics.')
+      syncHud()
+      return
+    }
     if (state.gold < cost) {
       pushLog(state.eventLog, 'Not enough gold.')
       syncHud()
       return
     }
-    state.gold -= cost
-    addConsumable(state, 'energy-small')
-    pushLog(state.eventLog, 'Energy tonic added to consumables.')
-    syncHud()
-    void saveGameState()
+    try {
+      const result = await callGameSecureAuthed('shop_buy_consumable', { type: 'energy-small' }, true)
+      if (!result.ok) {
+        pushLog(state.eventLog, result.error || 'Failed to buy Energy Tonic.')
+        syncHud()
+        return
+      }
+      if (isOlderProfileVersion(result.savedAt)) return
+      state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
+      applyServerConsumables(state, result.consumables)
+      markServerStateApplied(state, result.savedAt)
+      pushLog(state.eventLog, 'Energy tonic added to consumables.')
+      syncHud()
+    } catch (error) {
+      console.warn('Energy Tonic purchase failed', error)
+    }
   }
 
-  const buyFullEnergy = (cost: number) => {
+  const buyFullEnergy = async (cost: number) => {
     const state = gameStateRef.current
     if (!state) return
+    if (!accountIdentity) {
+      pushLog(state.eventLog, 'Sign in to buy Grand Energy Elixirs.')
+      syncHud()
+      return
+    }
     if (state.gold < cost) {
       pushLog(state.eventLog, 'Not enough gold.')
       syncHud()
       return
     }
-    state.gold -= cost
-    addConsumable(state, 'energy-full')
-    pushLog(state.eventLog, 'Grand Energy Elixir added to consumables.')
-    syncHud()
-    void saveGameState()
+    try {
+      const result = await callGameSecureAuthed('shop_buy_consumable', { type: 'energy-full' }, true)
+      if (!result.ok) {
+        pushLog(state.eventLog, result.error || 'Failed to buy Grand Energy Elixir.')
+        syncHud()
+        return
+      }
+      if (isOlderProfileVersion(result.savedAt)) return
+      state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
+      applyServerConsumables(state, result.consumables)
+      markServerStateApplied(state, result.savedAt)
+      pushLog(state.eventLog, 'Grand Energy Elixir added to consumables.')
+      syncHud()
+    } catch (error) {
+      console.warn('Grand Energy Elixir purchase failed', error)
+    }
   }
 
   const buyBossMark = async () => {
@@ -7399,12 +7525,13 @@ function App() {
         syncHud()
         return
       }
+      if (isOlderProfileVersion(result.savedAt)) return
       state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
       applyServerConsumables(state, result.consumables)
       applyConsumableEffectsFromServer(state, result)
+      markServerStateApplied(state, result.savedAt)
       pushLog(state.eventLog, 'Boss Mark added to consumables.')
       syncHud()
-      void saveGameState()
     } catch (error) {
       console.warn('Boss Mark purchase failed', error)
     }
@@ -7430,12 +7557,13 @@ function App() {
         syncHud()
         return
       }
+      if (isOlderProfileVersion(result.savedAt)) return
       state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
       applyServerConsumables(state, result.consumables)
       applyConsumableEffectsFromServer(state, result)
+      markServerStateApplied(state, result.savedAt)
       pushLog(state.eventLog, 'Crystal Flask added to consumables.')
       syncHud()
-      void saveGameState()
     } catch (error) {
       console.warn('Crystal Flask purchase failed', error)
     }
@@ -7465,12 +7593,13 @@ function App() {
         syncHud()
         return
       }
+      if (isOlderProfileVersion(result.savedAt)) return
       state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
       applyServerConsumables(state, result.consumables)
       applyShopLimitsFromResult(result)
+      markServerStateApplied(state, result.savedAt)
       pushLog(state.eventLog, 'Dungeon key purchased.')
       syncHud()
-      void saveGameState()
     } finally {
       setDungeonKeyBuyLoading(false)
     }
@@ -7499,14 +7628,15 @@ function App() {
         syncHud()
         return
       }
+      if (isOlderProfileVersion(result.savedAt)) return
       state.gold = Math.max(0, Math.floor(Number(result.gold ?? state.gold)))
       if (typeof result.worldBossTickets === 'number') {
         state.worldBossTickets = Math.max(0, Math.floor(result.worldBossTickets))
       }
       applyShopLimitsFromResult(result)
+      markServerStateApplied(state, result.savedAt)
       pushLog(state.eventLog, 'World Boss ticket purchased.')
       syncHud()
-      void saveGameState()
     } finally {
       setWorldBossTicketBuyLoading(false)
     }
@@ -7630,7 +7760,6 @@ function App() {
     if (!state) return
     if (consumableBusyIdsRef.current.has(item.id)) return
     setConsumableBusy(item.id, true)
-    let applied = true
     let message = ''
     try {
       switch (item.type) {
@@ -7644,7 +7773,6 @@ function App() {
             { deferSavedAt: true },
           )
           if (!result.ok) {
-            applied = false
             message = result.error || (item.type === 'energy-full' ? 'Failed to use Grand Energy Elixir.' : 'Failed to use Energy Tonic.')
             break
           }
@@ -7657,14 +7785,12 @@ function App() {
           applyServerConsumables(state, result.consumables)
           markServerStateApplied(state, result.savedAt)
           message = item.type === 'energy-full' ? 'Energy fully restored.' : 'Energy restored by 10.'
-          applied = false
           break
         }
         case 'boss-mark':
         {
           const result = await callGameSecureAuthed('use_boss_mark', { consumableId: item.id }, true, { deferSavedAt: true })
           if (!result.ok) {
-            applied = false
             message = result.error || 'Failed to use Boss Mark.'
             break
           }
@@ -7672,14 +7798,12 @@ function App() {
           applyConsumableEffectsFromServer(state, result)
           markServerStateApplied(state, result.savedAt)
           message = 'Boss Mark activated for the current World Boss cycle.'
-          applied = false
           break
         }
         case 'crystal-flask':
         {
           const result = await callGameSecureAuthed('use_crystal_flask', { consumableId: item.id }, true, { deferSavedAt: true })
           if (!result.ok) {
-            applied = false
             message = result.error || 'Failed to use Crystal Flask.'
             break
           }
@@ -7687,32 +7811,30 @@ function App() {
           applyConsumableEffectsFromServer(state, result)
           markServerStateApplied(state, result.savedAt)
           message = `Crystal Flask activated for ${Math.max(0, Math.floor(Number(result.crystalFlaskRuns ?? state.crystalFlaskRuns)))} dungeon runs.`
-          applied = false
           break
         }
         case 'key':
         {
           const result = await callDungeonSecureAuthed('use_key', { consumableId: item.id })
           if (!result.ok) {
-            applied = false
             message = result.error || 'Failed to use dungeon key.'
             break
           }
+          if (isOlderProfileVersion(result.savedAt)) {
+            break
+          }
+          applyServerConsumables(state, result.consumables)
           state.tickets = Math.max(0, Math.round(result.tickets ?? state.tickets))
           if (result.ticketDay) {
             state.ticketDay = result.ticketDay
           }
+          markServerStateApplied(state, result.savedAt)
           message = 'Dungeon key used.'
           break
         }
         default:
-          applied = false
           message = 'Cannot use item.'
           break
-      }
-
-      if (applied) {
-        state.consumables = state.consumables.filter((entry) => entry.id !== item.id)
       }
       pushLog(state.eventLog, message)
       syncHud()
@@ -7749,11 +7871,14 @@ function App() {
         syncHud()
         return
       }
+      if (isOlderProfileVersion(result.savedAt)) {
+        return
+      }
       if (typeof result.gold === 'number') {
         state.gold = Math.max(0, Math.floor(result.gold))
       }
       if (result.consumables) {
-        state.consumables = normalizeLoadedConsumables(result.consumables)
+        applyServerConsumables(state, result.consumables)
       }
       if (result.questStates) {
         state.questStates = { ...state.questStates, ...result.questStates }
@@ -7761,6 +7886,7 @@ function App() {
         state.questStates = { ...state.questStates, [quest.id]: { claimed: true } }
       }
       applyConsumableEffectsFromServer(state, result)
+      markServerStateApplied(state, result.savedAt)
       const rewardParts = [`+${quest.rewardGold} gold`]
       if (quest.rewardItem) rewardParts.push(`+${questRewardItemName(quest.rewardItem)}`)
       pushLog(state.eventLog, `Quest completed: ${rewardParts.join(', ')}.`)
@@ -9709,6 +9835,7 @@ function App() {
                             <div className="inventory-name">
                               <img className="icon-img equip-icon small" src={item.icon} alt="" />
                               {item.name}
+                              <span className="consumable-qty">x{formatNumber(Math.max(1, Math.floor(item.qty ?? 1)))}</span>
                             </div>
                             <div className="inventory-slot">{item.description}</div>
                           </div>
@@ -9843,10 +9970,10 @@ function App() {
                 <div className="shop-desc">Restore 10 energy.</div>
                 <div className="shop-meta">
                   <img className="icon-img small" src={iconGold} alt="" />
-                  Cost: 4500
+                  Cost: {formatNumber(SHOP_ENERGY_TONIC_COST)}
                 </div>
                 <img className="shop-icon" src={iconEnergyTonic} alt="Energy tonic" />
-                <button type="button" onClick={() => buyEnergyPotion(4500)}>
+                <button type="button" onClick={() => void buyEnergyPotion(SHOP_ENERGY_TONIC_COST)}>
                   Buy
                 </button>
               </div>
@@ -9855,10 +9982,10 @@ function App() {
                 <div className="shop-desc">Restore energy to full.</div>
                 <div className="shop-meta">
                   <img className="icon-img small" src={iconGold} alt="" />
-                  Cost: 15000
+                  Cost: {formatNumber(SHOP_GRAND_ENERGY_ELIXIR_COST)}
                 </div>
                 <img className="shop-icon" src={iconGrandEnergy} alt="Grand energy elixir" />
-                <button type="button" onClick={() => buyFullEnergy(15000)}>
+                <button type="button" onClick={() => void buyFullEnergy(SHOP_GRAND_ENERGY_ELIXIR_COST)}>
                   Buy
                 </button>
               </div>
@@ -10114,11 +10241,11 @@ function App() {
         </div>
       )}
 
-      {activePanel === 'starterpack' && hud && (
+      {activePanel === 'starterpack' && hud && hud.level < STARTER_PACK_TARGET_LEVEL && (
         <div className="modal-backdrop" onClick={() => setActivePanel(null)}>
           <div className="modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
-              <h3>Starter Pack</h3>
+              <h3>Season Catch-up Pack</h3>
               <button type="button" className="ghost" onClick={() => setActivePanel(null)}>
                 Close
               </button>
@@ -10127,7 +10254,7 @@ function App() {
               <div className="starterpack-hero">
                 <img className="starterpack-image" src={iconStarterPack} alt="" />
                 <div className="starterpack-meta">
-                  <div className="starterpack-title">Starter Pack</div>
+                  <div className="starterpack-title">Season Catch-up Pack</div>
                   <div className="starterpack-price">
                     {!usingTelegramAuth && <img className="icon-img small" src={iconSolana} alt="" />}
                     {usingTelegramAuth && activeTelegramPaymentRail === 'stars' && <span className="tg-stars-inline">⭐</span>}
@@ -10142,39 +10269,47 @@ function App() {
               {usingTelegramAuth && renderTelegramPaymentRailControls(setStarterPackError)}
               <div className="starterpack-list">
                 <div className="starterpack-item">
+                  <img className="icon-img" src={iconName} alt="" />
+                  <span>Instant Level {STARTER_PACK_TARGET_LEVEL}</span>
+                </div>
+                <div className="starterpack-item">
+                  <img className="icon-img" src={iconInventory} alt="" />
+                  <span>Legendary Gear Set (6 items)</span>
+                </div>
+                <div className="starterpack-item">
                   <img className="icon-img" src={iconGold} alt="" />
                   <span>{formatNumber(STARTER_PACK_GOLD)} Gold</span>
                 </div>
                 <div className="starterpack-item">
-                  <img className="icon-img" src={iconEnergyTonic} alt="" />
-                  <span>20 Energy Tonic</span>
-                </div>
-                <div className="starterpack-item">
-                  <img className="icon-img" src={iconGrandEnergy} alt="" />
-                  <span>5 Grand Energy Elixir</span>
-                </div>
-                <div className="starterpack-item">
-                  <img className="icon-img" src={iconWorldBoss} alt="" />
-                  <span>3 Boss Marks</span>
-                </div>
-                <div className="starterpack-item">
-                  <img className="icon-img" src={iconCrystals} alt="" />
-                  <span>5 Crystal Flasks</span>
-                </div>
-                <div className="starterpack-item">
                   <img className="icon-img" src={iconKey} alt="" />
-                  <span>20 Dungeon Keys</span>
+                  <span>50 Dungeon Keys</span>
                 </div>
                 <div className="starterpack-item">
                   <img className="icon-img" src={iconWorldBossTicket} alt="" />
                   <span>{STARTER_PACK_WORLD_BOSS_TICKETS} World Boss Tickets</span>
+                </div>
+                <div className="starterpack-item">
+                  <img className="icon-img" src={iconEnergyTonic} alt="" />
+                  <span>50 Energy Tonics</span>
+                </div>
+                <div className="starterpack-item">
+                  <img className="icon-img" src={iconGrandEnergy} alt="" />
+                  <span>20 Grand Energy Elixirs</span>
+                </div>
+                <div className="starterpack-item">
+                  <img className="icon-img" src={iconWorldBoss} alt="" />
+                  <span>10 Boss Marks</span>
+                </div>
+                <div className="starterpack-item">
+                  <img className="icon-img" src={iconCrystals} alt="" />
+                  <span>10 Crystal Flasks</span>
                 </div>
               </div>
               {starterPackError && <div className="withdraw-error">{starterPackError}</div>}
               <button
                 type="button"
                 className="withdraw-submit"
-                disabled={starterPackLoading}
+                disabled={starterPackLoading || hud.level >= STARTER_PACK_TARGET_LEVEL || hud.seasonCatchupPackPurchased}
                 onClick={() => {
                   void buyStarterPack()
                 }}
@@ -10182,10 +10317,16 @@ function App() {
                 {starterPackLoading
                   ? 'Processing...'
                   : usingTelegramAuth
-                    ? `${activeTelegramPaymentRail === 'stars' ? '⭐' : getTelegramRailCurrencyLabel(activeTelegramPaymentRail)} Buy Starter Pack • ${formatPaymentAmount(getTelegramStarterPackPriceByRail(activeTelegramPaymentRail))} ${getTelegramRailCurrencyLabel(activeTelegramPaymentRail)}`
-                    : 'Buy Starter Pack (SOL)'}
+                    ? `${activeTelegramPaymentRail === 'stars' ? '⭐' : getTelegramRailCurrencyLabel(activeTelegramPaymentRail)} Buy Catch-up Pack • ${formatPaymentAmount(getTelegramStarterPackPriceByRail(activeTelegramPaymentRail))} ${getTelegramRailCurrencyLabel(activeTelegramPaymentRail)}`
+                    : 'Buy Catch-up Pack (SOL)'}
               </button>
-              <div className="withdraw-note">This pack can be purchased only once.</div>
+              <div className="withdraw-note">
+                {hud.seasonCatchupPackPurchased
+                  ? 'Already purchased on this account.'
+                  : hud.level >= STARTER_PACK_TARGET_LEVEL
+                    ? `Available only for players below level ${STARTER_PACK_TARGET_LEVEL}.`
+                    : 'One-time pack for players below level 60.'}
+              </div>
             </div>
             </div>
           </div>
@@ -11968,41 +12109,6 @@ function App() {
   )
 }
 export default App
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
